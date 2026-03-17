@@ -12,6 +12,9 @@ from panda3d.core import (
 
 from src.player import Player
 from src.starfield import Starfield
+from src.lasers import LaserSystem
+from src.enemies import EnemySpawner
+from src.hud import HUD
 
 
 class Game(ShowBase):
@@ -38,6 +41,19 @@ class Game(ShowBase):
         # Joueur (X-Wing)
         self.player = Player(self)
 
+        # Système de tir
+        self.lasers = LaserSystem(self)
+
+        # Ennemis
+        self.spawner = EnemySpawner(self)
+
+        # Connecte le laser au spawner (pour l'auto-aim)
+        self.lasers.set_enemies(self.spawner)
+
+        # HUD
+        self.hud = HUD(self)
+        self.last_wave = 1
+
         # Vitesse de défilement
         self.scroll_speed = 20.0
 
@@ -59,13 +75,13 @@ class Game(ShowBase):
 
     def setup_lights(self):
         """Met en place l'éclairage de la scène."""
-        # Lumière ambiante (pour qu'on voie quelque chose partout)
+        # Lumière ambiante
         ambient = AmbientLight("ambient")
         ambient.setColor(Vec4(0.2, 0.2, 0.3, 1))
         ambient_np = self.render.attachNewNode(ambient)
         self.render.setLight(ambient_np)
 
-        # Lumière directionnelle (simule une étoile lointaine)
+        # Lumière directionnelle
         sun = DirectionalLight("sun")
         sun.setColor(Vec4(0.9, 0.9, 0.8, 1))
         sun_np = self.render.attachNewNode(sun)
@@ -76,11 +92,30 @@ class Game(ShowBase):
         """Boucle de jeu principale — appelée chaque frame."""
         dt = globalClock.getDt()
 
-        # Update étoiles (défilement)
+        # Update étoiles
         self.starfield.update(dt, self.scroll_speed)
 
-        # Update joueur (position souris)
+        # Update joueur
         self.player.update(dt)
+
+        # Update lasers
+        self.lasers.update(dt, self.player.node)
+
+        # Update ennemis + collisions
+        self.spawner.update(dt, self.lasers)
+
+        # Annonce nouvelle vague
+        if self.spawner.wave != self.last_wave:
+            self.hud.announce_wave(self.spawner.wave)
+            self.last_wave = self.spawner.wave
+
+        # Update HUD
+        self.hud.update(
+            dt,
+            self.spawner.score,
+            self.spawner.wave,
+            self.spawner.get_enemy_count()
+        )
 
         return task.cont
 
