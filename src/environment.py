@@ -309,10 +309,9 @@ class Nebula:
 class Environment:
     """Gère tout le décor spatial."""
 
-    ASTEROID_INTERVAL = 0.8
-    PLANET_INTERVAL = 20.0
+    ASTEROID_INTERVAL = 1.8     # Moins fréquents
     NEBULA_INTERVAL = 35.0
-    DEBRIS_INTERVAL = 3.0
+    DEBRIS_INTERVAL = 5.0       # Moins de débris aussi
 
     SPAWN_DEPTH = 200.0
     FIELD_WIDTH = 25.0
