@@ -1,11 +1,12 @@
 """
-Sounds — Gestion du son (lasers, explosions, ambiance).
-Utilise les sons intégrés de Panda3D ou des fichiers custom dans assets/sounds/.
+Sounds — Sons du jeu (lasers, explosions, surchauffe).
+Sons procéduraux WAV générés au premier lancement.
 """
 
 import os
 import struct
 import math
+import random as rnd
 from panda3d.core import Filename
 
 
@@ -17,54 +18,159 @@ class SoundManager:
         self.sounds = {}
         self.enabled = True
 
-        # Génère des sons procéduraux (WAV basiques)
         self._generate_sounds()
-
-        # Charge les sons
         self._load_sounds()
 
     def _generate_sounds(self):
-        """Génère des fichiers WAV procéduraux si pas de fichiers custom."""
         sound_dir = "assets/sounds"
         os.makedirs(sound_dir, exist_ok=True)
 
-        # Laser joueur : bip aigu court
+        # Laser joueur : pew court et punchy
         if not os.path.exists(f"{sound_dir}/laser.wav"):
-            self._make_wav(
-                f"{sound_dir}/laser.wav",
-                freq=880, duration=0.08, volume=0.3,
-                freq_end=440, wave_type="square"
-            )
+            self._make_laser_sound(f"{sound_dir}/laser.wav")
 
-        # Laser ennemi : bip grave
+        # Laser ennemi : plus grave
         if not os.path.exists(f"{sound_dir}/laser_enemy.wav"):
             self._make_wav(
                 f"{sound_dir}/laser_enemy.wav",
-                freq=330, duration=0.12, volume=0.25,
-                freq_end=220, wave_type="square"
+                freq=280, duration=0.1, volume=0.2,
+                freq_end=180, wave_type="sine"
             )
 
-        # Explosion : bruit blanc + fade
+        # Explosion : whoosh + crackle
         if not os.path.exists(f"{sound_dir}/explosion.wav"):
-            self._make_wav(
-                f"{sound_dir}/explosion.wav",
-                freq=150, duration=0.4, volume=0.4,
-                freq_end=50, wave_type="noise"
-            )
+            self._make_explosion_sound(f"{sound_dir}/explosion.wav")
 
-        # Hit (dégât joueur) : bip descendant
+        # Hit joueur : impact sourd
         if not os.path.exists(f"{sound_dir}/hit.wav"):
-            self._make_wav(
-                f"{sound_dir}/hit.wav",
-                freq=600, duration=0.15, volume=0.35,
-                freq_end=200, wave_type="saw"
-            )
+            self._make_impact_sound(f"{sound_dir}/hit.wav")
+
+        # Surchauffe : souffle étouffé, comme de la vapeur
+        if not os.path.exists(f"{sound_dir}/overheat.wav"):
+            self._make_overheat_sound(f"{sound_dir}/overheat.wav")
+
+    def _make_laser_sound(self, filepath):
+        """Laser : mix sinus rapide descendant + légère saturation."""
+        sample_rate = 22050
+        duration = 0.08
+        num_samples = int(sample_rate * duration)
+        samples = []
+
+        for i in range(num_samples):
+            t = i / sample_rate
+            progress = i / num_samples
+
+            freq = 1200 - 800 * progress
+            val = math.sin(2 * math.pi * freq * t) * 0.4
+            # Ajoute un harmonique
+            val += math.sin(2 * math.pi * freq * 2 * t) * 0.15
+
+            # Envelope rapide
+            envelope = (1.0 - progress) ** 2
+            val *= envelope * 0.35
+
+            samples.append(max(-1, min(1, val)))
+
+        self._write_wav(filepath, samples, sample_rate)
+
+    def _make_explosion_sound(self, filepath):
+        """Explosion : bruit blanc filtré avec decay lent."""
+        sample_rate = 22050
+        duration = 0.5
+        num_samples = int(sample_rate * duration)
+        samples = []
+        prev = 0.0
+
+        for i in range(num_samples):
+            progress = i / num_samples
+
+            # Bruit blanc
+            noise = rnd.uniform(-1, 1)
+            # Filtre passe-bas simple (lisse le bruit)
+            filtered = prev * 0.7 + noise * 0.3
+            prev = filtered
+
+            # Basse fréquence pour le punch
+            bass = math.sin(2 * math.pi * 60 * (i / sample_rate)) * 0.5
+
+            val = (filtered * 0.5 + bass * 0.5)
+
+            # Envelope : attaque rapide, decay lent
+            if progress < 0.05:
+                envelope = progress / 0.05
+            else:
+                envelope = (1.0 - progress) ** 1.5
+
+            val *= envelope * 0.35
+            samples.append(max(-1, min(1, val)))
+
+        self._write_wav(filepath, samples, sample_rate)
+
+    def _make_impact_sound(self, filepath):
+        """Impact : thump sourd."""
+        sample_rate = 22050
+        duration = 0.15
+        num_samples = int(sample_rate * duration)
+        samples = []
+
+        for i in range(num_samples):
+            t = i / sample_rate
+            progress = i / num_samples
+
+            freq = 200 - 150 * progress
+            val = math.sin(2 * math.pi * freq * t)
+            # Distortion légère
+            val = max(-0.8, min(0.8, val * 1.5))
+
+            envelope = (1.0 - progress) ** 3
+            val *= envelope * 0.3
+
+            samples.append(max(-1, min(1, val)))
+
+        self._write_wav(filepath, samples, sample_rate)
+
+    def _make_overheat_sound(self, filepath):
+        """Surchauffe : souffle de vapeur étouffé, comme un sifflement grave."""
+        sample_rate = 22050
+        duration = 1.0
+        num_samples = int(sample_rate * duration)
+        samples = []
+        prev1 = 0.0
+        prev2 = 0.0
+
+        for i in range(num_samples):
+            t = i / sample_rate
+            progress = i / num_samples
+
+            # Bruit blanc très filtré (passe-bas double)
+            noise = rnd.uniform(-1, 1)
+            filtered1 = prev1 * 0.85 + noise * 0.15
+            filtered2 = prev2 * 0.9 + filtered1 * 0.1
+            prev1 = filtered1
+            prev2 = filtered2
+
+            # Grondement basse fréquence
+            rumble = math.sin(2 * math.pi * 40 * t) * 0.3
+            rumble += math.sin(2 * math.pi * 65 * t) * 0.2
+
+            val = filtered2 * 0.4 + rumble * 0.6
+
+            # Envelope : monte doucement, plateau, descend
+            if progress < 0.15:
+                envelope = progress / 0.15
+            elif progress > 0.7:
+                envelope = (1.0 - progress) / 0.3
+            else:
+                envelope = 1.0
+
+            val *= envelope * 0.25
+            samples.append(max(-1, min(1, val)))
+
+        self._write_wav(filepath, samples, sample_rate)
 
     def _make_wav(self, filepath, freq=440, duration=0.2, volume=0.5,
                   freq_end=None, wave_type="sine"):
-        """Génère un fichier WAV simple."""
-        import random as rnd
-
+        """Génère un WAV simple (fallback)."""
         sample_rate = 22050
         num_samples = int(sample_rate * duration)
         if freq_end is None:
@@ -74,11 +180,8 @@ class SoundManager:
         for i in range(num_samples):
             t = i / sample_rate
             progress = i / num_samples
-
-            # Fréquence qui glisse
             f = freq + (freq_end - freq) * progress
 
-            # Forme d'onde
             if wave_type == "sine":
                 val = math.sin(2 * math.pi * f * t)
             elif wave_type == "square":
@@ -90,55 +193,46 @@ class SoundManager:
             else:
                 val = math.sin(2 * math.pi * f * t)
 
-            # Envelope (fade out)
             envelope = 1.0 - progress
             val *= volume * envelope
+            samples.append(max(-1, min(1, val)))
 
-            # Clamp
-            val = max(-1.0, min(1.0, val))
-            sample = int(val * 32767)
-            samples.append(sample)
+        self._write_wav(filepath, samples, sample_rate)
 
-        # Écrit le WAV
+    def _write_wav(self, filepath, samples, sample_rate):
+        """Écrit un fichier WAV mono 16-bit."""
         with open(filepath, 'wb') as f:
             num_channels = 1
-            bits_per_sample = 16
-            byte_rate = sample_rate * num_channels * bits_per_sample // 8
-            block_align = num_channels * bits_per_sample // 8
-            data_size = num_samples * block_align
+            bits = 16
+            byte_rate = sample_rate * num_channels * bits // 8
+            block_align = num_channels * bits // 8
+            data_size = len(samples) * block_align
 
-            # Header RIFF
             f.write(b'RIFF')
             f.write(struct.pack('<I', 36 + data_size))
             f.write(b'WAVE')
-
-            # Chunk fmt
             f.write(b'fmt ')
             f.write(struct.pack('<I', 16))
-            f.write(struct.pack('<H', 1))  # PCM
+            f.write(struct.pack('<H', 1))
             f.write(struct.pack('<H', num_channels))
             f.write(struct.pack('<I', sample_rate))
             f.write(struct.pack('<I', byte_rate))
             f.write(struct.pack('<H', block_align))
-            f.write(struct.pack('<H', bits_per_sample))
-
-            # Chunk data
+            f.write(struct.pack('<H', bits))
             f.write(b'data')
             f.write(struct.pack('<I', data_size))
             for s in samples:
-                f.write(struct.pack('<h', s))
+                f.write(struct.pack('<h', int(s * 32767)))
 
     def _load_sounds(self):
-        """Charge les fichiers son."""
         sound_dir = "assets/sounds"
-
         sound_files = {
             "laser": f"{sound_dir}/laser.wav",
             "laser_enemy": f"{sound_dir}/laser_enemy.wav",
             "explosion": f"{sound_dir}/explosion.wav",
             "hit": f"{sound_dir}/hit.wav",
+            "overheat": f"{sound_dir}/overheat.wav",
         }
-
         for name, path in sound_files.items():
             if os.path.exists(path):
                 try:
@@ -149,7 +243,6 @@ class SoundManager:
                     pass
 
     def play(self, name):
-        """Joue un son."""
         if not self.enabled:
             return
         sound = self.sounds.get(name)
@@ -157,5 +250,4 @@ class SoundManager:
             sound.play()
 
     def toggle(self):
-        """Active/désactive le son."""
         self.enabled = not self.enabled

@@ -5,11 +5,12 @@ Comme ça la rotation visuelle n'affecte pas le positionnement.
 """
 
 import os
+import time
 from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
-    Geom, GeomTriangles, GeomNode,
-    NodePath, WindowProperties
+    Geom, GeomTriangles, GeomLines, GeomNode,
+    NodePath, WindowProperties, TransparencyAttrib
 )
 import math
 
@@ -55,6 +56,39 @@ class Player:
         self.current_roll = 0.0
         self.current_pitch = 0.0
 
+        # --- Barrel Roll ---
+        self.barrel_rolling = False
+        self.barrel_direction = 0       # -1 = gauche, +1 = droite
+        self.barrel_timer = 0.0
+        self.barrel_cooldown = 0.0
+        self.barrel_roll_angle = 0.0    # Angle accumulé pendant la vrille
+        self.invincible = False
+
+        # Double tap detection
+        self.last_tap_left = 0.0
+        self.last_tap_right = 0.0
+        self.DOUBLE_TAP_WINDOW = 0.3    # Fenêtre pour le double tap (secondes)
+        self.BARREL_DURATION = 0.6      # Durée de la vrille (plus lent)
+        self.BARREL_COOLDOWN = 1.0      # Cooldown après une vrille
+        self.BARREL_DODGE = 4.0         # Distance latérale pendant la vrille
+
+        # Traînées du barrel roll
+        self.barrel_trails = []
+
+        # Réticule de visée — système spring-damper (pendule au bout d'une tige)
+        self.crosshair = self._create_crosshair()
+        self.crosshair.reparentTo(game.render)
+        self.crosshair.setLightOff()
+        self.crosshair_x = 0.0
+        self.crosshair_z = 0.0
+        self.crosshair_vx = 0.0  # Vitesse du réticule (inertie)
+        self.crosshair_vz = 0.0
+
+        # Paramètres physiques du réticule
+        self.CH_SPRING = 15.0    # Force du ressort (rappel vers le vaisseau)
+        self.CH_DAMPING = 6.0    # Amortissement (freine les oscillations)
+        self.CH_DISTANCE = 60.0  # Distance devant le vaisseau
+
         # Souris libre
         props = WindowProperties()
         props.setCursorHidden(False)
@@ -92,12 +126,13 @@ class Player:
 
     def setup_controls(self):
         g = self.game
-        g.accept("arrow_left",    self.set_key, ["left", True])
-        g.accept("arrow_right",   self.set_key, ["right", True])
+        # Appui — passe par on_key_down pour détecter le double tap
+        g.accept("arrow_left",    self.on_key_down, ["left"])
+        g.accept("arrow_right",   self.on_key_down, ["right"])
         g.accept("arrow_up",      self.set_key, ["up", True])
         g.accept("arrow_down",    self.set_key, ["down", True])
-        g.accept("q",             self.set_key, ["left", True])
-        g.accept("d",             self.set_key, ["right", True])
+        g.accept("q",             self.on_key_down, ["left"])
+        g.accept("d",             self.on_key_down, ["right"])
         g.accept("z",             self.set_key, ["up", True])
         g.accept("s",             self.set_key, ["down", True])
 
@@ -112,6 +147,31 @@ class Player:
 
     def set_key(self, key, value):
         self.keys[key] = value
+
+    def on_key_down(self, key):
+        """Gère l'appui d'une touche gauche/droite avec détection du double tap."""
+        self.keys[key] = True
+        now = time.time()
+
+        if key == "left":
+            if now - self.last_tap_left < self.DOUBLE_TAP_WINDOW:
+                self.start_barrel_roll(-1)
+            self.last_tap_left = now
+        elif key == "right":
+            if now - self.last_tap_right < self.DOUBLE_TAP_WINDOW:
+                self.start_barrel_roll(1)
+            self.last_tap_right = now
+
+    def start_barrel_roll(self, direction):
+        """Lance un barrel roll si pas en cooldown."""
+        if self.barrel_rolling or self.barrel_cooldown > 0:
+            return
+        self.barrel_rolling = True
+        self.barrel_direction = direction
+        self.barrel_timer = self.BARREL_DURATION
+        self.barrel_roll_angle = 0.0
+        self.invincible = True
+        print(f"[Player] BARREL ROLL {'gauche' if direction < 0 else 'droite'} !")
 
     def create_xwing(self):
         """Crée un X-Wing procédural (fallback)."""
@@ -176,6 +236,10 @@ class Player:
         return NodePath(node)
 
     def update(self, dt):
+        # --- Cooldown barrel roll ---
+        if self.barrel_cooldown > 0:
+            self.barrel_cooldown -= dt
+
         # Direction depuis les touches
         move_x = 0.0
         move_z = 0.0
@@ -193,6 +257,50 @@ class Player:
             move_x *= 0.707
             move_z *= 0.707
 
+        # --- Barrel Roll actif ---
+        if self.barrel_rolling:
+            self.barrel_timer -= dt
+
+            # Dodge latéral pendant la vrille
+            dodge_speed = self.BARREL_DODGE / self.BARREL_DURATION
+            self.target_x += self.barrel_direction * dodge_speed * dt
+
+            # Rotation 360° sur la durée
+            rotation_per_frame = (360.0 / self.BARREL_DURATION) * dt
+            self.barrel_roll_angle += rotation_per_frame * self.barrel_direction
+
+            # Spawne des traînées lumineuses en spirale
+            progress = 1.0 - (self.barrel_timer / self.BARREL_DURATION)
+            angle = progress * math.pi * 2 * self.barrel_direction
+            trail_radius = 1.2
+            trail_x = self.node.getX() + math.cos(angle) * trail_radius
+            trail_z = self.node.getZ() + math.sin(angle) * trail_radius
+            trail_y = self.node.getY()
+
+            trail = self._spawn_trail_particle(trail_x, trail_y, trail_z)
+            if trail:
+                self.barrel_trails.append(trail)
+
+            if self.barrel_timer <= 0:
+                # Fin du barrel roll
+                self.barrel_rolling = False
+                self.invincible = False
+                self.barrel_cooldown = self.BARREL_COOLDOWN
+                self.barrel_roll_angle = 0.0
+
+        # Update traînées (fade out et suppression)
+        for trail in self.barrel_trails[:]:
+            trail["life"] -= dt
+            if trail["life"] <= 0:
+                trail["node"].removeNode()
+                self.barrel_trails.remove(trail)
+            else:
+                # Fade out
+                alpha = trail["life"] / trail["max_life"]
+                trail["node"].setColorScale(1, 1, 1, alpha)
+                # Recule avec le décor
+                trail["node"].setY(trail["node"].getY() - 40 * dt)
+
         # Déplace la cible
         self.target_x += move_x * self.MOVE_SPEED * dt
         self.target_z += move_z * self.MOVE_SPEED * dt
@@ -200,28 +308,156 @@ class Player:
         self.target_x = max(-self.BOUNDS_X, min(self.BOUNDS_X, self.target_x))
         self.target_z = max(-self.BOUNDS_Z, min(self.BOUNDS_Z, self.target_z))
 
-        # Interpole la position du node principal (pas de rotation ici)
+        # Interpole la position du node principal
         current_pos = self.node.getPos()
         target_pos = Point3(self.target_x, 20, self.target_z)
         lerp = min(1.0, self.LERP_SPEED * dt)
         new_pos = current_pos + (target_pos - current_pos) * lerp
         self.node.setPos(new_pos)
 
-        # --- Rotation visuelle du modèle (naturelle) ---
+        # --- Rotation visuelle du modèle ---
         rot_lerp = self.ROT_SPEED * dt
 
-        # Gauche/droite → roll (le vaisseau penche sur le côté)
-        target_roll = -move_x * self.MAX_ROLL
-        self.current_roll += (target_roll - self.current_roll) * rot_lerp
+        if self.barrel_rolling:
+            # Barrel roll : rotation 360° sur l'axe longitudinal (P)
+            self.model_node.setHpr(
+                90,
+                self.barrel_roll_angle,
+                self.current_roll,
+            )
+        else:
+            # Normal : roll/pitch selon le mouvement
+            target_roll = -move_x * self.MAX_ROLL
+            self.current_roll += (target_roll - self.current_roll) * rot_lerp
 
-        # Haut/bas → pitch (le vaisseau pointe le nez vers le haut ou le bas)
-        target_pitch = -move_z * self.MAX_PITCH
-        self.current_pitch += (target_pitch - self.current_pitch) * rot_lerp
+            target_pitch = -move_z * self.MAX_PITCH
+            self.current_pitch += (target_pitch - self.current_pitch) * rot_lerp
 
-        # Applique sur le model_node uniquement
-        # H = 90 (orientation de base du modèle) + rotations visuelles en P et R
-        self.model_node.setHpr(
-            90,
-            self.current_roll,
-            self.current_pitch,
-        )
+            self.model_node.setHpr(
+                90,
+                self.current_pitch,
+                self.current_roll,
+            )
+
+        # --- Réticule : spring-damper (pendule au bout d'une tige) ---
+        # Le réticule est "attaché" au vaisseau par un ressort.
+        # Quand le vaisseau bouge, le réticule résiste (inertie),
+        # puis dépasse (overshoot), puis revient (oscillation amortie).
+        ship_x = new_pos.getX()
+        ship_z = new_pos.getZ()
+
+        # Force du ressort : tire le réticule vers la position du vaisseau
+        spring_fx = (ship_x - self.crosshair_x) * self.CH_SPRING
+        spring_fz = (ship_z - self.crosshair_z) * self.CH_SPRING
+
+        # Amortissement : freine la vitesse du réticule
+        damp_fx = -self.crosshair_vx * self.CH_DAMPING
+        damp_fz = -self.crosshair_vz * self.CH_DAMPING
+
+        # Accélération = ressort + amortissement
+        ax = spring_fx + damp_fx
+        az = spring_fz + damp_fz
+
+        # Intègre la vitesse et la position
+        self.crosshair_vx += ax * dt
+        self.crosshair_vz += az * dt
+        self.crosshair_x += self.crosshair_vx * dt
+        self.crosshair_z += self.crosshair_vz * dt
+
+        crosshair_y = new_pos.getY() + self.CH_DISTANCE
+        self.crosshair.setPos(self.crosshair_x, crosshair_y, self.crosshair_z)
+
+    def _create_crosshair(self):
+        """Crée un réticule de visée (carré avec croix, style Star Fox)."""
+        root = NodePath("crosshair")
+
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("crosshair", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        color = GeomVertexWriter(vdata, "color")
+
+        # Couleur : vert semi-transparent
+        c = Vec4(0.2, 1.0, 0.3, 0.6)
+        c_dim = Vec4(0.2, 1.0, 0.3, 0.3)
+
+        size = 1.2  # Taille du réticule (en unités monde, loin = paraît petit)
+        half = size / 2
+        tick = size * 0.15  # Petites marques aux coins
+
+        # 4 coins du carré (lignes)
+        # Chaque coin = 2 lignes (L shape)
+        corners = [
+            # Coin haut-gauche
+            (-half, 0, half), (-half + tick, 0, half),
+            (-half, 0, half), (-half, 0, half - tick),
+            # Coin haut-droit
+            (half, 0, half), (half - tick, 0, half),
+            (half, 0, half), (half, 0, half - tick),
+            # Coin bas-gauche
+            (-half, 0, -half), (-half + tick, 0, -half),
+            (-half, 0, -half), (-half, 0, -half + tick),
+            # Coin bas-droit
+            (half, 0, -half), (half - tick, 0, -half),
+            (half, 0, -half), (half, 0, -half + tick),
+        ]
+
+        # Croix centrale (petite)
+        cross = size * 0.08
+        corners += [
+            (-cross, 0, 0), (cross, 0, 0),  # horizontal
+            (0, 0, -cross), (0, 0, cross),   # vertical
+        ]
+
+        for v in corners:
+            vertex.addData3(*v)
+            color.addData4(c)
+
+        lines = GeomLines(Geom.UHStatic)
+        for i in range(0, len(corners), 2):
+            lines.addVertices(i, i + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(lines)
+        node = GeomNode("crosshair_geom")
+        node.addGeom(geom)
+
+        np = NodePath(node)
+        np.reparentTo(root)
+        np.setRenderModeThickness(2)
+
+        return root
+
+    def _spawn_trail_particle(self, x, y, z):
+        """Crée une particule de traînée lumineuse pour le barrel roll."""
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("trail", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col = GeomVertexWriter(vdata, "color")
+
+        # Petite ligne lumineuse — courte et blanche
+        length = 0.3
+        c_bright = Vec4(1.0, 1.0, 1.0, 0.9)
+        c_dim = Vec4(0.6, 0.8, 1.0, 0.2)
+
+        vertex.addData3(0, 0, 0)
+        col.addData4(c_bright)
+        vertex.addData3(0, -length, 0)
+        col.addData4(c_dim)
+
+        lines = GeomLines(Geom.UHStatic)
+        lines.addVertices(0, 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(lines)
+        node = GeomNode("trail_particle")
+        node.addGeom(geom)
+
+        np = NodePath(node)
+        np.reparentTo(self.game.render)
+        np.setPos(x, y, z)
+        np.setLightOff()
+        np.setRenderModeThickness(2)
+        np.setTransparency(TransparencyAttrib.MAlpha)
+
+        life = 0.25
+        return {"node": np, "life": life, "max_life": life}

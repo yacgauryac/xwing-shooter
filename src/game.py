@@ -50,9 +50,10 @@ class Game(ShowBase):
         # État du jeu
         self.player_hp = self.PLAYER_MAX_HP
         self.game_over = False
-        self.scroll_speed = 20.0
+        self.scroll_speed = 40.0  # Plus rapide = meilleure sensation de vitesse
         self.last_wave = 1
         self.last_score = 0  # Pour détecter les kills
+        self._was_overheated = False
 
         # Compteur FPS (F1 pour toggle)
         self.fps_visible = True
@@ -66,6 +67,8 @@ class Game(ShowBase):
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
         self.accept("f1", self.toggle_fps)
+        self.accept("f11", self.toggle_fullscreen)
+        self.is_fullscreen = False
 
     def setup_window(self):
         props = WindowProperties()
@@ -128,20 +131,26 @@ class Game(ShowBase):
                 self.sounds.play("explosion")
 
         # Son laser joueur (quand on tire)
-        if self.lasers.firing and self.lasers.fire_timer <= 0:
+        if self.lasers.firing and self.lasers.fire_timer <= 0 and not self.lasers.overheated:
             self.sounds.play("laser")
 
-        # Collisions tirs ennemis -> joueur
-        damage = self.spawner.check_player_hit(player_pos)
-        if damage > 0:
-            self.player_hp -= damage
-            self.hud.show_damage_flash()
-            self.sounds.play("hit")
+        # Son de surchauffe
+        if self.lasers.overheated and not self._was_overheated:
+            self.sounds.play("overheat")
+        self._was_overheated = self.lasers.overheated
 
-            if self.player_hp <= 0:
-                self.player_hp = 0
-                self.game_over = True
-                self.hud.show_game_over(self.spawner.score)
+        # Collisions tirs ennemis -> joueur (sauf pendant barrel roll)
+        if not self.player.invincible:
+            damage = self.spawner.check_player_hit(player_pos)
+            if damage > 0:
+                self.player_hp -= damage
+                self.hud.show_damage_flash()
+                self.sounds.play("hit")
+
+                if self.player_hp <= 0:
+                    self.player_hp = 0
+                    self.game_over = True
+                    self.hud.show_game_over(self.spawner.score)
 
         # Explosions
         self.explosions.update(dt)
@@ -159,6 +168,9 @@ class Game(ShowBase):
             self.spawner.get_enemy_count(),
             self.player_hp,
             self.PLAYER_MAX_HP,
+            heat_pct=self.lasers.get_heat_pct(),
+            overheated=self.lasers.is_overheated(),
+            cooldown_pct=self.lasers.get_cooldown_pct(),
         )
 
         return task.cont
@@ -228,3 +240,12 @@ class Game(ShowBase):
         """Active/désactive le compteur FPS."""
         self.fps_visible = not self.fps_visible
         self.setFrameRateMeter(self.fps_visible)
+
+    def toggle_fullscreen(self):
+        """Bascule entre plein écran et fenêtré."""
+        self.is_fullscreen = not self.is_fullscreen
+        props = WindowProperties()
+        props.setFullscreen(self.is_fullscreen)
+        if not self.is_fullscreen:
+            props.setSize(1280, 720)
+        self.win.requestProperties(props)
