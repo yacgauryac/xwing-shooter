@@ -29,7 +29,7 @@ class Player:
 
     # Chemin vers le modèle 3D (si présent)
     MODEL_PATH = "assets/models/xwing.glb"
-    MODEL_SCALE = 0.5  # Ajuste selon le modèle téléchargé
+    MODEL_SCALE = 0.1  # Ajuste selon le modèle téléchargé
 
     def __init__(self, game):
         self.game = game
