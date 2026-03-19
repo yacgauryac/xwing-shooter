@@ -1,0 +1,11 @@
+Model Information:
+* title:	Sci Fi Planets
+* source:	https://sketchfab.com/3d-models/sci-fi-planets-91814453535b4016be5a1c213ead23f9
+* author:	dante6686 (https://sketchfab.com/dante6686)
+
+Model License:
+* license type:	CC-BY-SA-4.0 (http://creativecommons.org/licenses/by-sa/4.0/)
+* requirements:	Author must be credited. Modified versions must have the same license. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Sci Fi Planets" (https://sketchfab.com/3d-models/sci-fi-planets-91814453535b4016be5a1c213ead23f9) by dante6686 (https://sketchfab.com/dante6686) licensed under CC-BY-SA-4.0 (http://creativecommons.org/licenses/by-sa/4.0/)
