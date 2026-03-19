@@ -55,6 +55,7 @@ class Game(ShowBase):
         self.last_score = 0  # Pour détecter les kills
 
         # Compteur FPS (F1 pour toggle)
+        self.fps_visible = True
         self.setFrameRateMeter(True)
 
         # Boucle de jeu
@@ -74,16 +75,25 @@ class Game(ShowBase):
         self.disableMouse()
 
     def setup_lights(self):
+        # Lumière ambiante — bleutée, espace froid
         ambient = AmbientLight("ambient")
-        ambient.setColor(Vec4(0.2, 0.2, 0.3, 1))
+        ambient.setColor(Vec4(0.15, 0.15, 0.25, 1))
         ambient_np = self.render.attachNewNode(ambient)
         self.render.setLight(ambient_np)
 
+        # Soleil principal — lumière chaude depuis le haut-gauche
         sun = DirectionalLight("sun")
-        sun.setColor(Vec4(0.9, 0.9, 0.8, 1))
+        sun.setColor(Vec4(1.0, 0.95, 0.85, 1))
         sun_np = self.render.attachNewNode(sun)
-        sun_np.setHpr(45, -45, 0)
+        sun_np.setHpr(30, -40, 0)
         self.render.setLight(sun_np)
+
+        # Lumière de remplissage — légère, depuis le bas-droite
+        fill = DirectionalLight("fill")
+        fill.setColor(Vec4(0.15, 0.2, 0.3, 1))
+        fill_np = self.render.attachNewNode(fill)
+        fill_np.setHpr(-120, 30, 0)
+        self.render.setLight(fill_np)
 
     def update(self, task):
         """Boucle de jeu principale."""
@@ -189,6 +199,20 @@ class Game(ShowBase):
         self.lasers.bolts = []
         self.explosions.explosions = []
 
+        # Nettoie l'environnement
+        for a in self.environment.asteroids:
+            a.destroy()
+        for p in self.environment.planets:
+            p.destroy()
+        for n in self.environment.nebulae:
+            n.destroy()
+        for d in self.environment.debris:
+            d.destroy()
+        self.environment.asteroids = []
+        self.environment.planets = []
+        self.environment.nebulae = []
+        self.environment.debris = []
+
         self.player.node.setPos(0, 20, 0)
         self.player.target_x = 0
         self.player.target_z = 0
@@ -202,4 +226,5 @@ class Game(ShowBase):
 
     def toggle_fps(self):
         """Active/désactive le compteur FPS."""
-        self.setFrameRateMeter(not self.frameRateMeter)
+        self.fps_visible = not self.fps_visible
+        self.setFrameRateMeter(self.fps_visible)

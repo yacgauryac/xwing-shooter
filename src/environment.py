@@ -237,7 +237,7 @@ class Nebula:
             r = color.getX() + random.uniform(-0.1, 0.1)
             g = color.getY() + random.uniform(-0.1, 0.1)
             b = color.getZ() + random.uniform(-0.1, 0.1)
-            a = random.uniform(0.05, 0.15)
+            a = random.uniform(0.03, 0.08)
             col.addData4(max(0, r), max(0, g), max(0, b), a)
 
         from panda3d.core import GeomPoints
@@ -252,7 +252,7 @@ class Nebula:
 
         np = NodePath(geom_node)
         np.reparentTo(self.node)
-        np.setRenderModeThickness(3)
+        np.setRenderModeThickness(2)
         np.setTransparency(TransparencyAttrib.MAlpha)
 
     def update(self, dt):
@@ -357,7 +357,7 @@ class Environment:
 
         for d in self.debris:
             d.update(dt)
-        self.debris = [d for a in [self.debris] for d in a if d.alive]
+        self.debris = [d for d in self.debris if d.alive]
 
     def _spawn_asteroid(self, scroll_speed):
         """Fait apparaître un astéroïde."""

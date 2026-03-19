@@ -54,9 +54,9 @@ class Player:
         props.setMouseMode(WindowProperties.M_absolute)
         game.win.requestProperties(props)
 
-        # Caméra derrière
-        game.camera.setPos(0, -5, 3)
-        game.camera.lookAt(0, 20, 0)
+        # Caméra derrière — légèrement au-dessus
+        game.camera.setPos(0, -5, 1.8)
+        game.camera.lookAt(0, 25, 0)
 
     def load_model(self):
         """Charge le modèle .glb ou .gltf, fallback sur le procédural."""
@@ -66,8 +66,19 @@ class Player:
                 if model:
                     print(f"[Player] Modèle 3D chargé: {self.MODEL_PATH}")
                     model.setScale(self.MODEL_SCALE)
-                    # Oriente le modèle face à +Y (selon le modèle, ajuster H/P/R)
-                    model.setH(-90)
+                    model.setHpr(90, 0, 0)
+
+                    # Debug : affiche les dimensions du modèle
+                    bounds = model.getTightBounds()
+                    if bounds:
+                        bmin, bmax = bounds
+                        size = bmax - bmin
+                        center = (bmin + bmax) * 0.5
+                        print(f"[Player] Dimensions: {size}")
+                        print(f"[Player] Centre: {center}")
+                        print(f"[Player] Min: {bmin}")
+                        print(f"[Player] Max: {bmax}")
+
                     return model
             except Exception as e:
                 print(f"[Player] Erreur chargement modèle: {e}")

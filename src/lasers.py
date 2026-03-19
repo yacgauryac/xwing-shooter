@@ -1,6 +1,6 @@
 """
 Lasers — Système de tir laser du X-Wing.
-Les bolts partent des 4 canons en alternance avec léger auto-aim.
+Tir en paires alternées (haut puis bas) comme dans les films.
 """
 
 from panda3d.core import (
@@ -15,27 +15,28 @@ import math
 class LaserBolt:
     """Un seul tir laser."""
 
-    SPEED = 90.0          # Vitesse du bolt
-    MAX_DISTANCE = 200.0  # Distance max avant suppression
+    SPEED = 90.0
+    MAX_DISTANCE = 200.0
     DAMAGE = 1
 
-    def __init__(self, parent_node, start_pos, direction):
+    def __init__(self, parent_node, start_pos, direction, color_back=None, color_front=None):
         self.alive = True
         self.distance_traveled = 0.0
-        self.direction = direction  # Vec3 normalisé
+        self.direction = direction
 
-        # Crée le modèle du bolt
-        self.node = self.make_bolt()
+        # Couleurs par défaut : rouge/orange (joueur)
+        if color_back is None:
+            color_back = Vec4(1.0, 0.2, 0.0, 1)
+        if color_front is None:
+            color_front = Vec4(1.0, 0.7, 0.4, 1)
+
+        self.node = self.make_bolt(color_back, color_front)
         self.node.reparentTo(parent_node)
         self.node.setPos(start_pos)
-
-        # Oriente le bolt dans la direction de tir
         self.node.lookAt(start_pos + direction)
-
-        # Pas d'éclairage (le laser brille tout seul)
         self.node.setLightOff()
 
-    def make_bolt(self):
+    def make_bolt(self, color_back, color_front):
         """Crée un bolt laser bien visible."""
         fmt = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("bolt", fmt, Geom.UHStatic)
@@ -43,17 +44,13 @@ class LaserBolt:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        # Bolt plus gros et plus long pour être visible
         hx, hy, hz = 0.06, 0.8, 0.06
-
-        colors_back = Vec4(1.0, 0.2, 0.0, 1)   # arrière : rouge vif
-        colors_front = Vec4(1.0, 0.7, 0.4, 1)   # avant : orange clair
 
         corners = [
             (-hx, -hy, -hz), (hx, -hy, -hz), (hx, -hy, hz), (-hx, -hy, hz),
             (-hx,  hy, -hz), (hx,  hy, -hz), (hx,  hy, hz), (-hx,  hy, hz),
         ]
-        colors = [colors_back]*4 + [colors_front]*4
+        colors = [color_back]*4 + [color_front]*4
 
         for i, c in enumerate(corners):
             vertex.addData3(*c)
@@ -74,62 +71,52 @@ class LaserBolt:
         return NodePath(node)
 
     def update(self, dt):
-        """Avance le bolt dans sa direction."""
         if not self.alive:
             return
 
         move = self.SPEED * dt
-        offset = self.direction * move
-        self.node.setPos(self.node.getPos() + offset)
+        self.node.setPos(self.node.getPos() + self.direction * move)
         self.distance_traveled += move
 
         if self.distance_traveled > self.MAX_DISTANCE:
             self.destroy()
 
     def destroy(self):
-        """Supprime le bolt."""
         self.alive = False
-        self.node.removeNode()
+        if not self.node.isEmpty():
+            self.node.removeNode()
 
 
 class LaserSystem:
-    """Gère tous les tirs laser du joueur."""
+    """Gère les tirs laser du joueur — 4 canons, tir par paires alternées."""
 
-    FIRE_RATE = 0.10  # Tir un peu plus rapide
+    FIRE_RATE = 0.15  # Temps entre chaque paire
 
-    # Positions des 4 canons relatif au vaisseau
-    # Le vaisseau est tourné de -90 sur H :
-    #   X vaisseau -> -Y monde
-    #   Y vaisseau -> X monde
-    # Canons sont aux bouts des ailes
-    CANNON_OFFSETS = [
-        Point3( 0.25, 0.0,  0.8),   # haut-droit
-        Point3(-0.25, 0.0,  0.8),   # haut-gauche
-        Point3( 0.25, 0.0, -0.8),   # bas-droit
-        Point3(-0.25, 0.0, -0.8),   # bas-gauche
+    # Paires de canons : chaque paire tire 2 bolts simultanés
+    # Paire 0 : canons haut (droite + gauche)
+    # Paire 1 : canons bas (droite + gauche)
+    CANNON_PAIRS = [
+        [Point3( 0.5, 0.0,  0.8), Point3(-0.5, 0.0,  0.8)],   # paire haute
+        [Point3( 0.5, 0.0, -0.8), Point3(-0.5, 0.0, -0.8)],   # paire basse
     ]
 
-    # Distance max pour l'auto-aim (au-delà, tir droit)
     AUTO_AIM_RANGE = 120.0
-    # Force de l'auto-aim (0 = aucun, 1 = 100% vers l'ennemi)
     AUTO_AIM_STRENGTH = 0.15
 
     def __init__(self, game):
         self.game = game
         self.bolts = []
         self.fire_timer = 0.0
-        self.cannon_index = 0
+        self.pair_index = 0  # Alterne entre paire haute et basse
         self.firing = False
-        self.enemies_ref = None  # Référence au spawner, set par game.py
+        self.enemies_ref = None
 
-        # Contrôles de tir
         game.accept("mouse1", self.start_fire)
         game.accept("mouse1-up", self.stop_fire)
         game.accept("space", self.start_fire)
         game.accept("space-up", self.stop_fire)
 
     def set_enemies(self, spawner):
-        """Connecte le système de tir au spawner pour l'auto-aim."""
         self.enemies_ref = spawner
 
     def start_fire(self):
@@ -139,11 +126,10 @@ class LaserSystem:
         self.firing = False
 
     def update(self, dt, player_node):
-        """Met à jour les tirs et crée de nouveaux bolts."""
         self.fire_timer -= dt
 
         if self.firing and self.fire_timer <= 0:
-            self.fire(player_node)
+            self.fire_pair(player_node)
             self.fire_timer = self.FIRE_RATE
 
         for bolt in self.bolts:
@@ -152,7 +138,6 @@ class LaserSystem:
         self.bolts = [b for b in self.bolts if b.alive]
 
     def find_nearest_enemy(self, from_pos):
-        """Trouve l'ennemi vivant le plus proche devant le joueur."""
         if not self.enemies_ref:
             return None
 
@@ -163,10 +148,7 @@ class LaserSystem:
             if not enemy.alive:
                 continue
             epos = enemy.get_pos()
-            if epos is None:
-                continue
-            # Seulement les ennemis devant le joueur
-            if epos.getY() <= from_pos.getY():
+            if epos is None or epos.getY() <= from_pos.getY():
                 continue
             dist = (epos - from_pos).length()
             if dist < nearest_dist:
@@ -175,32 +157,32 @@ class LaserSystem:
 
         return nearest
 
-    def fire(self, player_node):
-        """Tire un bolt depuis le canon suivant avec auto-aim."""
-        offset = self.CANNON_OFFSETS[self.cannon_index]
-        world_pos = self.game.render.getRelativePoint(player_node, offset)
+    def fire_pair(self, player_node):
+        """Tire 2 bolts simultanés depuis la paire de canons active."""
+        pair = self.CANNON_PAIRS[self.pair_index]
 
-        # Direction de base : droit devant (+Y)
-        base_dir = Vec3(0, 1, 0)
+        for offset in pair:
+            world_pos = self.game.render.getRelativePoint(player_node, offset)
 
-        # Auto-aim : dévie légèrement vers l'ennemi le plus proche
-        nearest = self.find_nearest_enemy(world_pos)
-        if nearest:
-            epos = nearest.get_pos()
-            if epos:
-                to_enemy = epos - world_pos
-                to_enemy.normalize()
-                # Mélange direction de base + direction vers l'ennemi
-                aim_dir = base_dir * (1 - self.AUTO_AIM_STRENGTH) + to_enemy * self.AUTO_AIM_STRENGTH
-                aim_dir.normalize()
-                base_dir = aim_dir
+            # Direction de base
+            base_dir = Vec3(0, 1, 0)
 
-        bolt = LaserBolt(self.game.render, world_pos, base_dir)
-        self.bolts.append(bolt)
+            # Auto-aim
+            nearest = self.find_nearest_enemy(world_pos)
+            if nearest:
+                epos = nearest.get_pos()
+                if epos:
+                    to_enemy = epos - world_pos
+                    to_enemy.normalize()
+                    aim_dir = base_dir * (1 - self.AUTO_AIM_STRENGTH) + to_enemy * self.AUTO_AIM_STRENGTH
+                    aim_dir.normalize()
+                    base_dir = aim_dir
 
-        # Alterne le canon
-        self.cannon_index = (self.cannon_index + 1) % len(self.CANNON_OFFSETS)
+            bolt = LaserBolt(self.game.render, world_pos, base_dir)
+            self.bolts.append(bolt)
+
+        # Alterne la paire
+        self.pair_index = (self.pair_index + 1) % len(self.CANNON_PAIRS)
 
     def get_bolts(self):
-        """Retourne les bolts actifs."""
         return [b for b in self.bolts if b.alive]
