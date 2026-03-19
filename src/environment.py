@@ -165,11 +165,12 @@ class Asteroid:
 
 
 class DistantPlanet:
-    """Une planète lointaine en arrière-plan (très lente)."""
+    """Une planète fixe en arrière-plan qui grossit lentement (approche)."""
 
     def __init__(self, parent, pos, size, color):
         self.alive = True
-        self.speed = 0.5
+        self.initial_scale = 1.0
+        self.grow_rate = 0.015  # Grossit de 1.5% par seconde
 
         self.node = self._make_sphere(size, color)
         self.node.reparentTo(parent)
@@ -185,8 +186,8 @@ class DistantPlanet:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        rings = 12
-        sectors = 16
+        rings = 14
+        sectors = 18
 
         for i in range(rings + 1):
             phi = math.pi * i / rings
@@ -199,10 +200,12 @@ class DistantPlanet:
 
                 vertex.addData3(x, y, z)
 
-                band = math.sin(phi * 3) * 0.1
+                # Bandes atmosphériques
+                band = math.sin(phi * 4) * 0.08
+                band2 = math.sin(phi * 7 + theta * 2) * 0.03
                 c = Vec4(
-                    max(0, min(1, color.getX() + band)),
-                    max(0, min(1, color.getY() + band * 0.5)),
+                    max(0, min(1, color.getX() + band + band2)),
+                    max(0, min(1, color.getY() + band * 0.5 + band2)),
                     max(0, min(1, color.getZ() - band * 0.3)),
                     1,
                 )
@@ -228,9 +231,9 @@ class DistantPlanet:
     def update(self, dt):
         if not self.alive:
             return
-        self.node.setY(self.node.getY() - self.speed * dt)
-        if self.node.getY() < -50:
-            self.destroy()
+        # Grossit lentement (comme si on s'approchait)
+        self.initial_scale += self.grow_rate * dt
+        self.node.setScale(self.initial_scale)
 
     def destroy(self):
         self.alive = False
@@ -307,7 +310,7 @@ class Environment:
     """Gère tout le décor spatial."""
 
     ASTEROID_INTERVAL = 0.8
-    PLANET_INTERVAL = 30.0
+    PLANET_INTERVAL = 20.0
     NEBULA_INTERVAL = 35.0
     DEBRIS_INTERVAL = 3.0
 
@@ -324,18 +327,11 @@ class Environment:
         self.debris = []
 
         self.asteroid_timer = 2.0
-        self.planet_timer = 5.0
         self.nebula_timer = 15.0
         self.debris_timer = 4.0
 
-        self.planet_colors = [
-            Vec4(0.6, 0.3, 0.2, 1),
-            Vec4(0.2, 0.4, 0.7, 1),
-            Vec4(0.7, 0.6, 0.3, 1),
-            Vec4(0.3, 0.6, 0.3, 1),
-            Vec4(0.5, 0.3, 0.6, 1),
-            Vec4(0.7, 0.5, 0.2, 1),
-        ]
+        # 2 planètes fixes dès le départ
+        self._spawn_fixed_planets()
 
         self.nebula_colors = [
             Vec4(0.6, 0.2, 0.8, 1),
@@ -359,15 +355,9 @@ class Environment:
             a.update(dt)
         self.asteroids = [a for a in self.asteroids if a.alive]
 
-        # Planètes
-        self.planet_timer -= dt
-        if self.planet_timer <= 0:
-            self._spawn_planet()
-            self.planet_timer = self.PLANET_INTERVAL + random.uniform(-10, 10)
-
+        # Planètes (fixes, grossissent lentement)
         for p in self.planets:
             p.update(dt)
-        self.planets = [p for p in self.planets if p.alive]
 
         # Nébuleuses
         self.nebula_timer -= dt
@@ -428,15 +418,25 @@ class Environment:
         asteroid = Asteroid(self.game.render, Point3(x, y, z), size, speed)
         self.asteroids.append(asteroid)
 
-    def _spawn_planet(self):
-        x = random.uniform(-40, 40)
-        z = random.uniform(-20, 20)
-        y = self.SPAWN_DEPTH + random.uniform(100, 300)
-        size = random.uniform(8, 25)
-        color = random.choice(self.planet_colors)
+    def _spawn_fixed_planets(self):
+        """Crée 2 planètes fixes en arrière-plan au démarrage."""
+        # Planète 1 : grande, rouge-orangé (style Mars), en haut à gauche
+        p1 = DistantPlanet(
+            self.game.render,
+            Point3(-25, 400, 15),
+            size=15,
+            color=Vec4(0.6, 0.35, 0.2, 1),
+        )
+        self.planets.append(p1)
 
-        planet = DistantPlanet(self.game.render, Point3(x, y, z), size, color)
-        self.planets.append(planet)
+        # Planète 2 : plus petite, bleutée (style glacée), en bas à droite
+        p2 = DistantPlanet(
+            self.game.render,
+            Point3(30, 500, -10),
+            size=10,
+            color=Vec4(0.25, 0.4, 0.65, 1),
+        )
+        self.planets.append(p2)
 
     def _spawn_nebula(self):
         x = random.uniform(-60, 60)
