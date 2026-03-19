@@ -152,6 +152,18 @@ class Game(ShowBase):
                     self.game_over = True
                     self.hud.show_game_over(self.spawner.score)
 
+            # Collisions astéroïdes -> joueur
+            asteroid_damage = self.environment.check_player_collision(player_pos)
+            if asteroid_damage > 0:
+                self.player_hp -= asteroid_damage
+                self.hud.show_damage_flash()
+                self.sounds.play("hit")
+
+                if self.player_hp <= 0:
+                    self.player_hp = 0
+                    self.game_over = True
+                    self.hud.show_game_over(self.spawner.score)
+
         # Explosions
         self.explosions.update(dt)
 
