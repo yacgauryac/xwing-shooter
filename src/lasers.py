@@ -92,12 +92,12 @@ class LaserSystem:
 
     FIRE_RATE = 0.15  # Temps entre chaque paire
 
-    # Paires de canons : chaque paire tire 2 bolts simultanés
-    # Paire 0 : canons haut (droite + gauche)
-    # Paire 1 : canons bas (droite + gauche)
+    # Paires de canons en coordonnées LOCALES du modèle
+    # Le modèle a: X = ailes (±1.0), Y = nez (1.4), Z = haut/bas (±0.3)
+    # getRelativePoint convertit automatiquement en world space
     CANNON_PAIRS = [
-        [Point3( 0.5, 0.0,  0.8), Point3(-0.5, 0.0,  0.8)],   # paire haute
-        [Point3( 0.5, 0.0, -0.8), Point3(-0.5, 0.0, -0.8)],   # paire basse
+        [Point3( 1.0, 1.3,  0.15), Point3(-1.0, 1.3,  0.15)],   # ailes haut
+        [Point3( 1.0, 1.3, -0.15), Point3(-1.0, 1.3, -0.15)],   # ailes bas
     ]
 
     AUTO_AIM_RANGE = 120.0
