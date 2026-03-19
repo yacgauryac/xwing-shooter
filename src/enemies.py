@@ -133,8 +133,10 @@ class TIEFighter:
                 if TIEFighter._model_template:
                     model = TIEFighter._model_template.copyTo(NodePath("tie_instance"))
                     model.setScale(self.MODEL_SCALE)
-                    model.setH(180)  # Face au joueur
-                    # Debug : affiche les dimensions du modèle au premier chargement
+                    model.setH(90)  # Face au joueur
+                    # Éclaircir le TIE pour qu'il soit visible sur fond noir
+                    model.setColorScale(Vec4(1.8, 1.8, 2.0, 1))
+                    # Debug
                     if not hasattr(TIEFighter, '_size_logged'):
                         bounds = model.getTightBounds()
                         if bounds:
@@ -219,7 +221,8 @@ class TIEFighter:
         if self.flash_timer > 0:
             self.flash_timer -= dt
             if self.flash_timer <= 0:
-                self.node.clearColorScale()
+                # Restaure le boost de luminosité normal
+                self.node.setColorScale(Vec4(1.8, 1.8, 2.0, 1))
 
         if self.node.getY() < -10:
             self.destroy()
@@ -232,13 +235,16 @@ class TIEFighter:
             dist = (my_pos - player_pos).length()
             if dist < self.FIRE_RANGE and my_pos.getY() > player_pos.getY():
                 self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
-                # Retourne la position et direction du tir
+                # Direction vers le joueur avec imprécision
                 direction = player_pos - my_pos
-                # Ajoute un peu d'imprécision (les Stormtroopers visent mal !)
                 direction.setX(direction.getX() + random.uniform(-2.0, 2.0))
                 direction.setZ(direction.getZ() + random.uniform(-1.5, 1.5))
                 direction.normalize()
-                return (Vec3(my_pos), direction)
+                # Retourne 2 positions (gauche et droite du cockpit)
+                offset = 0.4
+                pos_left = Vec3(my_pos.getX(), my_pos.getY(), my_pos.getZ() + offset)
+                pos_right = Vec3(my_pos.getX(), my_pos.getY(), my_pos.getZ() - offset)
+                return [(pos_left, direction), (pos_right, direction)]
 
         return None
 
@@ -294,9 +300,10 @@ class EnemySpawner:
         for enemy in self.enemies:
             fire_result = enemy.update(dt, player_pos)
             if fire_result is not None:
-                pos, direction = fire_result
-                bolt = EnemyBolt(self.game.render, pos, direction)
-                self.enemy_bolts.append(bolt)
+                # fire_result est une liste de (pos, direction)
+                for pos, direction in fire_result:
+                    bolt = EnemyBolt(self.game.render, pos, direction)
+                    self.enemy_bolts.append(bolt)
 
         # Update tirs ennemis
         for bolt in self.enemy_bolts:
