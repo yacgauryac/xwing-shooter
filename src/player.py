@@ -28,7 +28,8 @@ class Player:
     MAX_PITCH = 20.0   # Piqué/cabré quand on monte/descend
     ROT_SPEED = 6.0    # Vitesse de retour à la normale
 
-    MODEL_PATH = "assets/models/xwing.glb"
+    # MODEL_PATH = "assets/models/xwing/scene.gltf"
+    MODEL_PATH = "assets/models/xwing.glb" 
     MODEL_SCALE = 0.1
 
     def __init__(self, game):
