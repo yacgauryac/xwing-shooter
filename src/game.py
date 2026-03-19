@@ -1,6 +1,6 @@
 """
 X-Wing Shooter — Classe principale du jeu.
-Gère la fenêtre, la scène, et la boucle de jeu.
+Phase 3 : explosions, tirs ennemis, sons, vie joueur.
 """
 
 from direct.showbase.ShowBase import ShowBase
@@ -14,74 +14,71 @@ from src.player import Player
 from src.starfield import Starfield
 from src.lasers import LaserSystem
 from src.enemies import EnemySpawner
+from src.explosions import ExplosionManager
 from src.hud import HUD
+from src.sounds import SoundManager
+from src.environment import Environment
 
 
 class Game(ShowBase):
     """Classe principale du jeu X-Wing Shooter."""
 
+    PLAYER_MAX_HP = 10
+
     def __init__(self):
         ShowBase.__init__(self)
 
-        # Config fenêtre
         self.setup_window()
-
-        # Éclairage
         self.setup_lights()
 
-        # Anti-aliasing
         self.render.setAntialias(AntialiasAttrib.MAuto)
-
-        # Fond noir (espace)
         self.setBackgroundColor(0, 0, 0, 1)
 
-        # Étoiles
+        # Systèmes
         self.starfield = Starfield(self)
-
-        # Joueur (X-Wing)
+        self.environment = Environment(self)
         self.player = Player(self)
-
-        # Système de tir
         self.lasers = LaserSystem(self)
-
-        # Ennemis
         self.spawner = EnemySpawner(self)
+        self.explosions = ExplosionManager(self)
+        self.sounds = SoundManager(self)
+        self.hud = HUD(self)
 
-        # Connecte le laser au spawner (pour l'auto-aim)
+        # Connecte le laser au spawner pour l'auto-aim
         self.lasers.set_enemies(self.spawner)
 
-        # HUD
-        self.hud = HUD(self)
-        self.last_wave = 1
-
-        # Vitesse de défilement
+        # État du jeu
+        self.player_hp = self.PLAYER_MAX_HP
+        self.game_over = False
         self.scroll_speed = 20.0
+        self.last_wave = 1
+        self.last_score = 0  # Pour détecter les kills
+
+        # Compteur FPS (F1 pour toggle)
+        self.setFrameRateMeter(True)
 
         # Boucle de jeu
         self.taskMgr.add(self.update, "game_update")
 
-        # Quitter avec Échap
+        # Contrôles
         self.accept("escape", self.quit_game)
+        self.accept("m", self.sounds.toggle)
+        self.accept("r", self.reset_game)
+        self.accept("f1", self.toggle_fps)
 
     def setup_window(self):
-        """Configure la fenêtre de jeu."""
         props = WindowProperties()
         props.setTitle("X-Wing Shooter")
         props.setSize(1280, 720)
         self.win.requestProperties(props)
-
-        # Désactive le contrôle caméra par défaut de Panda3D
         self.disableMouse()
 
     def setup_lights(self):
-        """Met en place l'éclairage de la scène."""
-        # Lumière ambiante
         ambient = AmbientLight("ambient")
         ambient.setColor(Vec4(0.2, 0.2, 0.3, 1))
         ambient_np = self.render.attachNewNode(ambient)
         self.render.setLight(ambient_np)
 
-        # Lumière directionnelle
         sun = DirectionalLight("sun")
         sun.setColor(Vec4(0.9, 0.9, 0.8, 1))
         sun_np = self.render.attachNewNode(sun)
@@ -89,36 +86,120 @@ class Game(ShowBase):
         self.render.setLight(sun_np)
 
     def update(self, task):
-        """Boucle de jeu principale — appelée chaque frame."""
+        """Boucle de jeu principale."""
         dt = globalClock.getDt()
 
-        # Update étoiles
+        if self.game_over:
+            return task.cont
+
+        # Étoiles
         self.starfield.update(dt, self.scroll_speed)
 
-        # Update joueur
-        self.player.update(dt)
+        # Décor (astéroïdes, planètes, nébuleuses, débris)
+        self.environment.update(dt, self.scroll_speed)
 
-        # Update lasers
+        # Joueur
+        self.player.update(dt)
+        player_pos = self.player.node.getPos()
+
+        # Lasers joueur
         self.lasers.update(dt, self.player.node)
 
-        # Update ennemis + collisions
-        self.spawner.update(dt, self.lasers)
+        # Mémorise le score avant update pour détecter les kills
+        score_before = self.spawner.score
+
+        # Ennemis + tirs ennemis
+        self.spawner.update(dt, self.lasers, player_pos)
+
+        # Détecte un kill → explosion + son
+        if self.spawner.score > score_before:
+            if hasattr(self.spawner, 'last_kill_pos'):
+                self.explosions.spawn(self.spawner.last_kill_pos)
+                self.sounds.play("explosion")
+
+        # Son laser joueur (quand on tire)
+        if self.lasers.firing and self.lasers.fire_timer <= 0:
+            self.sounds.play("laser")
+
+        # Collisions tirs ennemis -> joueur
+        damage = self.spawner.check_player_hit(player_pos)
+        if damage > 0:
+            self.player_hp -= damage
+            self.hud.show_damage_flash()
+            self.sounds.play("hit")
+
+            if self.player_hp <= 0:
+                self.player_hp = 0
+                self.game_over = True
+                self.hud.show_game_over(self.spawner.score)
+
+        # Explosions
+        self.explosions.update(dt)
 
         # Annonce nouvelle vague
         if self.spawner.wave != self.last_wave:
             self.hud.announce_wave(self.spawner.wave)
             self.last_wave = self.spawner.wave
 
-        # Update HUD
+        # HUD
         self.hud.update(
             dt,
             self.spawner.score,
             self.spawner.wave,
-            self.spawner.get_enemy_count()
+            self.spawner.get_enemy_count(),
+            self.player_hp,
+            self.PLAYER_MAX_HP,
         )
 
         return task.cont
 
+    def reset_game(self):
+        """Recommence une partie."""
+        if not self.game_over:
+            return
+
+        # Nettoie tout
+        for enemy in self.spawner.enemies:
+            if enemy.alive:
+                enemy.destroy()
+        for bolt in self.spawner.enemy_bolts:
+            if bolt.alive:
+                bolt.destroy()
+        for bolt in self.lasers.bolts:
+            if bolt.alive:
+                bolt.destroy()
+        for exp in self.explosions.explosions:
+            if exp.alive:
+                exp.destroy()
+
+        # Reset état
+        self.player_hp = self.PLAYER_MAX_HP
+        self.game_over = False
+        self.last_wave = 1
+        self.last_score = 0
+
+        self.spawner.enemies = []
+        self.spawner.enemy_bolts = []
+        self.spawner.score = 0
+        self.spawner.wave = 1
+        self.spawner.enemies_spawned = 0
+        self.spawner.enemies_per_wave = 5
+        self.spawner.spawn_timer = 1.0
+
+        self.lasers.bolts = []
+        self.explosions.explosions = []
+
+        self.player.node.setPos(0, 20, 0)
+        self.player.target_x = 0
+        self.player.target_z = 0
+
+        # Reset HUD
+        self.hud.game_over_text.setText("")
+        self.hud.game_over_sub.setText("")
+
     def quit_game(self):
-        """Quitte proprement."""
         self.userExit()
+
+    def toggle_fps(self):
+        """Active/désactive le compteur FPS."""
+        self.setFrameRateMeter(not self.frameRateMeter)
