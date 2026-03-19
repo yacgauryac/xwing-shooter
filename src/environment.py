@@ -11,6 +11,7 @@ from panda3d.core import (
 )
 import random
 import math
+import os
 
 
 class Asteroid:
@@ -165,12 +166,12 @@ class Asteroid:
 
 
 class DistantPlanet:
-    """Une planète fixe en arrière-plan qui grossit lentement (approche)."""
+    """Une planète fixe procédurale qui grossit lentement."""
 
     def __init__(self, parent, pos, size, color):
         self.alive = True
         self.initial_scale = 1.0
-        self.grow_rate = 0.015  # Grossit de 1.5% par seconde
+        self.grow_rate = 0.012
 
         self.node = self._make_sphere(size, color)
         self.node.reparentTo(parent)
@@ -178,29 +179,22 @@ class DistantPlanet:
         self.node.setLightOff()
 
     def _make_sphere(self, radius, color):
-        """Crée une vraie sphère procédurale (UV sphere)."""
         root = NodePath("planet")
-
         fmt = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("sphere", fmt, Geom.UHStatic)
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        rings = 14
-        sectors = 18
-
+        rings, sectors = 14, 18
         for i in range(rings + 1):
             phi = math.pi * i / rings
             for j in range(sectors + 1):
                 theta = 2.0 * math.pi * j / sectors
-
                 x = radius * math.sin(phi) * math.cos(theta)
                 y = radius * math.sin(phi) * math.sin(theta)
                 z = radius * math.cos(phi)
-
                 vertex.addData3(x, y, z)
 
-                # Bandes atmosphériques
                 band = math.sin(phi * 4) * 0.08
                 band2 = math.sin(phi * 7 + theta * 2) * 0.03
                 c = Vec4(
@@ -223,15 +217,12 @@ class DistantPlanet:
         geom.addPrimitive(tris)
         node = GeomNode("sphere")
         node.addGeom(geom)
-
-        np = NodePath(node)
-        np.reparentTo(root)
+        NodePath(node).reparentTo(root)
         return root
 
     def update(self, dt):
         if not self.alive:
             return
-        # Grossit lentement (comme si on s'approchait)
         self.initial_scale += self.grow_rate * dt
         self.node.setScale(self.initial_scale)
 
@@ -239,6 +230,36 @@ class DistantPlanet:
         self.alive = False
         if not self.node.isEmpty():
             self.node.removeNode()
+
+
+class StarDestroyerDecor:
+    """Star Destroyer en arrière-plan — purement décoratif, très loin."""
+
+    MODEL_PATH = "assets/models/star_destroyer/scene.gltf"
+
+    def __init__(self, game, pos, scale=0.01):
+        self.alive = True
+        self.node = None
+
+        if os.path.exists(self.MODEL_PATH):
+            try:
+                model = game.loader.loadModel(self.MODEL_PATH)
+                if model:
+                    self.node = model
+                    self.node.reparentTo(game.render)
+                    self.node.setPos(pos)
+                    self.node.setScale(scale)
+                    self.node.setH(90)
+                    # Légèrement éclairé
+                    self.node.setColorScale(Vec4(1.5, 1.5, 1.8, 1))
+                    print(f"[StarDestroyer] Modèle chargé")
+            except Exception as e:
+                print(f"[StarDestroyer] Erreur: {e}")
+
+    def update(self, dt):
+        if self.node and self.alive:
+            # Dérive très lentement
+            self.node.setY(self.node.getY() - 0.3 * dt)
 
 
 class Nebula:
@@ -329,8 +350,9 @@ class Environment:
         self.nebula_timer = 15.0
         self.debris_timer = 4.0
 
-        # 2 planètes fixes dès le départ
+        # 2 planètes fixes + Star Destroyer en fond
         self._spawn_fixed_planets()
+        self.star_destroyer = StarDestroyerDecor(game, Point3(15, 600, 8), scale=0.02)
 
         self.nebula_colors = [
             Vec4(0.6, 0.2, 0.8, 1),
@@ -357,6 +379,10 @@ class Environment:
         # Planètes (fixes, grossissent lentement)
         for p in self.planets:
             p.update(dt)
+
+        # Star Destroyer en fond
+        if self.star_destroyer:
+            self.star_destroyer.update(dt)
 
         # Nébuleuses
         self.nebula_timer -= dt
@@ -418,8 +444,7 @@ class Environment:
         self.asteroids.append(asteroid)
 
     def _spawn_fixed_planets(self):
-        """Crée 2 planètes fixes en arrière-plan au démarrage."""
-        # Planète 1 : grande, rouge-orangé (style Mars), en haut à gauche
+        """Crée 2 planètes procédurales fixes."""
         p1 = DistantPlanet(
             self.game.render,
             Point3(-25, 400, 15),
@@ -428,7 +453,6 @@ class Environment:
         )
         self.planets.append(p1)
 
-        # Planète 2 : plus petite, bleutée (style glacée), en bas à droite
         p2 = DistantPlanet(
             self.game.render,
             Point3(30, 500, -10),

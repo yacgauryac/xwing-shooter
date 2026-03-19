@@ -276,7 +276,8 @@ class BaseEnemy:
 class TIEFighter(BaseEnemy):
     """TIE Fighter standard — équilibré."""
     SPEED_BASE = 18.0
-    SPEED_CHARGE = 38.0
+    SPEED_CHARGE = 65.0       # Kamikaze !
+    CHARGE_DISTANCE = 100.0   # Accélère de loin
     HP = 2
     HIT_RADIUS = 1.8
     FIRE_COOLDOWN_MIN = 2.0
@@ -284,6 +285,7 @@ class TIEFighter(BaseEnemy):
     BOLTS_PER_SHOT = 2
     SCORE_VALUE = 100
 
+    #MODEL_PATH = "assets/models/tie_fighter/scene.gltf"
     MODEL_PATH = "assets/models/tie.glb"
     MODEL_SCALE = 0.5
 
@@ -302,16 +304,16 @@ class TIEFighter(BaseEnemy):
 class TIEInterceptor(BaseEnemy):
     """TIE Interceptor — rapide et agressif, tir fréquent."""
     SPEED_BASE = 25.0
-    SPEED_CHARGE = 50.0
-    CHARGE_DISTANCE = 70.0
-    HP = 1                    # Fragile
+    SPEED_CHARGE = 80.0       # Ultra rapide en charge
+    CHARGE_DISTANCE = 110.0   # Fonce de très loin
+    HP = 1
     HIT_RADIUS = 1.5
-    FIRE_COOLDOWN_MIN = 1.0   # Tire souvent
+    FIRE_COOLDOWN_MIN = 1.0
     FIRE_COOLDOWN_MAX = 2.5
-    BOLTS_PER_SHOT = 1        # Un seul tir mais rapide
+    BOLTS_PER_SHOT = 1
     SCORE_VALUE = 150
 
-    MODEL_PATH = "assets/models/tie_interceptor.glb"
+    MODEL_PATH = "assets/models/tie_interceptor/scene.gltf"
     MODEL_SCALE = 0.5
 
     def __init__(self, *args, **kwargs):
@@ -345,16 +347,16 @@ class TIEInterceptor(BaseEnemy):
 class TIEBomber(BaseEnemy):
     """TIE Bomber — lent, résistant, tire des salves lourdes."""
     SPEED_BASE = 10.0
-    SPEED_CHARGE = 18.0
-    CHARGE_DISTANCE = 50.0
-    HP = 5                    # Tank
+    SPEED_CHARGE = 30.0       # Même le bomber accélère
+    CHARGE_DISTANCE = 80.0
+    HP = 5
     HIT_RADIUS = 2.2
     FIRE_COOLDOWN_MIN = 3.0
     FIRE_COOLDOWN_MAX = 6.0
     BOLTS_PER_SHOT = 2
     SCORE_VALUE = 250
 
-    MODEL_PATH = "assets/models/tie_bomber.glb"
+    MODEL_PATH = "assets/models/tie_bomber/scene.gltf"
     MODEL_SCALE = 0.5
 
     def create_procedural(self):
@@ -412,11 +414,9 @@ class Formation:
         positions = []
         per_side = count // 2
         for i in range(per_side):
-            # Côté gauche
-            positions.append((-12 - i * 2, i * 10, random.uniform(-3, 3)))
+            positions.append((-7 - i * 1.5, i * 10, random.uniform(-2, 2)))
         for i in range(count - per_side):
-            # Côté droit
-            positions.append((12 + i * 2, i * 10, random.uniform(-3, 3)))
+            positions.append((7 + i * 1.5, i * 10, random.uniform(-2, 2)))
         return positions
 
     @staticmethod
