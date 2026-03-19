@@ -92,13 +92,15 @@ class LaserSystem:
 
     FIRE_RATE = 0.15  # Temps entre chaque paire
 
-    # Paires de canons en coordonnées LOCALES du modèle
-    # Le modèle a: X = ailes (±1.0), Y = nez (1.4), Z = haut/bas (±0.3)
-    # getRelativePoint convertit automatiquement en world space
+    # Paires de canons en coordonnées MONDE (relatif au node parent sans scale/rotation)
+    # Le vaisseau visible fait ~2.0 de large (scale 0.1 * modèle 20 unités)
+    # Bouts d'ailes à X=±1.0, nez devant à Y=+1.5
+    # Haut/bas à Z=±0.03 (très plat, presque invisible)
     CANNON_PAIRS = [
-        [Point3( 1.0, 1.3,  0.15), Point3(-1.0, 1.3,  0.15)],   # ailes haut
-        [Point3( 1.0, 1.3, -0.15), Point3(-1.0, 1.3, -0.15)],   # ailes bas
+        [Point3( 1.0, 1.5,  0.03), Point3(-1.0, 1.5,  0.03)],   # droite+gauche haut
+        [Point3( 1.0, 1.5, -0.03), Point3(-1.0, 1.5, -0.03)],   # droite+gauche bas
     ]
+    # Note: on passe player.node (parent) pas model_node pour ces offsets
 
     AUTO_AIM_RANGE = 120.0
     AUTO_AIM_STRENGTH = 0.15
@@ -164,6 +166,10 @@ class LaserSystem:
         for offset in pair:
             world_pos = self.game.render.getRelativePoint(player_node, offset)
 
+            # Debug : affiche les positions monde des canons
+            if not hasattr(self, '_debug_logged'):
+                print(f"[Laser] Canon offset {offset} → world {world_pos}")
+
             # Direction de base
             base_dir = Vec3(0, 1, 0)
 
@@ -180,6 +186,9 @@ class LaserSystem:
 
             bolt = LaserBolt(self.game.render, world_pos, base_dir)
             self.bolts.append(bolt)
+
+        if not hasattr(self, '_debug_logged'):
+            self._debug_logged = True
 
         # Alterne la paire
         self.pair_index = (self.pair_index + 1) % len(self.CANNON_PAIRS)

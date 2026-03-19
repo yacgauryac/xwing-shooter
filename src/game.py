@@ -112,8 +112,8 @@ class Game(ShowBase):
         self.player.update(dt)
         player_pos = self.player.node.getPos()
 
-        # Lasers joueur (utilise model_node pour les positions de canons)
-        self.lasers.update(dt, self.player.model_node)
+        # Lasers joueur (utilise node parent pour les positions de canons)
+        self.lasers.update(dt, self.player.node)
 
         # Mémorise le score avant update pour détecter les kills
         score_before = self.spawner.score
