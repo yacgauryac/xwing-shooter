@@ -233,7 +233,7 @@ class DistantPlanet:
 
 
 class StarDestroyerDecor:
-    """Star Destroyer en arrière-plan — purement décoratif, très loin."""
+    """Star Destroyer en arrière-plan — grossit lentement (approche)."""
 
     MODEL_PATH = "assets/models/star_destroyer/scene.gltf"
 
@@ -250,16 +250,14 @@ class StarDestroyerDecor:
                     self.node.setPos(pos)
                     self.node.setScale(scale)
                     self.node.setH(90)
-                    # Légèrement éclairé
                     self.node.setColorScale(Vec4(1.5, 1.5, 1.8, 1))
-                    print(f"[StarDestroyer] Modèle chargé")
+                    self.node.setLightOff()
+                    print(f"[StarDestroyer] Modèle chargé, scale={scale}")
             except Exception as e:
                 print(f"[StarDestroyer] Erreur: {e}")
 
     def update(self, dt):
-        if self.node and self.alive:
-            # Dérive très lentement
-            self.node.setY(self.node.getY() - 0.3 * dt)
+        pass
 
 
 class Nebula:
@@ -352,7 +350,7 @@ class Environment:
 
         # 2 planètes fixes + Star Destroyer en fond
         self._spawn_fixed_planets()
-        self.star_destroyer = StarDestroyerDecor(game, Point3(15, 600, 8), scale=0.02)
+        self.star_destroyer = StarDestroyerDecor(game, Point3(20, 600, -5), scale=0.03)
 
         self.nebula_colors = [
             Vec4(0.6, 0.2, 0.8, 1),

@@ -10,7 +10,8 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomLines, GeomNode,
-    NodePath, WindowProperties, TransparencyAttrib
+    NodePath, WindowProperties, TransparencyAttrib,
+    PointLight
 )
 import math
 
@@ -28,9 +29,10 @@ class Player:
     MAX_PITCH = 20.0   # Piqué/cabré quand on monte/descend
     ROT_SPEED = 6.0    # Vitesse de retour à la normale
 
-    # MODEL_PATH = "assets/models/xwing/scene.gltf"
-    MODEL_PATH = "assets/models/xwing.glb" 
+    # MODEL_PATH = "assets/models/xwing.glb"
+    MODEL_PATH = "assets/models/xwing/scene.gltf"
     MODEL_SCALE = 0.1
+    TARGET_SIZE = 2.5  # Un peu plus gros
 
     def __init__(self, game):
         self.game = game
@@ -43,6 +45,9 @@ class Player:
         }
 
         self.setup_controls()
+
+        # Rotation de base du modèle (sera défini dans load_model)
+        self.model_h = 0
 
         # Node principal (position dans le monde, pas de rotation)
         self.node = NodePath("player_root")
@@ -96,28 +101,46 @@ class Player:
         props.setMouseMode(WindowProperties.M_absolute)
         game.win.requestProperties(props)
 
-        # Caméra derrière
-        game.camera.setPos(0, -5, 1.8)
-        game.camera.lookAt(0, 25, 0)
+        # Caméra derrière — vue légèrement du dessus
+        game.camera.setPos(0, -4, 3.0)
+        game.camera.lookAt(0, 22, 0)
+
+        # Lumière dédiée au joueur (éclaire le X-Wing par derrière/dessus = ce que la caméra voit)
+        plight = PointLight("player_light")
+        plight.setColor(Vec4(1.5, 1.5, 1.6, 1))
+        plight.setAttenuation((0.3, 0.01, 0.001))
+        self.player_light = self.node.attachNewNode(plight)
+        self.player_light.setPos(0, -3, 5)  # Derrière et au-dessus
+        game.render.setLight(self.player_light)
 
     def load_model(self):
-        """Charge le modèle .glb ou fallback procédural."""
+        """Charge le modèle .glb/.gltf, auto-scale à TARGET_SIZE, fallback procédural."""
         if os.path.exists(self.MODEL_PATH):
             try:
                 model = self.game.loader.loadModel(self.MODEL_PATH)
                 if model:
                     print(f"[Player] Modèle 3D chargé: {self.MODEL_PATH}")
-                    model.setScale(self.MODEL_SCALE)
-                    # Le modèle a son nez vers +Y et ses ailes sur X
-                    # On le tourne de 90° sur H pour qu'il pointe vers +Y monde
-                    model.setH(90)
 
+                    # Auto-scale : mesure le modèle brut et scale pour TARGET_SIZE
                     bounds = model.getTightBounds()
                     if bounds:
                         bmin, bmax = bounds
-                        print(f"[Player] Dimensions: {bmax - bmin}")
-                        print(f"[Player] Min: {bmin} Max: {bmax}")
+                        size = bmax - bmin
+                        max_dim = max(size.getX(), size.getY(), size.getZ())
+                        print(f"[Player] Dimensions brutes: {size}")
+                        if max_dim > 0:
+                            auto_scale = self.TARGET_SIZE / max_dim
+                            model.setScale(auto_scale)
+                            print(f"[Player] Auto-scale: {auto_scale:.4f} (target {self.TARGET_SIZE})")
 
+                        # Re-check après scale
+                        bounds2 = model.getTightBounds()
+                        if bounds2:
+                            print(f"[Player] Dimensions finales: {bounds2[1] - bounds2[0]}")
+
+                    self.model_h = 180
+                    model.setH(self.model_h)
+                    model.setColorScale(Vec4(3.0, 3.0, 3.0, 1))
                     return model
             except Exception as e:
                 print(f"[Player] Erreur chargement modèle: {e}")
@@ -320,14 +343,12 @@ class Player:
         rot_lerp = self.ROT_SPEED * dt
 
         if self.barrel_rolling:
-            # Barrel roll : rotation 360° sur l'axe longitudinal (P)
             self.model_node.setHpr(
-                90,
+                self.model_h,
+                self.current_pitch,
                 self.barrel_roll_angle,
-                self.current_roll,
             )
         else:
-            # Normal : roll/pitch selon le mouvement
             target_roll = -move_x * self.MAX_ROLL
             self.current_roll += (target_roll - self.current_roll) * rot_lerp
 
@@ -335,7 +356,7 @@ class Player:
             self.current_pitch += (target_pitch - self.current_pitch) * rot_lerp
 
             self.model_node.setHpr(
-                90,
+                self.model_h,
                 self.current_pitch,
                 self.current_roll,
             )
