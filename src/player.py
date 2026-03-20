@@ -81,6 +81,13 @@ class Player:
         # Traînées du barrel roll
         self.barrel_trails = []
 
+        # Effets visuels barrel roll
+        self.barrel_flash_timer = 0.0
+        self.barrel_flash_node = None
+        self.barrel_fov_active = False
+        self.base_fov = 60.0
+        self.speed_lines = []
+
         # Réticule de visée — système spring-damper (pendule au bout d'une tige)
         self.crosshair = self._create_crosshair()
         self.crosshair.reparentTo(game.render)
@@ -195,6 +202,17 @@ class Player:
         self.barrel_timer = self.BARREL_DURATION
         self.barrel_roll_angle = 0.0
         self.invincible = True
+
+        # --- Effets visuels ---
+        # Flash blanc au déclenchement
+        self.barrel_flash_timer = 0.15
+
+        # Speed lines
+        self._spawn_speed_lines()
+
+        # Zoom FOV (sera restauré à la fin)
+        self.barrel_fov_active = True
+
         print(f"[Player] BARREL ROLL {'gauche' if direction < 0 else 'droite'} !")
 
     def create_xwing(self):
@@ -311,6 +329,47 @@ class Player:
                 self.invincible = False
                 self.barrel_cooldown = self.BARREL_COOLDOWN
                 self.barrel_roll_angle = 0.0
+                self.barrel_fov_active = False
+
+        # --- Effets visuels barrel roll ---
+        # Flash blanc
+        if self.barrel_flash_timer > 0:
+            self.barrel_flash_timer -= dt
+            if self.barrel_flash_node is None:
+                from direct.gui.DirectGui import DirectFrame
+                self.barrel_flash_node = DirectFrame(
+                    frameColor=Vec4(1, 1, 1, 0.3),
+                    frameSize=(-2, 2, -2, 2),
+                    pos=(0, 0, 0), sortOrder=90,
+                )
+            alpha = max(0, self.barrel_flash_timer / 0.15) * 0.3
+            self.barrel_flash_node["frameColor"] = Vec4(1, 0.9, 0.7, alpha)
+            if self.barrel_flash_timer <= 0 and self.barrel_flash_node:
+                self.barrel_flash_node.destroy()
+                self.barrel_flash_node = None
+
+        # FOV zoom pendant barrel roll
+        if self.barrel_fov_active:
+            progress = 1.0 - (self.barrel_timer / self.BARREL_DURATION)
+            # FOV augmente puis revient : sin curve
+            fov_boost = math.sin(progress * math.pi) * 15
+            self.game.camLens.setFov(self.base_fov + fov_boost)
+        elif self.game.camLens.getFov()[0] != self.base_fov:
+            # Retour progressif au FOV normal
+            current = self.game.camLens.getFov()[0]
+            self.game.camLens.setFov(current + (self.base_fov - current) * 5 * dt)
+
+        # Speed lines (update + cleanup)
+        for sl in self.speed_lines[:]:
+            sl["life"] -= dt
+            if sl["life"] <= 0:
+                sl["node"].removeNode()
+                self.speed_lines.remove(sl)
+            else:
+                alpha = sl["life"] / sl["max_life"]
+                sl["node"].setColorScale(1, 1, 1, alpha)
+                # Les lignes filent vers l'arrière
+                sl["node"].setY(sl["node"].getY() - 80 * dt)
 
         # Update traînées (fade out et suppression)
         for trail in self.barrel_trails[:]:
@@ -483,3 +542,48 @@ class Player:
 
         life = 0.25
         return {"node": np, "life": life, "max_life": life}
+
+    def _spawn_speed_lines(self):
+        """Spawn des lignes de vitesse autour du vaisseau pendant le barrel roll."""
+        import random
+        px = self.node.getX()
+        py = self.node.getY()
+        pz = self.node.getZ()
+
+        for _ in range(12):
+            fmt = GeomVertexFormat.getV3c4()
+            vdata = GeomVertexData("speedline", fmt, Geom.UHStatic)
+            vertex = GeomVertexWriter(vdata, "vertex")
+            col = GeomVertexWriter(vdata, "color")
+
+            # Lignes autour du vaisseau, allongées vers l'arrière
+            ox = px + random.uniform(-4, 4)
+            oz = pz + random.uniform(-3, 3)
+            oy = py + random.uniform(2, 15)
+            length = random.uniform(2, 5)
+
+            c_front = Vec4(1.0, 0.85, 0.5, 0.8)
+            c_back = Vec4(1.0, 0.6, 0.2, 0.0)
+
+            vertex.addData3(0, 0, 0)
+            col.addData4(c_front)
+            vertex.addData3(0, -length, 0)
+            col.addData4(c_back)
+
+            lines = GeomLines(Geom.UHStatic)
+            lines.addVertices(0, 1)
+
+            geom = Geom(vdata)
+            geom.addPrimitive(lines)
+            node = GeomNode("speedline")
+            node.addGeom(geom)
+
+            np = NodePath(node)
+            np.reparentTo(self.game.render)
+            np.setPos(ox, oy, oz)
+            np.setLightOff()
+            np.setRenderModeThickness(random.uniform(1.5, 3.0))
+            np.setTransparency(TransparencyAttrib.MAlpha)
+
+            life = random.uniform(0.3, 0.6)
+            self.speed_lines.append({"node": np, "life": life, "max_life": life})
