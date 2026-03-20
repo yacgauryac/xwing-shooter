@@ -346,7 +346,7 @@ class Player:
             self.model_node.setHpr(
                 self.model_h,
                 self.current_pitch,
-                self.barrel_roll_angle,
+                -self.barrel_roll_angle,
             )
         else:
             target_roll = -move_x * self.MAX_ROLL
