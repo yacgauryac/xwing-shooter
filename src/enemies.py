@@ -104,7 +104,9 @@ class BaseEnemy:
 
     MODEL_PATH = None
     MODEL_SCALE = 0.5
-    COLOR_BOOST = Vec4(2.5, 2.5, 2.8, 1)
+    MODEL_H = 0               # Rotation horizontale du modèle
+    TARGET_SIZE = 2.0
+    COLOR_BOOST = Vec4(1.8, 1.8, 2.0, 1)
 
     # Cache de modèles par classe
     _model_cache = {}
@@ -133,7 +135,7 @@ class BaseEnemy:
         self.node.setPos(start_pos)
 
     def load_model(self):
-        """Charge le modèle .glb (caché) ou fallback procédural."""
+        """Charge le modèle .glb/.gltf (caché) ou fallback procédural."""
         class_name = type(self).__name__
 
         if self.MODEL_PATH and os.path.exists(self.MODEL_PATH) and self.game:
@@ -144,10 +146,26 @@ class BaseEnemy:
                         BaseEnemy._model_cache[class_name] = template
                         print(f"[{class_name}] Modèle 3D chargé: {self.MODEL_PATH}")
 
+                        # Log les dimensions pour calibrer le scale
+                        bounds = template.getTightBounds()
+                        if bounds:
+                            bmin, bmax = bounds
+                            size = bmax - bmin
+                            print(f"[{class_name}] Dimensions brutes: {size}")
+                            max_dim = max(size.getX(), size.getY(), size.getZ())
+                            # Calcule le scale pour que le modèle fasse TARGET_SIZE
+                            if max_dim > 0:
+                                auto_scale = self.TARGET_SIZE / max_dim
+                                print(f"[{class_name}] Auto-scale: {auto_scale:.4f} (target {self.TARGET_SIZE})")
+                                BaseEnemy._model_cache[class_name + "_scale"] = auto_scale
+
                 if class_name in BaseEnemy._model_cache:
                     model = BaseEnemy._model_cache[class_name].copyTo(NodePath(f"{class_name}_inst"))
-                    model.setScale(self.MODEL_SCALE)
-                    model.setH(90)
+
+                    # Utilise l'auto-scale si disponible, sinon MODEL_SCALE
+                    scale = BaseEnemy._model_cache.get(class_name + "_scale", self.MODEL_SCALE)
+                    model.setScale(scale)
+                    model.setH(self.MODEL_H)
                     model.setColorScale(self.COLOR_BOOST)
                     return model
             except Exception as e:
@@ -285,9 +303,9 @@ class TIEFighter(BaseEnemy):
     BOLTS_PER_SHOT = 2
     SCORE_VALUE = 100
 
-    #MODEL_PATH = "assets/models/tie_fighter/scene.gltf"
-    MODEL_PATH = "assets/models/tie.glb"
+    MODEL_PATH = "assets/models/tie_fighter/scene.gltf"
     MODEL_SCALE = 0.5
+    TARGET_SIZE = 2.0         # ~2 unités monde
 
     def create_procedural(self):
         root = NodePath("tie_fighter")
@@ -315,6 +333,7 @@ class TIEInterceptor(BaseEnemy):
 
     MODEL_PATH = "assets/models/tie_interceptor/scene.gltf"
     MODEL_SCALE = 0.5
+    TARGET_SIZE = 1.8         # Un peu plus petit que le TIE standard
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -358,6 +377,7 @@ class TIEBomber(BaseEnemy):
 
     MODEL_PATH = "assets/models/tie_bomber/scene.gltf"
     MODEL_SCALE = 0.5
+    TARGET_SIZE = 2.5         # Plus gros que les autres
 
     def create_procedural(self):
         """Bomber procédural — double cockpit."""

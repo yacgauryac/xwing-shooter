@@ -1,7 +1,6 @@
 """
-HUD — Score, vague, vie, cercle de chaleur unifié, game over.
-Le cercle de chaleur se remplit progressivement et change de couleur.
-En surchauffe il clignote et le cooldown le vide.
+HUD v2 — Elite Dangerous holographique.
+Arcs gros, fonds semi-transparents, cadres, poussé vers les bords.
 """
 
 from direct.gui.OnscreenText import OnscreenText
@@ -9,283 +8,366 @@ from direct.gui.DirectGui import DirectFrame
 from panda3d.core import (
     TextNode, Vec4,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
-    Geom, GeomTriangles, GeomNode,
+    Geom, GeomTriangles, GeomLines, GeomNode,
     NodePath, TransparencyAttrib
 )
 import math
 
 
+# Palette holographique orange/ambre
+C_MAIN = Vec4(1.0, 0.65, 0.15, 0.85)
+C_DIM = Vec4(1.0, 0.65, 0.15, 0.25)
+C_BRIGHT = Vec4(1.0, 0.8, 0.3, 1.0)
+C_DANGER = Vec4(1.0, 0.15, 0.05, 0.9)
+C_WARN = Vec4(1.0, 0.5, 0.1, 0.9)
+C_SAFE = Vec4(0.2, 0.9, 0.4, 0.85)
+C_BG = Vec4(0.05, 0.03, 0.0, 0.35)       # Fond sombre semi-transparent
+C_BG_DARK = Vec4(0.03, 0.02, 0.0, 0.5)
+
+
+def _make_arc(parent, cx, cz, radius, a0, a1, segs=32, color=C_MAIN, thick=1.5):
+    fmt = GeomVertexFormat.getV3c4()
+    vd = GeomVertexData("a", fmt, Geom.UHDynamic)
+    v = GeomVertexWriter(vd, "vertex")
+    c = GeomVertexWriter(vd, "color")
+    for i in range(segs + 1):
+        t = i / segs
+        a = a0 + t * (a1 - a0)
+        v.addData3(cx + math.cos(a) * radius, 0, cz + math.sin(a) * radius)
+        c.addData4(color)
+    lines = GeomLines(Geom.UHDynamic)
+    for i in range(segs):
+        lines.addVertices(i, i + 1)
+    g = Geom(vd)
+    g.addPrimitive(lines)
+    n = GeomNode("arc")
+    n.addGeom(g)
+    np = NodePath(n)
+    np.reparentTo(parent)
+    np.setRenderModeThickness(thick)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    return np
+
+
+def _make_filled_arc(parent, cx, cz, r_in, r_out, a0, a1, segs=32, color=C_MAIN):
+    fmt = GeomVertexFormat.getV3c4()
+    vd = GeomVertexData("fa", fmt, Geom.UHDynamic)
+    v = GeomVertexWriter(vd, "vertex")
+    c = GeomVertexWriter(vd, "color")
+    c_in = Vec4(color.getX(), color.getY(), color.getZ(), color.getW() * 0.2)
+    for i in range(segs + 1):
+        t = i / segs
+        a = a0 + t * (a1 - a0)
+        cos_a, sin_a = math.cos(a), math.sin(a)
+        v.addData3(cx + cos_a * r_in, 0, cz + sin_a * r_in)
+        c.addData4(c_in)
+        v.addData3(cx + cos_a * r_out, 0, cz + sin_a * r_out)
+        c.addData4(color)
+    tris = GeomTriangles(Geom.UHDynamic)
+    for i in range(segs):
+        b = i * 2
+        tris.addVertices(b, b+1, b+2)
+        tris.addVertices(b+1, b+3, b+2)
+    g = Geom(vd)
+    g.addPrimitive(tris)
+    n = GeomNode("fa")
+    n.addGeom(g)
+    np = NodePath(n)
+    np.reparentTo(parent)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    return np
+
+
 class HUD:
-    """Affiche les infos de jeu à l'écran."""
+    """HUD holographique v2 — Elite Dangerous style."""
 
     def __init__(self, game):
         self.game = game
-
-        # Score
-        self.score_text = OnscreenText(
-            text="Score: 0", pos=(-1.3, 0.9), scale=0.06,
-            fg=Vec4(0.2, 1.0, 0.2, 1), align=TextNode.ALeft, mayChange=True,
-        )
-
-        # Vague
-        self.wave_text = OnscreenText(
-            text="Vague 1", pos=(0, 0.9), scale=0.06,
-            fg=Vec4(1.0, 1.0, 0.2, 1), align=TextNode.ACenter, mayChange=True,
-        )
-
-        # Ennemis
-        self.enemy_text = OnscreenText(
-            text="Ennemis: 0", pos=(1.3, 0.9), scale=0.06,
-            fg=Vec4(1.0, 0.4, 0.4, 1), align=TextNode.ARight, mayChange=True,
-        )
-
-        # Vie
-        self.health_text = OnscreenText(
-            text="Blindage: 100%", pos=(-1.3, -0.85), scale=0.05,
-            fg=Vec4(0.3, 0.8, 1.0, 1), align=TextNode.ALeft, mayChange=True,
-        )
-        self.health_bar_bg = DirectFrame(
-            frameColor=Vec4(0.2, 0.2, 0.2, 0.8),
-            frameSize=(-0.3, 0.3, -0.012, 0.012), pos=(-1.0, 0, -0.88),
-        )
-        self.health_bar = DirectFrame(
-            frameColor=Vec4(0.2, 0.8, 1.0, 0.9),
-            frameSize=(-0.3, 0.3, -0.01, 0.01), pos=(-1.0, 0, -0.88),
-        )
-
-        # --- Cercle de chaleur unifié ---
-        self.heat_node = game.aspect2d.attachNewNode("heat_circle")
-        self.heat_node.setPos(0, 0, -0.5)
-        self.heat_node.setTransparency(TransparencyAttrib.MAlpha)
-        self.last_heat_pct = -1  # Force le premier rendu
         self.blink_timer = 0.0
 
-        # Texte surchauffe (au centre du cercle)
+        # =============================================
+        # BANDEAU HAUT — fond semi-transparent + infos
+        # =============================================
+        self.top_bar = DirectFrame(
+            frameColor=C_BG,
+            frameSize=(-1.4, 1.4, -0.04, 0.04),
+            pos=(0, 0, 0.92),
+            sortOrder=0,
+        )
+
+        # Ligne lumineuse en bas du bandeau
+        self.top_line = DirectFrame(
+            frameColor=Vec4(1, 0.65, 0.15, 0.4),
+            frameSize=(-1.4, 1.4, -0.001, 0.001),
+            pos=(0, 0, 0.88),
+            sortOrder=1,
+        )
+
+        # Score
+        self.score_label = OnscreenText(
+            text="SCORE", pos=(-1.3, 0.93), scale=0.025,
+            fg=C_DIM, align=TextNode.ALeft, mayChange=False,
+        )
+        self.score_text = OnscreenText(
+            text="0", pos=(-1.3, 0.895), scale=0.04,
+            fg=C_BRIGHT, align=TextNode.ALeft, mayChange=True,
+        )
+
+        # Vague (centre)
+        self.wave_text = OnscreenText(
+            text="WAVE 1", pos=(0, 0.905), scale=0.035,
+            fg=C_MAIN, align=TextNode.ACenter, mayChange=True,
+        )
+
+        # Hostiles
+        self.enemy_label = OnscreenText(
+            text="HOSTILES", pos=(1.3, 0.93), scale=0.025,
+            fg=C_DIM, align=TextNode.ARight, mayChange=False,
+        )
+        self.enemy_text = OnscreenText(
+            text="0", pos=(1.3, 0.895), scale=0.04,
+            fg=C_DANGER, align=TextNode.ARight, mayChange=True,
+        )
+
+        # =============================================
+        # SHIELD (bas gauche) — gros arc
+        # =============================================
+        self.shield_root = game.aspect2d.attachNewNode("shield_gauge")
+        self.shield_root.setPos(-1.15, 0, -0.72)
+        self.shield_root.setTransparency(TransparencyAttrib.MAlpha)
+
+        # Fond sombre circulaire
+        _make_filled_arc(self.shield_root, 0, 0, 0, 0.17,
+                        0, math.pi * 2, 32, C_BG_DARK)
+
+        # Arc de fond (contour complet)
+        _make_arc(self.shield_root, 0, 0, 0.17,
+                 math.pi * 0.65, math.pi * 2.35, 40, C_DIM, 1.5)
+
+        self.shield_arc_np = None
+
+        self.shield_text = OnscreenText(
+            text="100", pos=(-1.15, -0.73), scale=0.04,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True,
+        )
+        self.shield_pct = OnscreenText(
+            text="%", pos=(-1.09, -0.73), scale=0.025,
+            fg=C_DIM, align=TextNode.ALeft, mayChange=False,
+        )
+        self.shield_label = OnscreenText(
+            text="SHIELD", pos=(-1.15, -0.79), scale=0.022,
+            fg=C_DIM, align=TextNode.ACenter, mayChange=False,
+        )
+
+        # =============================================
+        # HEAT (bas droit) — gros arc
+        # =============================================
+        self.heat_root = game.aspect2d.attachNewNode("heat_gauge")
+        self.heat_root.setPos(1.15, 0, -0.72)
+        self.heat_root.setTransparency(TransparencyAttrib.MAlpha)
+
+        # Fond sombre
+        _make_filled_arc(self.heat_root, 0, 0, 0, 0.17,
+                        0, math.pi * 2, 32, C_BG_DARK)
+
+        # Arc de fond
+        _make_arc(self.heat_root, 0, 0, 0.17,
+                 -math.pi * 0.35, math.pi * 1.35, 40, C_DIM, 1.5)
+
+        self.heat_arc_np = None
+
+        self.heat_text = OnscreenText(
+            text="", pos=(1.15, -0.73), scale=0.035,
+            fg=C_MAIN, align=TextNode.ACenter, mayChange=True,
+        )
+        self.heat_label = OnscreenText(
+            text="HEAT", pos=(1.15, -0.79), scale=0.022,
+            fg=C_DIM, align=TextNode.ACenter, mayChange=False,
+        )
         self.overheat_text = OnscreenText(
-            text="", pos=(0, -0.53), scale=0.035,
-            fg=Vec4(1.0, 0.3, 0.1, 0.9), align=TextNode.ACenter, mayChange=True,
+            text="", pos=(1.15, -0.64), scale=0.028,
+            fg=C_DANGER, align=TextNode.ACenter, mayChange=True,
         )
 
-        # Contrôles
-        OnscreenText(
-            text="ZQSD: bouger | Espace/Clic: tirer | M: son | Echap: quitter",
-            pos=(0, -0.95), scale=0.035,
-            fg=Vec4(0.5, 0.5, 0.5, 0.6), align=TextNode.ACenter, mayChange=False,
-        )
+        # =============================================
+        # LIGNES DECO (coins + bords)
+        # =============================================
+        deco = game.aspect2d.attachNewNode("deco")
+        deco.setTransparency(TransparencyAttrib.MAlpha)
 
-        # Annonce de vague
+        # Coins — petits angles
+        for sx, sz in [(-1, 1), (1, 1), (-1, -1), (1, -1)]:
+            cx, cz = sx * 1.35, sz * 0.88
+            length = 0.08
+            col = Vec4(1, 0.65, 0.15, 0.2)
+
+            # Horizontal
+            fmt = GeomVertexFormat.getV3c4()
+            vd = GeomVertexData("d", fmt, Geom.UHStatic)
+            v = GeomVertexWriter(vd, "vertex")
+            c = GeomVertexWriter(vd, "color")
+            v.addData3(cx, 0, cz); c.addData4(col)
+            v.addData3(cx - sx * length, 0, cz); c.addData4(col)
+            v.addData3(cx, 0, cz); c.addData4(col)
+            v.addData3(cx, 0, cz - sz * length); c.addData4(col)
+            lines = GeomLines(Geom.UHStatic)
+            lines.addVertices(0, 1)
+            lines.addVertices(2, 3)
+            g = Geom(vd)
+            g.addPrimitive(lines)
+            n = GeomNode("corner")
+            n.addGeom(g)
+            np = NodePath(n)
+            np.reparentTo(deco)
+            np.setRenderModeThickness(1.0)
+
+        # Lignes horizontales subtiles milieu bas
+        for x1, x2 in [(-0.8, -0.3), (0.3, 0.8)]:
+            fmt = GeomVertexFormat.getV3c4()
+            vd = GeomVertexData("hl", fmt, Geom.UHStatic)
+            v = GeomVertexWriter(vd, "vertex")
+            c = GeomVertexWriter(vd, "color")
+            v.addData3(x1, 0, -0.88); c.addData4(Vec4(1, 0.65, 0.15, 0.12))
+            v.addData3(x2, 0, -0.88); c.addData4(Vec4(1, 0.65, 0.15, 0.12))
+            lines = GeomLines(Geom.UHStatic)
+            lines.addVertices(0, 1)
+            g = Geom(vd)
+            g.addPrimitive(lines)
+            n = GeomNode("hline")
+            n.addGeom(g)
+            np = NodePath(n)
+            np.reparentTo(deco)
+            np.setRenderModeThickness(1.0)
+
+        # =============================================
+        # ANNONCE / FLASH / GAME OVER
+        # =============================================
         self.wave_announce = OnscreenText(
-            text="", pos=(0, 0.3), scale=0.12,
-            fg=Vec4(1.0, 0.8, 0.0, 1), align=TextNode.ACenter, mayChange=True,
+            text="", pos=(0, 0.55), scale=0.06,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True,
         )
         self.announce_timer = 0.0
 
-        # Flash de dégât
         self.damage_flash = DirectFrame(
-            frameColor=Vec4(1, 0, 0, 0), frameSize=(-2, 2, -2, 2),
+            frameColor=Vec4(1, 0.3, 0, 0), frameSize=(-2, 2, -2, 2),
             pos=(0, 0, 0), sortOrder=100,
         )
         self.flash_timer = 0.0
 
-        # Game Over
         self.game_over_text = OnscreenText(
-            text="", pos=(0, 0.1), scale=0.15,
-            fg=Vec4(1.0, 0.2, 0.2, 1), align=TextNode.ACenter, mayChange=True,
+            text="", pos=(0, 0.08), scale=0.1,
+            fg=C_DANGER, align=TextNode.ACenter, mayChange=True,
         )
         self.game_over_sub = OnscreenText(
-            text="", pos=(0, -0.1), scale=0.06,
-            fg=Vec4(0.8, 0.8, 0.8, 1), align=TextNode.ACenter, mayChange=True,
+            text="", pos=(0, -0.05), scale=0.035,
+            fg=C_MAIN, align=TextNode.ACenter, mayChange=True,
         )
 
-    def _get_heat_color(self, pct):
-        """Couleur du cercle selon la chaleur : vert → jaune → orange → rouge."""
-        if pct < 0.4:
-            # Vert → jaune
-            t = pct / 0.4
-            return Vec4(t, 0.8, 0.2 * (1 - t), 0.4 + 0.2 * t)
-        elif pct < 0.75:
-            # Jaune → orange
-            t = (pct - 0.4) / 0.35
-            return Vec4(1.0, 0.8 - 0.4 * t, 0.1, 0.5 + 0.2 * t)
-        else:
-            # Orange → rouge
-            t = (pct - 0.75) / 0.25
-            return Vec4(1.0, 0.4 * (1 - t), 0.05, 0.7 + 0.2 * t)
+        # Contrôles micro
+        OnscreenText(
+            text="ZQSD:MOVE  SPACE:FIRE  DBTAP:ROLL  M:SND  F11:FS  ESC:QUIT",
+            pos=(0, -0.95), scale=0.02,
+            fg=Vec4(1, 0.65, 0.15, 0.15), align=TextNode.ACenter,
+        )
 
-    def _build_heat_circle(self, fill_pct, overheated=False):
-        """Construit le cercle de chaleur. fill_pct = 0.0 à 1.0."""
-        self.heat_node.getChildren().detach()
+    # =========================================
+    # UPDATE
+    # =========================================
 
-        radius = 0.055
-        ring_width = 0.004
-        segments = 32
-
-        # --- Contour du cercle complet (toujours visible, discret) ---
-        ring_color = Vec4(0.4, 0.4, 0.4, 0.2)
-        self._draw_ring(radius, ring_width, segments, ring_color)
-
-        if fill_pct <= 0.01:
+    def _rebuild_shield(self, pct):
+        if self.shield_arc_np:
+            self.shield_arc_np.removeNode()
+            self.shield_arc_np = None
+        if pct <= 0:
             return
 
-        # --- Arc rempli (chaleur) ---
-        fill_color = self._get_heat_color(fill_pct)
+        if pct > 0.5:
+            color = C_SAFE
+        elif pct > 0.25:
+            color = C_WARN
+        else:
+            color = C_DANGER
+
+        span = math.pi * 1.7
+        end = math.pi * 0.65 + span * pct
+        self.shield_arc_np = _make_filled_arc(
+            self.shield_root, 0, 0, 0.12, 0.17,
+            math.pi * 0.65, end, max(3, int(40 * pct)), color
+        )
+
+    def _rebuild_heat(self, pct, overheated=False):
+        if self.heat_arc_np:
+            self.heat_arc_np.removeNode()
+            self.heat_arc_np = None
+        if pct <= 0.01:
+            return
 
         if overheated:
-            # Clignotement en surchauffe
-            blink = abs(math.sin(self.blink_timer * 6.0))
-            fill_color = Vec4(1.0, 0.15, 0.05, 0.5 + 0.4 * blink)
+            blink = abs(math.sin(self.blink_timer * 6))
+            color = Vec4(1, 0.1, 0.05, 0.4 + 0.5 * blink)
+        elif pct > 0.75:
+            color = C_DANGER
+        elif pct > 0.5:
+            color = C_WARN
+        else:
+            color = C_MAIN
 
-        self._draw_arc(fill_pct, radius, segments, fill_color)
-
-        # --- Petit point au sommet du remplissage (indicateur) ---
-        if not overheated and fill_pct > 0.05:
-            angle = -math.pi / 2 + fill_pct * 2.0 * math.pi
-            dot_x = math.cos(angle) * radius
-            dot_z = math.sin(angle) * radius
-            self._draw_dot(dot_x, dot_z, 0.006, Vec4(1, 1, 1, 0.8))
-
-    def _draw_arc(self, pct, radius, segments, color):
-        """Dessine un arc rempli (camembert)."""
-        fmt = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("arc", fmt, Geom.UHDynamic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        col = GeomVertexWriter(vdata, "color")
-
-        # Centre (plus sombre)
-        vertex.addData3(0, 0, 0)
-        center_color = Vec4(color.getX() * 0.3, color.getY() * 0.3, color.getZ() * 0.3, color.getW() * 0.5)
-        col.addData4(center_color)
-
-        num_segs = max(3, int(segments * pct))
-        angle_span = pct * 2.0 * math.pi
-
-        for i in range(num_segs + 1):
-            angle = -math.pi / 2 + (i / num_segs) * angle_span
-            vertex.addData3(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-            col.addData4(color)
-
-        tris = GeomTriangles(Geom.UHDynamic)
-        for i in range(num_segs):
-            tris.addVertices(0, i + 1, i + 2)
-
-        geom = Geom(vdata)
-        geom.addPrimitive(tris)
-        node = GeomNode("arc")
-        node.addGeom(geom)
-        NodePath(node).reparentTo(self.heat_node)
-
-    def _draw_ring(self, radius, width, segments, color):
-        """Dessine un anneau fin."""
-        fmt = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("ring", fmt, Geom.UHDynamic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        col = GeomVertexWriter(vdata, "color")
-
-        r_in = radius - width
-        r_out = radius + width
-
-        for i in range(segments + 1):
-            angle = (i / segments) * 2.0 * math.pi
-            vertex.addData3(math.cos(angle) * r_in, 0, math.sin(angle) * r_in)
-            col.addData4(color)
-            vertex.addData3(math.cos(angle) * r_out, 0, math.sin(angle) * r_out)
-            col.addData4(color)
-
-        tris = GeomTriangles(Geom.UHDynamic)
-        for i in range(segments):
-            base = i * 2
-            tris.addVertices(base, base + 1, base + 2)
-            tris.addVertices(base + 1, base + 3, base + 2)
-
-        geom = Geom(vdata)
-        geom.addPrimitive(tris)
-        node = GeomNode("ring")
-        node.addGeom(geom)
-        NodePath(node).reparentTo(self.heat_node)
-
-    def _draw_dot(self, x, z, radius, color):
-        """Dessine un petit point (indicateur)."""
-        fmt = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("dot", fmt, Geom.UHDynamic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        col = GeomVertexWriter(vdata, "color")
-
-        vertex.addData3(x, 0, z)
-        col.addData4(color)
-
-        segs = 8
-        for i in range(segs + 1):
-            angle = (i / segs) * 2.0 * math.pi
-            vertex.addData3(x + math.cos(angle) * radius, 0, z + math.sin(angle) * radius)
-            col.addData4(color)
-
-        tris = GeomTriangles(Geom.UHDynamic)
-        for i in range(segs):
-            tris.addVertices(0, i + 1, i + 2)
-
-        geom = Geom(vdata)
-        geom.addPrimitive(tris)
-        node = GeomNode("dot")
-        node.addGeom(geom)
-        NodePath(node).reparentTo(self.heat_node)
+        span = math.pi * 1.7
+        end = -math.pi * 0.35 + span * pct
+        self.heat_arc_np = _make_filled_arc(
+            self.heat_root, 0, 0, 0.12, 0.17,
+            -math.pi * 0.35, end, max(3, int(40 * pct)), color
+        )
 
     def update(self, dt, score, wave, enemy_count, health, max_health,
                heat_pct=0.0, overheated=False, cooldown_pct=0.0):
-        """Met à jour l'affichage."""
-        self.score_text.setText(f"Score: {score}")
-        self.wave_text.setText(f"Vague {wave}")
-        self.enemy_text.setText(f"Ennemis: {enemy_count}")
-
-        # Vie
-        health_pct_val = max(0, health / max_health)
-        self.health_text.setText(f"Blindage: {int(health_pct_val * 100)}%")
-
-        if health_pct_val > 0.5:
-            bar_color = Vec4(0.2, 0.8, 1.0, 0.9)
-        elif health_pct_val > 0.25:
-            bar_color = Vec4(1.0, 0.8, 0.0, 0.9)
-        else:
-            bar_color = Vec4(1.0, 0.2, 0.2, 0.9)
-        self.health_bar["frameColor"] = bar_color
-        self.health_bar["frameSize"] = (-0.3, -0.3 + 0.6 * health_pct_val, -0.01, 0.01)
-
-        # --- Cercle de chaleur ---
         self.blink_timer += dt
 
-        # En surchauffe : le cercle montre le cooldown (se vide)
-        if overheated:
-            self._build_heat_circle(cooldown_pct, overheated=True)
-            self.overheat_text.setText("SURCHAUFFE")
-        else:
-            # Normal : le cercle montre la chaleur (se remplit)
-            # Optimisation : ne redessine que si le % a changé significativement
-            rounded = round(heat_pct, 2)
-            if rounded != self.last_heat_pct:
-                self._build_heat_circle(heat_pct, overheated=False)
-                self.last_heat_pct = rounded
-            self.overheat_text.setText("")
+        # Textes
+        self.score_text.setText(f"{score}")
+        self.wave_text.setText(f"WAVE {wave}")
+        self.enemy_text.setText(f"{enemy_count}")
 
-        # Annonce de vague
+        # Shield
+        hp = max(0, health / max_health)
+        self.shield_text.setText(f"{int(hp * 100)}")
+        self._rebuild_shield(hp)
+
+        # Heat
+        disp = cooldown_pct if overheated else heat_pct
+        self._rebuild_heat(disp, overheated)
+
+        if overheated:
+            self.overheat_text.setText("OVERHEAT")
+            self.heat_text.setText("")
+        else:
+            self.overheat_text.setText("")
+            self.heat_text.setText(f"{int(heat_pct * 100)}" if heat_pct > 0.01 else "")
+
+        # Vague
         if self.announce_timer > 0:
             self.announce_timer -= dt
+            alpha = min(1.0, self.announce_timer / 0.5)
+            self.wave_announce.setFg(Vec4(C_BRIGHT.getX(), C_BRIGHT.getY(),
+                                         C_BRIGHT.getZ(), alpha))
             if self.announce_timer <= 0:
                 self.wave_announce.setText("")
 
-        # Flash de dégât
+        # Flash
         if self.flash_timer > 0:
             self.flash_timer -= dt
-            alpha = max(0, self.flash_timer / 0.3) * 0.3
-            self.damage_flash["frameColor"] = Vec4(1, 0, 0, alpha)
+            a = max(0, self.flash_timer / 0.3) * 0.2
+            self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, a)
             if self.flash_timer <= 0:
-                self.damage_flash["frameColor"] = Vec4(1, 0, 0, 0)
+                self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, 0)
 
     def announce_wave(self, wave_num):
-        self.wave_announce.setText(f"--- VAGUE {wave_num} ---")
+        self.wave_announce.setText(f"WAVE {wave_num} INCOMING")
         self.announce_timer = 2.5
 
     def show_damage_flash(self):
         self.flash_timer = 0.3
 
     def show_game_over(self, score):
-        self.game_over_text.setText("GAME OVER")
-        self.game_over_sub.setText(f"Score final: {score}\n\nAppuie sur R pour recommencer")
+        self.game_over_text.setText("DESTROYED")
+        self.game_over_sub.setText(f"Final score: {score}  |  Press R to restart")
