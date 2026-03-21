@@ -35,21 +35,35 @@ class AsteroidModelCache:
         try:
             model = game.loader.loadModel(cls.PACK_PATH)
             if model:
-                # Extraire les enfants (chaque astéroïde)
-                children = model.getChildren()
+                # Structure: root → parent → 8 astéroïdes (Object_2..Object_9)
+                # On descend jusqu'aux enfants qui ont des meshes
+                parent = model
+                # Descendre tant qu'il n'y a qu'un seul enfant (nodes conteneurs)
+                while True:
+                    children = parent.getChildren()
+                    if len(children) == 1 and not children[0].node().isGeomNode():
+                        parent = children[0]
+                    else:
+                        break
+
+                children = parent.getChildren()
                 for child in children:
-                    # Clone le template
                     template = NodePath(f"asteroid_tpl_{len(cls._templates)}")
                     child.copyTo(template)
+
+                    # Recentre le modèle sur son propre centre
+                    bounds = template.getTightBounds()
+                    if bounds:
+                        bmin, bmax = bounds
+                        center = (bmin + bmax) / 2
+                        # Décale tous les enfants pour centrer à l'origine
+                        for c in template.getChildren():
+                            c.setPos(c.getPos() - center)
+                        template.setPos(0, 0, 0)
+
                     cls._templates.append(template)
 
                 print(f"[Asteroids] Pack chargé: {len(cls._templates)} astéroïdes")
-
-                # Si le modèle n'a qu'un seul enfant (pas de sous-objets),
-                # on utilise le modèle entier
-                if len(cls._templates) == 0:
-                    cls._templates.append(model)
-                    print(f"[Asteroids] Modèle unique utilisé")
         except Exception as e:
             print(f"[Asteroids] Erreur chargement: {e}")
 
