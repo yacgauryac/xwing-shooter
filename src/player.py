@@ -111,6 +111,11 @@ class Player:
         game.camera.setPos(0, -4, 3.0)
         game.camera.lookAt(0, 22, 0)
 
+        # Shield flash effect
+        self.shield_flash_timer = 0.0
+        self.shield_node = None
+        self.color_boost = Vec4(3.0, 3.0, 3.0, 1)  # Normal colorScale du modèle
+
     def load_model(self):
         """Charge le modèle .glb/.gltf, auto-scale à TARGET_SIZE, fallback procédural."""
         if os.path.exists(self.MODEL_PATH):
@@ -269,6 +274,21 @@ class Player:
         return NodePath(node)
 
     def update(self, dt):
+        # --- Shield flash (colore le vaisseau en bleu) ---
+        if self.shield_flash_timer > 0:
+            self.shield_flash_timer -= dt
+            progress = self.shield_flash_timer / 0.5
+            # Le vaisseau flashe bleu/blanc puis revient à normal
+            blue = progress * 3.0
+            self.model_node.setColorScale(
+                1.0 + blue * 0.3,
+                1.0 + blue * 0.5,
+                1.0 + blue * 2.0,
+                1.0
+            )
+            if self.shield_flash_timer <= 0:
+                self.model_node.setColorScale(self.color_boost)
+
         # --- Cooldown barrel roll ---
         if self.barrel_cooldown > 0:
             self.barrel_cooldown -= dt
@@ -605,3 +625,7 @@ class Player:
 
             life = random.uniform(0.4, 0.8)
             self.speed_lines.append({"node": np, "life": life, "max_life": life})
+
+    def show_shield_hit(self):
+        """Flash bleu sur le vaisseau quand touché."""
+        self.shield_flash_timer = 0.5

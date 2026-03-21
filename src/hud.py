@@ -17,11 +17,11 @@ import math
 import os
 
 
-C_ORANGE = Vec4(0.50, 0.28, 0.12, 0.90)
-C_BRIGHT = Vec4(0.60, 0.35, 0.15, 0.90)
-C_DANGER = Vec4(0.8, 0.12, 0.05, 0.90)
-C_WARN = Vec4(0.7, 0.35, 0.1, 0.90)
-C_BAR_BG = Vec4(0.06, 0.04, 0.01, 0.25)
+C_ORANGE = Vec4(0.9, 0.55, 0.15, 1.0)
+C_BRIGHT = Vec4(1.0, 0.7, 0.2, 1.0)
+C_DANGER = Vec4(1.0, 0.2, 0.05, 1.0)
+C_WARN = Vec4(1.0, 0.5, 0.1, 1.0)
+C_BAR_BG = Vec4(0.1, 0.06, 0.02, 0.4)
 
 OVERLAY_PATH = "assets/hud_overlay.png"
 
@@ -132,7 +132,7 @@ class HUD:
         # ===== WAVE (haut gauche) =====
         self.wave_label = OnscreenText(
             text="WAVE", pos=(-1.2, 0.90), scale=0.028,
-            fg=Vec4(0.50, 0.28, 0.12, 0.65), align=TextNode.ALeft,
+            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ALeft,
             mayChange=False, sort=50,
         )
         self.wave_text = OnscreenText(
@@ -145,7 +145,7 @@ class HUD:
         # ===== HOSTILES (haut droit) =====
         self.hostiles_label = OnscreenText(
             text="HOSTILES", pos=(1.2, 0.90), scale=0.028,
-            fg=Vec4(0.50, 0.28, 0.12, 0.65), align=TextNode.ARight,
+            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ARight,
             mayChange=False, sort=50,
         )
         self.hostiles_text = OnscreenText(
@@ -163,7 +163,7 @@ class HUD:
         # Shield — bas gauche, ENTRE les lignes du cadre
         self.shield_label = OnscreenText(
             text="SHIELD", pos=(-0.75, -0.90), scale=0.025,
-            fg=Vec4(0.50, 0.28, 0.12, 0.65), align=TextNode.ALeft,
+            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ALeft,
             mayChange=False, sort=50,
         )
         self.shield_bar = _make_bar(self.bar_root, -0.75, -0.95, 0.5, 0.025, segments=12)
@@ -171,13 +171,25 @@ class HUD:
         # Laser Energy — bas droit, label en haut à droite de la barre
         self.laser_label = OnscreenText(
             text="LASER", pos=(0.76, -0.90), scale=0.025,
-            fg=Vec4(0.55, 0.30, 0.12, 0.6), align=TextNode.ARight,
+            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ARight,
             mayChange=False, sort=50,
         )
         self.heat_bar = _make_bar(self.bar_root, 0.25, -0.95, 0.5, 0.025, segments=12)
         self.overheat_text = OnscreenText(
             text="", pos=(0.50, -0.90), scale=0.022,
             fg=C_DANGER, align=TextNode.ACenter, mayChange=True, sort=50,
+        )
+
+        # Torpedo counter — bas centre
+        self.torpedo_label = OnscreenText(
+            text="TORPEDOES", pos=(0, -0.88), scale=0.025,
+            fg=Vec4(0.9, 0.55, 0.15, 0.8), align=TextNode.ACenter,
+            mayChange=False, sort=50,
+        )
+        self.torpedo_count_text = OnscreenText(
+            text="3", pos=(0, -0.94), scale=0.04,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=50,
+            shadow=(0, 0, 0, 0.8),
         )
 
         # ===== ANNONCE / FLASH / GAME OVER =====
@@ -210,13 +222,24 @@ class HUD:
         self.attitude_root.setTransparency(TransparencyAttrib.MAlpha)
         self.attitude_lines = None
 
+        # Pickup feedback
+        self.pickup_text = OnscreenText(
+            text="", pos=(0, -0.15), scale=0.04,
+            fg=Vec4(1, 1, 1, 1), align=TextNode.ACenter,
+            mayChange=True, sort=50, shadow=(0, 0, 0, 0.6),
+        )
+        self.pickup_timer = 0.0
+
     def update(self, dt, score, wave, enemy_count, health, max_health,
                heat_pct=0.0, overheated=False, cooldown_pct=0.0,
-               roll=0.0, pitch=0.0):
+               roll=0.0, pitch=0.0, torpedo_count=0):
         self.blink_timer += dt
 
         # Score
         self.score_text.setText(f"{score:,}".replace(",", " "))
+
+        # Torpilles
+        self.torpedo_count_text.setText(f"{torpedo_count}")
 
         # Wave + hostiles
         self.wave_text.setText(f"{wave}")
@@ -263,6 +286,15 @@ class HUD:
             if self.flash_timer <= 0:
                 self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, 0)
 
+        # Pickup text fade
+        if self.pickup_timer > 0:
+            self.pickup_timer -= dt
+            progress = self.pickup_timer / 1.5
+            self.pickup_text.setFg(Vec4(1, 1, 1, progress))
+            self.pickup_text.setScale(0.04 + (1.0 - progress) * 0.005)
+            if self.pickup_timer <= 0:
+                self.pickup_text.setText("")
+
     def _update_attitude(self, roll, pitch):
         if self.attitude_lines:
             self.attitude_lines.removeNode()
@@ -308,6 +340,13 @@ class HUD:
     def show_damage_flash(self):
         self.flash_timer = 0.3
 
+    def show_pickup(self, text):
+        """Affiche un texte de pickup qui fade."""
+        self.pickup_text.setText(text)
+        self.pickup_text.setFg(Vec4(1, 1, 1, 1))
+        self.pickup_text.setScale(0.05)
+        self.pickup_timer = 1.5
+
     def show_game_over(self, score):
         self.game_over_text.setText("DESTROYED")
         self.game_over_sub.setText(f"Final score: {score:,}".replace(",", " "))
@@ -348,7 +387,7 @@ class HUD:
         self.lb_controls = OnscreenText(
             text="TYPE 3 LETTERS  |  BACKSPACE TO DELETE  |  ENTER TO VALIDATE",
             pos=(0, 0.18), scale=0.022,
-            fg=Vec4(0.50, 0.28, 0.12, 0.5), align=TextNode.ACenter,
+            fg=Vec4(0.9, 0.55, 0.15, 0.6), align=TextNode.ACenter,
             mayChange=False, sort=60,
         )
 
@@ -401,7 +440,7 @@ class HUD:
         header = OnscreenText(
             text="  #   NAME   SCORE    WAVE  KILLS   DATE",
             pos=(0, 0.55), scale=0.025,
-            fg=Vec4(0.50, 0.28, 0.12, 0.5), align=TextNode.ACenter,
+            fg=Vec4(0.9, 0.55, 0.15, 0.6), align=TextNode.ACenter,
             mayChange=False, sort=60,
         )
         self.lb_elements.append(header)
@@ -428,7 +467,7 @@ class HUD:
 
         restart = OnscreenText(
             text="PRESS R TO PLAY AGAIN", pos=(0, -0.35), scale=0.03,
-            fg=Vec4(0.50, 0.28, 0.12, 0.5), align=TextNode.ACenter,
+            fg=Vec4(0.9, 0.55, 0.15, 0.6), align=TextNode.ACenter,
             mayChange=False, sort=60,
         )
         self.lb_elements.append(restart)
