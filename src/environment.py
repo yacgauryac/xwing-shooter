@@ -171,7 +171,7 @@ class DistantPlanet:
     def __init__(self, parent, pos, size, color):
         self.alive = True
         self.initial_scale = 1.0
-        self.grow_rate = 0.012
+        self.grow_rate = 0.003  # Très lent
 
         self.node = self._make_sphere(size, color)
         self.node.reparentTo(parent)
@@ -252,6 +252,8 @@ class StarDestroyerDecor:
                     self.node.setH(90)
                     self.node.setColorScale(Vec4(1.5, 1.5, 1.8, 1))
                     self.node.setLightOff()
+                    # Rendu en arrière-plan (derrière les planètes)
+                    self.node.setBin("background", 10)
                     print(f"[StarDestroyer] Modèle chargé, scale={scale}")
             except Exception as e:
                 print(f"[StarDestroyer] Erreur: {e}")
@@ -348,9 +350,9 @@ class Environment:
         self.nebula_timer = 15.0
         self.debris_timer = 4.0
 
-        # 2 planètes fixes + Star Destroyer en fond
+        # 2 planètes fixes
         self._spawn_fixed_planets()
-        self.star_destroyer = StarDestroyerDecor(game, Point3(20, 600, -5), scale=0.03)
+        self.star_destroyer = None
 
         self.nebula_colors = [
             Vec4(0.6, 0.2, 0.8, 1),
@@ -442,19 +444,19 @@ class Environment:
         self.asteroids.append(asteroid)
 
     def _spawn_fixed_planets(self):
-        """Crée 2 planètes procédurales fixes."""
+        """Crée 2 planètes procédurales fixes — visibles dès le départ."""
         p1 = DistantPlanet(
             self.game.render,
-            Point3(-25, 400, 15),
-            size=15,
+            Point3(-20, 150, 12),
+            size=18,
             color=Vec4(0.6, 0.35, 0.2, 1),
         )
         self.planets.append(p1)
 
         p2 = DistantPlanet(
             self.game.render,
-            Point3(30, 500, -10),
-            size=10,
+            Point3(25, 200, -8),
+            size=12,
             color=Vec4(0.25, 0.4, 0.65, 1),
         )
         self.planets.append(p2)
