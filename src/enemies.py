@@ -21,9 +21,9 @@ import os
 class EnemyBolt:
     """Un tir laser ennemi (vert)."""
 
-    SPEED = 45.0
-    DAMAGE = 1
-    HIT_RADIUS = 1.5
+    SPEED = 65.0
+    DAMAGE = 2
+    HIT_RADIUS = 1.8
 
     def __init__(self, parent_node, start_pos, direction):
         self.alive = True
@@ -261,8 +261,8 @@ class BaseEnemy:
         if dist < self.FIRE_RANGE and my_pos.getY() > player_pos.getY():
             self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
             direction = player_pos - my_pos
-            direction.setX(direction.getX() + random.uniform(-2.0, 2.0))
-            direction.setZ(direction.getZ() + random.uniform(-1.5, 1.5))
+            direction.setX(direction.getX() + random.uniform(-1.2, 1.2))
+            direction.setZ(direction.getZ() + random.uniform(-0.8, 0.8))
             direction.normalize()
 
             results = []
@@ -316,8 +316,8 @@ class TIEFighter(BaseEnemy):
     CHARGE_DISTANCE = 100.0   # Accélère de loin
     HP = 2
     HIT_RADIUS = 1.8
-    FIRE_COOLDOWN_MIN = 2.0
-    FIRE_COOLDOWN_MAX = 4.0
+    FIRE_COOLDOWN_MIN = 1.2
+    FIRE_COOLDOWN_MAX = 3.0
     BOLTS_PER_SHOT = 2
     SCORE_VALUE = 100
 
@@ -344,8 +344,8 @@ class TIEInterceptor(BaseEnemy):
     CHARGE_DISTANCE = 110.0   # Fonce de très loin
     HP = 1
     HIT_RADIUS = 1.5
-    FIRE_COOLDOWN_MIN = 1.0
-    FIRE_COOLDOWN_MAX = 2.5
+    FIRE_COOLDOWN_MIN = 0.6
+    FIRE_COOLDOWN_MAX = 1.5
     BOLTS_PER_SHOT = 1
     SCORE_VALUE = 150
 
@@ -592,6 +592,7 @@ class EnemySpawner:
 
     def check_player_hit(self, player_pos):
         damage = 0
+        # Tirs ennemis → joueur
         for bolt in self.enemy_bolts:
             if not bolt.alive:
                 continue
@@ -599,6 +600,21 @@ class EnemySpawner:
             if dist < bolt.HIT_RADIUS:
                 damage += bolt.DAMAGE
                 bolt.destroy()
+
+        # Collision corps-à-corps TIE → joueur
+        for enemy in self.enemies:
+            if not enemy.alive:
+                continue
+            epos = enemy.get_pos()
+            if epos is None:
+                continue
+            dist = (epos - player_pos).length()
+            if dist < enemy.HIT_RADIUS + 1.0:  # Hitbox combinée
+                damage += 3  # Gros dégâts collision
+                enemy.hp = 0
+                enemy.destroy()
+                self.last_kill_pos = Vec3(epos)
+
         return damage
 
     def check_collisions(self, laser_system):
@@ -613,7 +629,7 @@ class EnemySpawner:
                 if enemy_pos is None:
                     continue
                 dist = (bolt_pos - enemy_pos).length()
-                if dist < enemy.HIT_RADIUS:
+                if dist < enemy.HIT_RADIUS + 0.5:  # Plus généreux
                     destroyed = enemy.hit(bolt.DAMAGE)
                     bolt.destroy()
                     if destroyed:
