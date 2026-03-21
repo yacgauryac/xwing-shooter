@@ -172,47 +172,52 @@ class LaserSystem:
     def stop_fire(self):
         self.firing = False
 
-    def update(self, dt, player_node):
+    def update(self, dt, player_node, force_active=False):
         self.fire_timer -= dt
 
-        # Gestion surchauffe
-        if self.overheated:
-            # En cooldown forcé
-            self.cooldown_timer -= dt
-            if self.cooldown_timer <= 0:
-                self.overheated = False
-                self.heat = 0.0
-                self.cooldown_timer = 0.0
+        # Force active → pas de surchauffe
+        if force_active:
+            self.heat = max(0, self.heat - self.HEAT_DECAY * 3 * dt)
+            self.overheated = False
+            self.cooldown_timer = 0
+
+            if self.firing and self.fire_timer <= 0:
+                self.fire_pair(player_node, force_active=True)
+                self.fire_timer = self.FIRE_RATE * 0.7  # Tir plus rapide
         else:
-            # Refroidissement naturel quand on tire pas
-            if not self.firing:
-                self.heat = max(0, self.heat - self.HEAT_DECAY * dt)
+            # Gestion surchauffe normale
+            if self.overheated:
+                self.cooldown_timer -= dt
+                if self.cooldown_timer <= 0:
+                    self.overheated = False
+                    self.heat = 0.0
+                    self.cooldown_timer = 0.0
             else:
-                # Refroidissement lent même en tirant
-                self.heat = max(0, self.heat - self.HEAT_DECAY * 0.3 * dt)
+                if not self.firing:
+                    self.heat = max(0, self.heat - self.HEAT_DECAY * dt)
+                else:
+                    self.heat = max(0, self.heat - self.HEAT_DECAY * 0.3 * dt)
 
-            # Tir
-            if self.firing and self.fire_timer <= 0 and not self.overheated:
-                self.fire_pair(player_node)
-                self.fire_timer = self.FIRE_RATE
-                self.heat += self.HEAT_PER_SHOT
+                if self.firing and self.fire_timer <= 0 and not self.overheated:
+                    self.fire_pair(player_node)
+                    self.fire_timer = self.FIRE_RATE
+                    self.heat += self.HEAT_PER_SHOT
 
-                # Check surchauffe
-                if self.heat >= self.OVERHEAT_THRESHOLD:
-                    self.overheated = True
-                    self.cooldown_timer = self.COOLDOWN_TIME
-                    self.cooldown_total = self.COOLDOWN_TIME
+                    if self.heat >= self.OVERHEAT_THRESHOLD:
+                        self.overheated = True
+                        self.cooldown_timer = self.COOLDOWN_TIME
+                        self.cooldown_total = self.COOLDOWN_TIME
 
         # Update bolts
         for bolt in self.bolts:
             bolt.update(dt)
         self.bolts = [b for b in self.bolts if b.alive]
 
-    def find_nearest_enemy(self, from_pos):
+    def find_nearest_enemy(self, from_pos, max_range=None):
         if not self.enemies_ref:
             return None
         nearest = None
-        nearest_dist = self.AUTO_AIM_RANGE
+        nearest_dist = max_range if max_range else self.AUTO_AIM_RANGE
         for enemy in self.enemies_ref.enemies:
             if not enemy.alive:
                 continue
@@ -225,11 +230,11 @@ class LaserSystem:
                 nearest = enemy
         return nearest
 
-    def fire_pair(self, player_node):
+    def fire_pair(self, player_node, force_active=False):
         """Tire 2 bolts simultanés depuis la paire de canons active."""
         pair = self.CANNON_PAIRS[self.pair_index]
 
-        # Couleurs légèrement alternées (subtil)
+        # Couleurs alternées
         if self.pair_index == 0:
             c_back = Vec4(1.0, 0.15, 0.0, 1)
             c_front = Vec4(1.0, 0.6, 0.35, 1)
@@ -237,22 +242,30 @@ class LaserSystem:
             c_back = Vec4(1.0, 0.25, 0.0, 1)
             c_front = Vec4(1.0, 0.7, 0.4, 1)
 
+        # Force → auto-aim boosté, range étendu
+        aim_strength = 0.85 if force_active else self.AUTO_AIM_STRENGTH
+        aim_range = 200.0 if force_active else self.AUTO_AIM_RANGE
+
         for offset in pair:
             world_pos = self.game.render.getRelativePoint(player_node, offset)
 
             base_dir = Vec3(0, 1, 0)
-            nearest = self.find_nearest_enemy(world_pos)
+            nearest = self.find_nearest_enemy(world_pos, max_range=aim_range)
             if nearest:
                 epos = nearest.get_pos()
                 if epos:
                     to_enemy = epos - world_pos
                     to_enemy.normalize()
-                    aim_dir = base_dir * (1 - self.AUTO_AIM_STRENGTH) + to_enemy * self.AUTO_AIM_STRENGTH
+                    aim_dir = base_dir * (1 - aim_strength) + to_enemy * aim_strength
                     aim_dir.normalize()
                     base_dir = aim_dir
 
             bolt = LaserBolt(self.game.render, world_pos, base_dir,
                             color_back=c_back, color_front=c_front)
+            # Force → bolts plus gros et lumineux
+            if force_active:
+                bolt.node.setScale(1.5)
+                bolt.node.setColorScale(1.5, 1.5, 1.5, 1)
             self.bolts.append(bolt)
 
         self.pair_index = (self.pair_index + 1) % len(self.CANNON_PAIRS)

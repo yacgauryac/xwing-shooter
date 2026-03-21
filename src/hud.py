@@ -238,9 +238,30 @@ class HUD:
         )
         self.pickup_timer = 0.0
 
+        # Force gauge — bas centre, sous les torpilles
+        self.force_label = OnscreenText(
+            text="FORCE", pos=(0, -0.72), scale=0.02,
+            fg=Vec4(0.4, 0.5, 0.9, 0.6), align=TextNode.ACenter,
+            mayChange=False, sort=50,
+        )
+        self.force_bar = _make_bar(self.bar_root, -0.15, -0.77, 0.3, 0.02, segments=10)
+        self.force_ready_text = OnscreenText(
+            text="", pos=(0, -0.68), scale=0.025,
+            fg=Vec4(0.5, 0.6, 1.0, 1.0), align=TextNode.ACenter,
+            mayChange=True, sort=50,
+        )
+
+        # Force overlay (bleu semi-transparent)
+        self.force_overlay = DirectFrame(
+            frameColor=Vec4(0.1, 0.15, 0.4, 0),
+            frameSize=(-2, 2, -2, 2),
+            pos=(0, 0, 0), sortOrder=98,
+        )
+
     def update(self, dt, score, wave, enemy_count, health, max_health,
                heat_pct=0.0, overheated=False, cooldown_pct=0.0,
-               roll=0.0, pitch=0.0, torpedo_count=0):
+               roll=0.0, pitch=0.0, torpedo_count=0,
+               force_pct=0.0, force_active=False):
         self.blink_timer += dt
 
         # Score
@@ -248,6 +269,24 @@ class HUD:
 
         # Torpilles
         self.torpedo_count_text.setText(f"{torpedo_count}")
+
+        # Force gauge
+        force_color = Vec4(0.4, 0.5, 1.0, 0.8)
+        if force_pct >= 1.0 and not force_active:
+            # Prêt — pulse
+            pulse = 0.7 + 0.3 * abs(math.sin(self.blink_timer * 4))
+            force_color = Vec4(0.5 * pulse, 0.6 * pulse, 1.0 * pulse, 1.0)
+            self.force_ready_text.setText("USE THE FORCE")
+            self.force_ready_text.setFg(Vec4(0.5, 0.6, 1.0, pulse))
+        else:
+            self.force_ready_text.setText("")
+        _update_bar(self.force_bar, force_pct, force_color)
+
+        # Force overlay bleu
+        if force_active:
+            self.force_overlay["frameColor"] = Vec4(0.08, 0.1, 0.3, 0.15)
+        else:
+            self.force_overlay["frameColor"] = Vec4(0.1, 0.15, 0.4, 0)
 
         # Wave + hostiles
         self.wave_text.setText(f"{wave}")
