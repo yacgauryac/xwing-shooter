@@ -1,21 +1,19 @@
 """
-Explosions — Effets visuels quand un TIE est détruit.
-Particules procédurales (pas besoin de fichier externe).
+Explosions — Boule de feu + débris solides + score popup.
 """
 
 from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
-    Geom, GeomPoints, GeomNode,
-    NodePath
+    Geom, GeomPoints, GeomTriangles, GeomNode,
+    NodePath, TextNode
 )
+from direct.gui.OnscreenText import OnscreenText
 import random
 import math
 
 
 class Particle:
-    """Une seule particule d'explosion."""
-
     def __init__(self, pos, velocity, color, lifetime):
         self.pos = Vec3(pos)
         self.velocity = Vec3(velocity)
@@ -25,81 +23,163 @@ class Particle:
         self.alive = True
 
 
-class Explosion:
-    """Une explosion composée de plusieurs particules."""
+class DebrisChunk:
+    """Morceau de TIE solide qui vole."""
 
-    NUM_PARTICLES = 20
-    BASE_SPEED = 8.0
-    LIFETIME = 0.8
+    def __init__(self, game, position):
+        self.alive = True
+        self.lifetime = random.uniform(0.8, 1.5)
+        self.max_lifetime = self.lifetime
+
+        speed = random.uniform(8, 20)
+        theta = random.uniform(0, math.pi * 2)
+        phi = random.uniform(0, math.pi)
+        self.velocity = Vec3(
+            math.sin(phi) * math.cos(theta) * speed,
+            math.sin(phi) * math.sin(theta) * speed,
+            math.cos(phi) * speed,
+        )
+        self.rot_speed = Vec3(
+            random.uniform(-200, 200),
+            random.uniform(-200, 200),
+            random.uniform(-200, 200),
+        )
+
+        self.node = self._make_chunk()
+        self.node.reparentTo(game.render)
+        self.node.setPos(position)
+        self.node.setLightOff()
+
+    def _make_chunk(self):
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("chunk", fmt, Geom.UHStatic)
+        v = GeomVertexWriter(vdata, "vertex")
+        c = GeomVertexWriter(vdata, "color")
+
+        s = random.uniform(0.1, 0.3)
+        gray = random.uniform(0.3, 0.6)
+        col = Vec4(gray, gray, gray * 0.9, 1)
+
+        v.addData3(-s, 0, -s * 0.5); c.addData4(col)
+        v.addData3(s, 0, -s * 0.3); c.addData4(col)
+        v.addData3(0, 0, s * 0.6); c.addData4(col)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        tris.addVertices(0, 1, 2)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        node = GeomNode("chunk")
+        node.addGeom(geom)
+        return NodePath(node)
+
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.lifetime -= dt
+        if self.lifetime <= 0:
+            self.destroy()
+            return
+
+        self.node.setPos(self.node.getPos() + self.velocity * dt)
+        self.velocity *= (1.0 - 1.5 * dt)
+
+        h, p, r = self.node.getHpr()
+        self.node.setHpr(
+            h + self.rot_speed.getX() * dt,
+            p + self.rot_speed.getY() * dt,
+            r + self.rot_speed.getZ() * dt,
+        )
+        alpha = self.lifetime / self.max_lifetime
+        self.node.setColorScale(1, 1, 1, alpha)
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+class Explosion:
+    """Boule de feu + fumée + débris solides."""
 
     def __init__(self, game, position):
         self.game = game
         self.alive = True
         self.particles = []
+        self.debris = []
         self.timer = 0.0
 
-        # Crée les particules
-        for _ in range(self.NUM_PARTICLES):
-            # Direction aléatoire (sphère)
+        # Couche interne (blanc/jaune, flash rapide)
+        for _ in range(15):
+            speed = random.uniform(3, 8)
             theta = random.uniform(0, math.pi * 2)
             phi = random.uniform(0, math.pi)
-            speed = random.uniform(self.BASE_SPEED * 0.3, self.BASE_SPEED)
-
             vel = Vec3(
                 math.sin(phi) * math.cos(theta) * speed,
                 math.sin(phi) * math.sin(theta) * speed,
                 math.cos(phi) * speed,
             )
+            color = Vec4(1.0, random.uniform(0.7, 1.0), random.uniform(0.3, 0.6), 1.0)
+            self.particles.append(Particle(position, vel, color, random.uniform(0.2, 0.4)))
 
-            # Couleur : mix orange/jaune/rouge
-            r = random.uniform(0.8, 1.0)
-            g = random.uniform(0.2, 0.7)
-            b = random.uniform(0.0, 0.15)
-            color = Vec4(r, g, b, 1.0)
+        # Couche externe (orange/rouge)
+        for _ in range(20):
+            speed = random.uniform(5, 12)
+            theta = random.uniform(0, math.pi * 2)
+            phi = random.uniform(0, math.pi)
+            vel = Vec3(
+                math.sin(phi) * math.cos(theta) * speed,
+                math.sin(phi) * math.sin(theta) * speed,
+                math.cos(phi) * speed,
+            )
+            color = Vec4(random.uniform(0.9, 1.0), random.uniform(0.2, 0.5), 0.0, 1.0)
+            self.particles.append(Particle(position, vel, color, random.uniform(0.3, 0.7)))
 
-            lifetime = random.uniform(self.LIFETIME * 0.5, self.LIFETIME)
+        # Fumée grise
+        for _ in range(10):
+            speed = random.uniform(2, 5)
+            theta = random.uniform(0, math.pi * 2)
+            phi = random.uniform(0, math.pi)
+            vel = Vec3(
+                math.sin(phi) * math.cos(theta) * speed,
+                math.sin(phi) * math.sin(theta) * speed,
+                math.cos(phi) * speed,
+            )
+            gray = random.uniform(0.15, 0.3)
+            self.particles.append(Particle(position, vel, Vec4(gray, gray, gray, 0.6),
+                                          random.uniform(0.5, 1.0)))
 
-            self.particles.append(Particle(position, vel, color, lifetime))
+        # Débris solides
+        for _ in range(6):
+            self.debris.append(DebrisChunk(game, position))
 
-        # Node pour le rendu
         self.node = NodePath("explosion")
         self.node.reparentTo(game.render)
         self.node.setLightOff()
-
-        # Crée la géométrie initiale
         self._build_geom()
 
     def _build_geom(self):
-        """Construit la géométrie des particules."""
         fmt = GeomVertexFormat.getV3c4()
         self.vdata = GeomVertexData("explosion", fmt, Geom.UHDynamic)
         self.vdata.setNumRows(len(self.particles))
-
         vertex = GeomVertexWriter(self.vdata, "vertex")
         color = GeomVertexWriter(self.vdata, "color")
-
         for p in self.particles:
             vertex.addData3(p.pos)
             color.addData4(p.color)
-
         points = GeomPoints(Geom.UHDynamic)
         points.addConsecutiveVertices(0, len(self.particles))
-
         geom = Geom(self.vdata)
         geom.addPrimitive(points)
-
         geom_node = GeomNode("explosion_geom")
         geom_node.addGeom(geom)
-
         np = NodePath(geom_node)
         np.reparentTo(self.node)
-        np.setRenderModeThickness(4)
+        np.setRenderModeThickness(5)
 
     def update(self, dt):
-        """Met à jour les particules."""
         if not self.alive:
             return
-
         self.timer += dt
         any_alive = False
 
@@ -111,41 +191,40 @@ class Explosion:
                 vertex.addData3(0, 0, 0)
                 color.addData4(0, 0, 0, 0)
                 continue
-
             p.lifetime -= dt
             if p.lifetime <= 0:
                 p.alive = False
                 vertex.addData3(0, 0, 0)
                 color.addData4(0, 0, 0, 0)
                 continue
-
             any_alive = True
-
-            # Déplace la particule
             p.pos += p.velocity * dt
+            p.velocity *= (1.0 - 3.0 * dt)
 
-            # Ralentit (friction)
-            p.velocity *= (1.0 - 2.0 * dt)
-
-            # Fade out
-            alpha = p.lifetime / p.max_lifetime
-            faded = Vec4(p.color.getX(), p.color.getY(), p.color.getZ(), alpha)
-
+            # Jaune → orange → rouge → noir
+            progress = 1.0 - (p.lifetime / p.max_lifetime)
+            alpha = (1.0 - progress) ** 0.5
+            r = p.color.getX()
+            g = p.color.getY() * (1.0 - progress * 0.7)
+            b = p.color.getZ() * (1.0 - progress)
             vertex.addData3(p.pos)
-            color.addData4(faded)
+            color.addData4(Vec4(r, g, b, alpha))
 
-        if not any_alive:
+        for chunk in self.debris:
+            chunk.update(dt)
+        self.debris = [d for d in self.debris if d.alive]
+
+        if not any_alive and len(self.debris) == 0:
             self.destroy()
 
     def destroy(self):
-        """Supprime l'explosion."""
         self.alive = False
         if not self.node.isEmpty():
             self.node.removeNode()
 
 
 class ScorePopup:
-    """Points qui s'affichent et montent en fadant."""
+    """Points +100 qui montent et fade."""
 
     def __init__(self, game, position, score):
         self.alive = True
@@ -154,16 +233,10 @@ class ScorePopup:
         self.game = game
 
         pos2d = self._world_to_screen(position)
-        from direct.gui.OnscreenText import OnscreenText
-        from panda3d.core import TextNode
         self.text = OnscreenText(
-            text=f"+{score}",
-            pos=pos2d,
-            scale=0.05,
+            text=f"+{score}", pos=pos2d, scale=0.05,
             fg=Vec4(1.0, 0.7, 0.2, 1.0),
-            align=TextNode.ACenter,
-            mayChange=True,
-            sort=60,
+            align=TextNode.ACenter, mayChange=True, sort=60,
         )
         self.start_y = pos2d[1]
 
@@ -171,10 +244,8 @@ class ScorePopup:
         p3 = self.game.cam.getRelativePoint(self.game.render, world_pos)
         if p3.getY() <= 0:
             return (0, 0)
-        lens = self.game.camLens
-        from panda3d.core import Point3 as P3
-        p2d = P3()
-        if lens.project(p3, p2d):
+        p2d = Point3()
+        if self.game.camLens.project(p3, p2d):
             return (p2d.getX(), p2d.getY())
         return (0, 0)
 
@@ -186,10 +257,8 @@ class ScorePopup:
         if progress >= 1.0:
             self.destroy()
             return
-        y_offset = progress * 0.15
-        alpha = 1.0 - progress
-        self.text.setPos(self.text.getPos()[0], self.start_y + y_offset)
-        self.text.setFg(Vec4(1.0, 0.7, 0.2, alpha))
+        self.text.setPos(self.text.getPos()[0], self.start_y + progress * 0.15)
+        self.text.setFg(Vec4(1.0, 0.7, 0.2, 1.0 - progress))
         self.text.setScale(0.05 + progress * 0.01)
 
     def destroy(self):
@@ -198,25 +267,20 @@ class ScorePopup:
 
 
 class ExplosionManager:
-    """Gère explosions + score popups."""
-
     def __init__(self, game):
         self.game = game
         self.explosions = []
         self.popups = []
 
     def spawn(self, position, score=0):
-        """Crée une explosion + popup de score."""
-        exp = Explosion(self.game, position)
-        self.explosions.append(exp)
+        self.explosions.append(Explosion(self.game, position))
         if score > 0:
-            popup = ScorePopup(self.game, position, score)
-            self.popups.append(popup)
+            self.popups.append(ScorePopup(self.game, position, score))
 
     def update(self, dt):
         for exp in self.explosions:
             exp.update(dt)
         self.explosions = [e for e in self.explosions if e.alive]
-        for popup in self.popups:
-            popup.update(dt)
+        for p in self.popups:
+            p.update(dt)
         self.popups = [p for p in self.popups if p.alive]

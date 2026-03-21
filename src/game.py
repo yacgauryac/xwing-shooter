@@ -184,6 +184,8 @@ class Game(ShowBase):
             heat_pct=self.lasers.get_heat_pct(),
             overheated=self.lasers.is_overheated(),
             cooldown_pct=self.lasers.get_cooldown_pct(),
+            roll=self.player.current_roll,
+            pitch=self.player.current_pitch,
         )
 
         return task.cont

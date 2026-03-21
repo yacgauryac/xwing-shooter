@@ -386,6 +386,15 @@ class Player:
         new_pos = current_pos + (target_pos - current_pos) * lerp
         self.node.setPos(new_pos)
 
+        # --- Caméra suit le joueur (décale quand on va sur les côtés) ---
+        cam_offset_x = new_pos.getX() * 0.3  # 30% du déplacement joueur
+        cam_offset_z = new_pos.getZ() * 0.15
+        cam_target = Point3(cam_offset_x, -4, 3.0 + cam_offset_z * 0.5)
+        cam_current = self.game.camera.getPos()
+        cam_lerp = min(1.0, 3.0 * dt)
+        self.game.camera.setPos(cam_current + (cam_target - cam_current) * cam_lerp)
+        self.game.camera.lookAt(cam_offset_x * 0.5, 22, cam_offset_z * 0.3)
+
         # --- Rotation visuelle du modèle ---
         rot_lerp = self.ROT_SPEED * dt
 
