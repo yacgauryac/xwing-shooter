@@ -1,9 +1,44 @@
 [
   {
     "name": "YAC",
+    "score": 8250,
+    "wave": 10,
+    "kills": 56,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "YAC",
     "score": 4350,
     "wave": 7,
     "kills": 34,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "YAC",
+    "score": 4300,
+    "wave": 7,
+    "kills": 31,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "YAC",
+    "score": 4250,
+    "wave": 7,
+    "kills": 34,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "QZD",
+    "score": 3000,
+    "wave": 6,
+    "kills": 24,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "ZER",
+    "score": 2150,
+    "wave": 5,
+    "kills": 16,
     "date": "2026-03-21"
   },
   {
@@ -15,58 +50,23 @@
   },
   {
     "name": "ZER",
-    "score": 950,
-    "wave": 6,
-    "kills": 7,
+    "score": 1400,
+    "wave": 4,
+    "kills": 11,
     "date": "2026-03-21"
   },
   {
-    "name": "DFK",
-    "score": 950,
-    "wave": 3,
+    "name": "ZER",
+    "score": 1400,
+    "wave": 4,
     "kills": 9,
     "date": "2026-03-21"
   },
   {
     "name": "ZER",
-    "score": 600,
-    "wave": 2,
-    "kills": 6,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "ZER",
-    "score": 600,
+    "score": 1250,
     "wave": 3,
-    "kills": 6,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "YAC",
-    "score": 600,
-    "wave": 2,
-    "kills": 6,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "ZET",
-    "score": 500,
-    "wave": 2,
-    "kills": 5,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "POL",
-    "score": 500,
-    "wave": 2,
-    "kills": 5,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "YAC",
-    "score": 400,
-    "wave": 2,
-    "kills": 4,
+    "kills": 11,
     "date": "2026-03-21"
   }
 ]

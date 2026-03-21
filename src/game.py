@@ -19,6 +19,9 @@ from src.hud import HUD
 from src.sounds import SoundManager
 from src.environment import Environment
 from src.scores import Leaderboard
+from src.powerups import PowerUpManager
+from src.torpedoes import TorpedoSystem
+from src.force import ForceAbility
 
 
 class Game(ShowBase):
@@ -44,6 +47,9 @@ class Game(ShowBase):
         self.explosions = ExplosionManager(self)
         self.sounds = SoundManager(self)
         self.hud = HUD(self)
+        self.powerups = PowerUpManager(self)
+        self.torpedoes = TorpedoSystem(self)
+        self.force = ForceAbility()
 
         # Connecte le laser au spawner pour l'auto-aim
         self.lasers.set_enemies(self.spawner)
@@ -55,6 +61,7 @@ class Game(ShowBase):
         self.last_wave = 1
         self.last_score = 0
         self.total_kills = 0
+        self.torpedo_count = 3
 
         # Leaderboard
         self.leaderboard = Leaderboard()
@@ -75,7 +82,11 @@ class Game(ShowBase):
         self.accept("r", self.reset_game)
         self.accept("f1", self.toggle_fps)
         self.accept("f11", self.toggle_fullscreen)
+        self.accept("mouse3", self.start_lock)
+        self.accept("mouse3-up", self.fire_torpedo)
+        self.accept("mouse2", self.activate_force)
         self.is_fullscreen = False
+        self.locking = False
 
         # Leaderboard : enter seulement, le reste est géré dans _lb_key via le player
         self.accept("enter", self._lb_key, ["enter"])
@@ -115,34 +126,73 @@ class Game(ShowBase):
         if self.game_over:
             return task.cont
 
+        # Force — update + time_scale
+        self.force.update(dt)
+        ts = self.force.get_time_scale()
+        dt_world = dt * ts   # Temps ralenti pour le monde
+        dt_player = dt       # Temps normal pour le joueur
+
         # Étoiles
-        self.starfield.update(dt, self.scroll_speed)
+        self.starfield.update(dt_world, self.scroll_speed)
 
-        # Décor (astéroïdes, planètes, nébuleuses, débris)
-        self.environment.update(dt, self.scroll_speed)
+        # Décor
+        self.environment.update(dt_world, self.scroll_speed)
 
-        # Joueur
-        self.player.update(dt)
+        # Joueur (temps normal)
+        self.player.update(dt_player)
         player_pos = self.player.node.getPos()
 
-        # Lasers joueur (utilise node parent pour les positions de canons)
-        self.lasers.update(dt, self.player.node)
+        # Lasers joueur (temps normal, force_active pour auto-aim + no overheat)
+        self.lasers.update(dt_player, self.player.node,
+                          force_active=self.force.active)
 
-        # Mémorise le score avant update pour détecter les kills
+        # Score avant pour détecter les kills
         score_before = self.spawner.score
 
-        # Ennemis + tirs ennemis
-        self.spawner.update(dt, self.lasers, player_pos)
+        # Ennemis + tirs ennemis (temps ralenti)
+        self.spawner.update(dt_world, self.lasers, player_pos)
 
-        # Détecte un kill → explosion + score popup + son
+        # Détecte un kill → explosion + score + powerup + force
         if self.spawner.score > score_before:
             kill_score = self.spawner.score - score_before
             self.total_kills += 1
             if hasattr(self.spawner, 'last_kill_pos'):
                 self.explosions.spawn(self.spawner.last_kill_pos, score=kill_score)
                 self.sounds.play("explosion")
+                self.powerups.try_spawn(self.spawner.last_kill_pos)
+                # Force gauge
+                if hasattr(self.spawner, 'last_kill_class'):
+                    self.force.add_kill(self.spawner.last_kill_class)
+                else:
+                    self.force.add_kill("TIEFighter")
 
-        # Son laser joueur (quand on tire)
+        # Power-ups
+        collected = self.powerups.update(dt_world, player_pos, self.scroll_speed)
+        for pu_type in collected:
+            if pu_type == "torpedo":
+                self.torpedoes.add_stock(3)
+                self.hud.show_pickup("+3 TORPEDOES")
+            elif pu_type == "repair":
+                self.player_hp = min(self.PLAYER_MAX_HP, self.player_hp + 2)
+                self.hud.show_pickup("+2 HULL")
+            self.sounds.play("hit")
+
+        # Torpilles (temps normal pour le joueur)
+        self.torpedoes.update(
+            dt_player, self.player.crosshair_x, self.player.crosshair_z,
+            self.spawner.enemies, locking=self.locking
+        )
+        score_tracker = {"last_kill_pos": None}
+        torpedo_score = self.torpedoes.check_impacts(
+            self.spawner.enemies, self.explosions, score_tracker
+        )
+        if torpedo_score > 0:
+            self.spawner.score += torpedo_score
+            self.total_kills += 1
+            if score_tracker["last_kill_pos"]:
+                self.spawner.last_kill_pos = score_tracker["last_kill_pos"]
+
+        # Son laser
         if self.lasers.firing and self.lasers.fire_timer <= 0 and not self.lasers.overheated:
             self.sounds.play("laser")
 
@@ -151,7 +201,7 @@ class Game(ShowBase):
             self.sounds.play("overheat")
         self._was_overheated = self.lasers.overheated
 
-        # Collisions tirs ennemis -> joueur (sauf pendant barrel roll)
+        # Collisions tirs ennemis -> joueur
         if not self.player.invincible:
             damage, hit_positions = self.spawner.check_player_hit(player_pos)
             if damage > 0:
@@ -167,7 +217,7 @@ class Game(ShowBase):
                     self.hud.show_game_over(self.spawner.score)
                     self._trigger_leaderboard()
 
-            # Collisions astéroïdes -> joueur
+            # Collisions astéroïdes
             asteroid_damage = self.environment.check_player_collision(player_pos)
             if asteroid_damage > 0:
                 self.player_hp -= asteroid_damage
@@ -203,6 +253,9 @@ class Game(ShowBase):
             cooldown_pct=self.lasers.get_cooldown_pct(),
             roll=self.player.current_roll,
             pitch=self.player.current_pitch,
+            torpedo_count=self.torpedoes.stock,
+            force_pct=self.force.get_gauge_pct(),
+            force_active=self.force.active,
         )
 
         return task.cont
@@ -238,6 +291,7 @@ class Game(ShowBase):
         self.last_wave = 1
         self.last_score = 0
         self.total_kills = 0
+        self.torpedo_count = 3
 
         self.spawner.enemies = []
         self.spawner.enemy_bolts = []
@@ -250,6 +304,9 @@ class Game(ShowBase):
         self.lasers.bolts = []
         self.explosions.explosions = []
         self.explosions.popups = []
+        self.powerups.reset()
+        self.torpedoes.reset()
+        self.force.reset()
 
         # Nettoie l'environnement
         for a in self.environment.asteroids:
@@ -272,6 +329,31 @@ class Game(ShowBase):
         # Reset HUD
         self.hud.game_over_text.setText("")
         self.hud.game_over_sub.setText("")
+
+    def start_lock(self):
+        if self.game_over:
+            return
+        self.locking = True
+
+    def fire_torpedo(self):
+        if self.game_over:
+            self.locking = False
+            return
+        self.locking = False
+        player_pos = self.player.node.getPos()
+        if self.torpedoes.fire(player_pos):
+            self.sounds.play("explosion")
+
+    def activate_force(self):
+        if self.game_over:
+            return
+        if self.force.activate():
+            self.sounds.play("explosion")  # Son temporaire
+            # Reset overheat si actif
+            if self.lasers.overheated:
+                self.lasers.heat = 0
+                self.lasers.overheated = False
+                self.lasers.cooldown_timer = 0
 
     def _trigger_leaderboard(self):
         """Appelé au game over — lance le flow leaderboard."""

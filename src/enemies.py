@@ -510,6 +510,7 @@ class EnemySpawner:
         self.spawn_index = 0
         self.wave_started = False
         self.last_kill_pos = None
+        self.last_kill_class = None
 
         self._prepare_wave()
 
@@ -643,6 +644,7 @@ class EnemySpawner:
                     if destroyed:
                         self.score += enemy.score_value
                         self.last_kill_pos = Vec3(enemy_pos)
+                        self.last_kill_class = enemy.__class__.__name__
                     break
 
     def next_wave(self):
