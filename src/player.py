@@ -10,8 +10,7 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomLines, GeomNode,
-    NodePath, WindowProperties, TransparencyAttrib,
-    PointLight
+    NodePath, WindowProperties, TransparencyAttrib
 )
 import math
 
@@ -111,14 +110,6 @@ class Player:
         # Caméra derrière — vue légèrement du dessus
         game.camera.setPos(0, -4, 3.0)
         game.camera.lookAt(0, 22, 0)
-
-        # Lumière dédiée au joueur (éclaire le X-Wing par derrière/dessus = ce que la caméra voit)
-        plight = PointLight("player_light")
-        plight.setColor(Vec4(1.5, 1.5, 1.6, 1))
-        plight.setAttenuation((0.3, 0.01, 0.001))
-        self.player_light = self.node.attachNewNode(plight)
-        self.player_light.setPos(0, -3, 5)  # Derrière et au-dessus
-        game.render.setLight(self.player_light)
 
     def load_model(self):
         """Charge le modèle .glb/.gltf, auto-scale à TARGET_SIZE, fallback procédural."""

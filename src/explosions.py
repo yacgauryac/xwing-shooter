@@ -144,21 +144,79 @@ class Explosion:
             self.node.removeNode()
 
 
+class ScorePopup:
+    """Points qui s'affichent et montent en fadant."""
+
+    def __init__(self, game, position, score):
+        self.alive = True
+        self.timer = 0.0
+        self.duration = 1.0
+        self.game = game
+
+        pos2d = self._world_to_screen(position)
+        from direct.gui.OnscreenText import OnscreenText
+        from panda3d.core import TextNode
+        self.text = OnscreenText(
+            text=f"+{score}",
+            pos=pos2d,
+            scale=0.05,
+            fg=Vec4(1.0, 0.7, 0.2, 1.0),
+            align=TextNode.ACenter,
+            mayChange=True,
+            sort=60,
+        )
+        self.start_y = pos2d[1]
+
+    def _world_to_screen(self, world_pos):
+        p3 = self.game.cam.getRelativePoint(self.game.render, world_pos)
+        if p3.getY() <= 0:
+            return (0, 0)
+        lens = self.game.camLens
+        from panda3d.core import Point3 as P3
+        p2d = P3()
+        if lens.project(p3, p2d):
+            return (p2d.getX(), p2d.getY())
+        return (0, 0)
+
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.timer += dt
+        progress = self.timer / self.duration
+        if progress >= 1.0:
+            self.destroy()
+            return
+        y_offset = progress * 0.15
+        alpha = 1.0 - progress
+        self.text.setPos(self.text.getPos()[0], self.start_y + y_offset)
+        self.text.setFg(Vec4(1.0, 0.7, 0.2, alpha))
+        self.text.setScale(0.05 + progress * 0.01)
+
+    def destroy(self):
+        self.alive = False
+        self.text.destroy()
+
+
 class ExplosionManager:
-    """Gère toutes les explosions actives."""
+    """Gère explosions + score popups."""
 
     def __init__(self, game):
         self.game = game
         self.explosions = []
+        self.popups = []
 
-    def spawn(self, position):
-        """Crée une explosion à la position donnée."""
+    def spawn(self, position, score=0):
+        """Crée une explosion + popup de score."""
         exp = Explosion(self.game, position)
         self.explosions.append(exp)
+        if score > 0:
+            popup = ScorePopup(self.game, position, score)
+            self.popups.append(popup)
 
     def update(self, dt):
-        """Met à jour toutes les explosions."""
         for exp in self.explosions:
             exp.update(dt)
-
         self.explosions = [e for e in self.explosions if e.alive]
+        for popup in self.popups:
+            popup.update(dt)
+        self.popups = [p for p in self.popups if p.alive]

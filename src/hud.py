@@ -20,7 +20,7 @@ C_DIM = Vec4(1.0, 0.65, 0.15, 0.25)
 C_BRIGHT = Vec4(1.0, 0.8, 0.3, 1.0)
 C_DANGER = Vec4(1.0, 0.15, 0.05, 0.9)
 C_WARN = Vec4(1.0, 0.5, 0.1, 0.9)
-C_SAFE = Vec4(0.2, 0.9, 0.4, 0.85)
+C_SAFE = Vec4(0.3, 0.7, 0.4, 0.8)
 C_BG = Vec4(0.05, 0.03, 0.0, 0.35)       # Fond sombre semi-transparent
 C_BG_DARK = Vec4(0.03, 0.02, 0.0, 0.5)
 

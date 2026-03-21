@@ -124,10 +124,11 @@ class Game(ShowBase):
         # Ennemis + tirs ennemis
         self.spawner.update(dt, self.lasers, player_pos)
 
-        # Détecte un kill → explosion + son
+        # Détecte un kill → explosion + score popup + son
         if self.spawner.score > score_before:
+            kill_score = self.spawner.score - score_before
             if hasattr(self.spawner, 'last_kill_pos'):
-                self.explosions.spawn(self.spawner.last_kill_pos)
+                self.explosions.spawn(self.spawner.last_kill_pos, score=kill_score)
                 self.sounds.play("explosion")
 
         # Son laser joueur (quand on tire)
