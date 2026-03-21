@@ -1,0 +1,30 @@
+[
+  {
+    "name": "YAC",
+    "score": 400,
+    "wave": 2,
+    "kills": 4,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "YAC",
+    "score": 200,
+    "wave": 1,
+    "kills": 2,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "YAC",
+    "score": 100,
+    "wave": 1,
+    "kills": 1,
+    "date": "2026-03-21"
+  },
+  {
+    "name": "YAC",
+    "score": 0,
+    "wave": 1,
+    "kills": 0,
+    "date": "2026-03-21"
+  }
+]

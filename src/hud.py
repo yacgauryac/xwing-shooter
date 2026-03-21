@@ -310,4 +310,148 @@ class HUD:
 
     def show_game_over(self, score):
         self.game_over_text.setText("DESTROYED")
-        self.game_over_sub.setText(f"Final score: {score:,}  |  Press R to restart".replace(",", " "))
+        self.game_over_sub.setText(f"Final score: {score:,}".replace(",", " "))
+
+    # =========================================
+    # LEADERBOARD SCREENS
+    # =========================================
+
+    def show_name_entry(self):
+        """Affiche l'écran de saisie du nom (frappe clavier)."""
+        self._clear_leaderboard()
+        self.name_entry_active = True
+        self.typed_name = ""
+
+        # Fond sombre
+        self.lb_bg = DirectFrame(
+            frameColor=Vec4(0, 0, 0, 0.7),
+            frameSize=(-2, 2, -2, 2),
+            pos=(0, 0, 0), sortOrder=55,
+        )
+
+        self.lb_title = OnscreenText(
+            text="NEW HIGH SCORE!", pos=(0, 0.55), scale=0.07,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=False, sort=60,
+            shadow=(0, 0, 0, 0.8),
+        )
+        self.lb_subtitle = OnscreenText(
+            text="ENTER YOUR NAME", pos=(0, 0.45), scale=0.035,
+            fg=C_ORANGE, align=TextNode.ACenter, mayChange=False, sort=60,
+        )
+
+        self.name_display = OnscreenText(
+            text="___", pos=(0, 0.30), scale=0.09,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=60,
+            shadow=(0, 0, 0, 0.8),
+        )
+
+        self.lb_controls = OnscreenText(
+            text="TYPE 3 LETTERS  |  BACKSPACE TO DELETE  |  ENTER TO VALIDATE",
+            pos=(0, 0.18), scale=0.022,
+            fg=Vec4(0.50, 0.28, 0.12, 0.5), align=TextNode.ACenter,
+            mayChange=False, sort=60,
+        )
+
+    def update_name_entry(self, key):
+        """Gère la frappe clavier pour le nom."""
+        if not hasattr(self, 'name_entry_active') or not self.name_entry_active:
+            return False
+
+        if key == "backspace":
+            self.typed_name = self.typed_name[:-1]
+        elif key == "enter":
+            if len(self.typed_name) > 0:
+                self.name_entry_active = False
+                return self.typed_name[:3].upper()
+        elif len(key) == 1 and key.isalpha() and len(self.typed_name) < 3:
+            self.typed_name += key.upper()
+
+        # Affiche avec des underscores pour les places vides
+        display = self.typed_name + "_" * (3 - len(self.typed_name))
+        if hasattr(self, 'name_display'):
+            self.name_display.setText(display)
+
+        return False
+
+    def _update_name_display(self):
+        pass  # Plus utilisé avec la frappe clavier
+
+    def show_leaderboard(self, entries, highlight_rank=None):
+        """Affiche le tableau des scores."""
+        self._clear_leaderboard()
+        self.leaderboard_active = True
+
+        # Fond sombre
+        self.lb_bg = DirectFrame(
+            frameColor=Vec4(0, 0, 0, 0.7),
+            frameSize=(-2, 2, -2, 2),
+            pos=(0, 0, 0), sortOrder=55,
+        )
+
+        self.lb_elements = []
+
+        title = OnscreenText(
+            text="TOP PILOTS", pos=(0, 0.65), scale=0.06,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=False, sort=60,
+            shadow=(0, 0, 0, 0.8),
+        )
+        self.lb_elements.append(title)
+
+        # En-tête
+        header = OnscreenText(
+            text="  #   NAME   SCORE    WAVE  KILLS   DATE",
+            pos=(0, 0.55), scale=0.025,
+            fg=Vec4(0.50, 0.28, 0.12, 0.5), align=TextNode.ACenter,
+            mayChange=False, sort=60,
+        )
+        self.lb_elements.append(header)
+
+        # Lignes
+        for i, entry in enumerate(entries[:10]):
+            rank = i + 1
+            name = entry.get("name", "???")
+            score = entry.get("score", 0)
+            wave = entry.get("wave", 0)
+            kills = entry.get("kills", 0)
+            date = entry.get("date", "")
+
+            line = f" {rank:>2}.   {name}   {score:>6}     {wave:>2}     {kills:>3}   {date}"
+
+            is_highlight = (highlight_rank is not None and rank == highlight_rank)
+            fg = C_BRIGHT if is_highlight else C_ORANGE
+
+            t = OnscreenText(
+                text=line, pos=(0, 0.48 - i * 0.07), scale=0.028,
+                fg=fg, align=TextNode.ACenter, mayChange=False, sort=60,
+            )
+            self.lb_elements.append(t)
+
+        restart = OnscreenText(
+            text="PRESS R TO PLAY AGAIN", pos=(0, -0.35), scale=0.03,
+            fg=Vec4(0.50, 0.28, 0.12, 0.5), align=TextNode.ACenter,
+            mayChange=False, sort=60,
+        )
+        self.lb_elements.append(restart)
+
+    def _clear_leaderboard(self):
+        """Nettoie les éléments du leaderboard."""
+        if hasattr(self, 'lb_bg') and self.lb_bg:
+            self.lb_bg.destroy()
+            self.lb_bg = None
+        for attr in ['lb_title', 'lb_subtitle', 'lb_controls']:
+            if hasattr(self, attr):
+                getattr(self, attr).destroy()
+                delattr(self, attr)
+        if hasattr(self, 'name_texts'):
+            for t in self.name_texts:
+                t.destroy()
+            del self.name_texts
+        if hasattr(self, 'name_display'):
+            self.name_display.destroy()
+            del self.name_display
+        if hasattr(self, 'lb_elements'):
+            for e in self.lb_elements:
+                e.destroy()
+            del self.lb_elements
+        self.name_entry_active = False
+        self.leaderboard_active = False

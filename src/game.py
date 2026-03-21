@@ -18,6 +18,7 @@ from src.explosions import ExplosionManager
 from src.hud import HUD
 from src.sounds import SoundManager
 from src.environment import Environment
+from src.scores import Leaderboard
 
 
 class Game(ShowBase):
@@ -50,9 +51,15 @@ class Game(ShowBase):
         # État du jeu
         self.player_hp = self.PLAYER_MAX_HP
         self.game_over = False
-        self.scroll_speed = 40.0  # Plus rapide = meilleure sensation de vitesse
+        self.scroll_speed = 40.0
         self.last_wave = 1
-        self.last_score = 0  # Pour détecter les kills
+        self.last_score = 0
+        self.total_kills = 0
+
+        # Leaderboard
+        self.leaderboard = Leaderboard()
+        self.lb_state = None  # None, "name_entry", "showing"
+        self.lb_rank = None
         self._was_overheated = False
 
         # Compteur FPS (F1 pour toggle)
@@ -69,6 +76,9 @@ class Game(ShowBase):
         self.accept("f1", self.toggle_fps)
         self.accept("f11", self.toggle_fullscreen)
         self.is_fullscreen = False
+
+        # Leaderboard : enter seulement, le reste est géré dans _lb_key via le player
+        self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
         props = WindowProperties()
@@ -127,6 +137,7 @@ class Game(ShowBase):
         # Détecte un kill → explosion + score popup + son
         if self.spawner.score > score_before:
             kill_score = self.spawner.score - score_before
+            self.total_kills += 1
             if hasattr(self.spawner, 'last_kill_pos'):
                 self.explosions.spawn(self.spawner.last_kill_pos, score=kill_score)
                 self.sounds.play("explosion")
@@ -152,6 +163,7 @@ class Game(ShowBase):
                     self.player_hp = 0
                     self.game_over = True
                     self.hud.show_game_over(self.spawner.score)
+                    self._trigger_leaderboard()
 
             # Collisions astéroïdes -> joueur
             asteroid_damage = self.environment.check_player_collision(player_pos)
@@ -164,6 +176,7 @@ class Game(ShowBase):
                     self.player_hp = 0
                     self.game_over = True
                     self.hud.show_game_over(self.spawner.score)
+                    self._trigger_leaderboard()
 
         # Explosions
         self.explosions.update(dt)
@@ -195,6 +208,12 @@ class Game(ShowBase):
         if not self.game_over:
             return
 
+        # Nettoie leaderboard screens
+        self.hud._clear_leaderboard()
+        self._lb_unbind_keys()
+        self.lb_state = None
+        self.lb_rank = None
+
         # Nettoie tout
         for enemy in self.spawner.enemies:
             if enemy.alive:
@@ -214,6 +233,7 @@ class Game(ShowBase):
         self.game_over = False
         self.last_wave = 1
         self.last_score = 0
+        self.total_kills = 0
 
         self.spawner.enemies = []
         self.spawner.enemy_bolts = []
@@ -225,6 +245,7 @@ class Game(ShowBase):
 
         self.lasers.bolts = []
         self.explosions.explosions = []
+        self.explosions.popups = []
 
         # Nettoie l'environnement
         for a in self.environment.asteroids:
@@ -247,6 +268,42 @@ class Game(ShowBase):
         # Reset HUD
         self.hud.game_over_text.setText("")
         self.hud.game_over_sub.setText("")
+
+    def _trigger_leaderboard(self):
+        """Appelé au game over — lance le flow leaderboard."""
+        score = self.spawner.score
+        if self.leaderboard.is_high_score(score):
+            self.lb_state = "name_entry"
+            self.hud.show_name_entry()
+            # Active les touches de saisie (lettres A-Z + backspace)
+            for c in "abcdefghijklmnopqrstuvwxyz":
+                self.accept(c, self._lb_key, [c])
+            self.accept("backspace", self._lb_key, ["backspace"])
+        else:
+            self.lb_state = "showing"
+            self.hud.show_leaderboard(self.leaderboard.entries)
+
+    def _lb_unbind_keys(self):
+        """Désactive les touches de saisie du leaderboard."""
+        for c in "abcdefghijklmnopqrstuvwxyz":
+            self.ignore(c)
+        self.ignore("backspace")
+
+    def _lb_key(self, key):
+        """Gère les touches pour la saisie du nom."""
+        if self.lb_state != "name_entry":
+            return
+
+        result = self.hud.update_name_entry(key)
+        if result:
+            self._lb_unbind_keys()
+            rank = self.leaderboard.add_score(
+                result, self.spawner.score,
+                self.spawner.wave, self.total_kills
+            )
+            self.lb_rank = rank
+            self.lb_state = "showing"
+            self.hud.show_leaderboard(self.leaderboard.entries, highlight_rank=rank)
 
     def quit_game(self):
         self.userExit()
