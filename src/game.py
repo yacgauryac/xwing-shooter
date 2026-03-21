@@ -22,6 +22,7 @@ from src.scores import Leaderboard
 from src.powerups import PowerUpManager
 from src.torpedoes import TorpedoSystem
 from src.force import ForceAbility
+from src.menu import MainMenu
 
 
 class Game(ShowBase):
@@ -38,20 +39,55 @@ class Game(ShowBase):
         self.render.setAntialias(AntialiasAttrib.MAuto)
         self.setBackgroundColor(0, 0, 0, 1)
 
-        # Systèmes
+        # Leaderboard (disponible pour le menu)
+        self.leaderboard = Leaderboard()
+
+        # Sons (disponible pour le menu)
+        self.sounds = SoundManager(self)
+
+        # Starfield en arrière-plan (visible au menu ET en jeu)
         self.starfield = Starfield(self)
+
+        # État
+        self.game_started = False
+        self.is_fullscreen = False
+        self.fps_visible = True
+        self.setFrameRateMeter(True)
+
+        # Starfield update task (toujours actif, même au menu)
+        self.taskMgr.add(self._update_starfield, "starfield_update")
+
+        # Contrôles globaux
+        self.accept("f1", self.toggle_fps)
+        self.accept("f11", self.toggle_fullscreen)
+
+        # Menu principal
+        self.menu = MainMenu(self)
+        self.menu.show()
+
+    def _update_starfield(self, task):
+        dt = globalClock.getDt()
+        self.starfield.update(dt, 20.0)  # Vitesse lente au menu
+        return task.cont
+
+    def start_game(self):
+        """Lance la partie — appelé depuis le menu."""
+        if self.game_started:
+            return
+
+        self.game_started = True
+
+        # Systèmes de jeu
         self.environment = Environment(self)
         self.player = Player(self)
         self.lasers = LaserSystem(self)
         self.spawner = EnemySpawner(self)
         self.explosions = ExplosionManager(self)
-        self.sounds = SoundManager(self)
         self.hud = HUD(self)
         self.powerups = PowerUpManager(self)
         self.torpedoes = TorpedoSystem(self)
         self.force = ForceAbility()
 
-        # Connecte le laser au spawner pour l'auto-aim
         self.lasers.set_enemies(self.spawner)
 
         # État du jeu
@@ -62,33 +98,21 @@ class Game(ShowBase):
         self.last_score = 0
         self.total_kills = 0
         self.torpedo_count = 3
-
-        # Leaderboard
-        self.leaderboard = Leaderboard()
-        self.lb_state = None  # None, "name_entry", "showing"
+        self.lb_state = None
         self.lb_rank = None
         self._was_overheated = False
-
-        # Compteur FPS (F1 pour toggle)
-        self.fps_visible = True
-        self.setFrameRateMeter(True)
+        self.locking = False
 
         # Boucle de jeu
         self.taskMgr.add(self.update, "game_update")
 
-        # Contrôles
-        self.accept("escape", self.quit_game)
+        # Contrôles de jeu
+        self.accept("escape", self._game_escape)
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
-        self.accept("f1", self.toggle_fps)
-        self.accept("f11", self.toggle_fullscreen)
         self.accept("mouse3", self.start_lock)
         self.accept("mouse3-up", self.fire_torpedo)
         self.accept("mouse2", self.activate_force)
-        self.is_fullscreen = False
-        self.locking = False
-
-        # Leaderboard : enter seulement, le reste est géré dans _lb_key via le player
         self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
@@ -393,6 +417,63 @@ class Game(ShowBase):
 
     def quit_game(self):
         self.userExit()
+
+    def _game_escape(self):
+        """Escape en jeu — retour au menu si game over, sinon quit."""
+        if self.game_over:
+            self.return_to_menu()
+        else:
+            self.quit_game()
+
+    def return_to_menu(self):
+        """Nettoie la scène et retourne au menu."""
+        # Stop game loop
+        self.taskMgr.remove("game_update")
+
+        # Unbind game controls
+        for key in ["m", "r", "mouse3", "mouse3-up", "mouse2", "escape", "enter"]:
+            self.ignore(key)
+        self._lb_unbind_keys()
+
+        # Nettoie les systèmes de jeu
+        if hasattr(self, 'spawner'):
+            for enemy in self.spawner.enemies:
+                if enemy.alive:
+                    enemy.destroy()
+            for bolt in self.spawner.enemy_bolts:
+                if bolt.alive:
+                    bolt.destroy()
+        if hasattr(self, 'lasers'):
+            for bolt in self.lasers.bolts:
+                if bolt.alive:
+                    bolt.destroy()
+        if hasattr(self, 'explosions'):
+            for exp in self.explosions.explosions:
+                if exp.alive:
+                    exp.destroy()
+        if hasattr(self, 'environment'):
+            for a in self.environment.asteroids:
+                a.destroy()
+            for p in self.environment.planets:
+                p.destroy()
+            for n in self.environment.nebulae:
+                n.destroy()
+            for d in self.environment.debris:
+                d.destroy()
+        if hasattr(self, 'player'):
+            self.player.node.removeNode()
+        if hasattr(self, 'hud'):
+            self.hud._clear_leaderboard()
+        if hasattr(self, 'powerups'):
+            self.powerups.reset()
+        if hasattr(self, 'torpedoes'):
+            self.torpedoes.reset()
+
+        self.game_started = False
+        self.game_over = False
+
+        # Réaffiche le menu
+        self.menu.show()
 
     def toggle_fps(self):
         """Active/désactive le compteur FPS."""

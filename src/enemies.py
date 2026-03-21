@@ -21,8 +21,8 @@ import os
 class EnemyBolt:
     """Un tir laser ennemi (vert)."""
 
-    SPEED = 65.0
-    DAMAGE = 2
+    SPEED = 40.0
+    DAMAGE = 1
     HIT_RADIUS = 1.8
 
     def __init__(self, parent_node, start_pos, direction):
@@ -261,8 +261,8 @@ class BaseEnemy:
         if dist < self.FIRE_RANGE and my_pos.getY() > player_pos.getY():
             self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
             direction = player_pos - my_pos
-            direction.setX(direction.getX() + random.uniform(-1.2, 1.2))
-            direction.setZ(direction.getZ() + random.uniform(-0.8, 0.8))
+            direction.setX(direction.getX() + random.uniform(-1.8, 1.8))
+            direction.setZ(direction.getZ() + random.uniform(-1.2, 1.2))
             direction.normalize()
 
             results = []
@@ -316,8 +316,8 @@ class TIEFighter(BaseEnemy):
     CHARGE_DISTANCE = 100.0   # Accélère de loin
     HP = 2
     HIT_RADIUS = 1.8
-    FIRE_COOLDOWN_MIN = 1.2
-    FIRE_COOLDOWN_MAX = 3.0
+    FIRE_COOLDOWN_MIN = 2.5
+    FIRE_COOLDOWN_MAX = 5.0
     BOLTS_PER_SHOT = 2
     SCORE_VALUE = 100
 
@@ -344,8 +344,8 @@ class TIEInterceptor(BaseEnemy):
     CHARGE_DISTANCE = 110.0   # Fonce de très loin
     HP = 1
     HIT_RADIUS = 1.5
-    FIRE_COOLDOWN_MIN = 0.6
-    FIRE_COOLDOWN_MAX = 1.5
+    FIRE_COOLDOWN_MIN = 1.5
+    FIRE_COOLDOWN_MAX = 3.0
     BOLTS_PER_SHOT = 1
     SCORE_VALUE = 150
 
