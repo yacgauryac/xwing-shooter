@@ -18,7 +18,7 @@ COLOR_REPAIR = Vec4(1.0, 0.5, 0.15, 1.0)    # Orange chaud
 
 DROP_CHANCE = 0.20
 WEIGHT_TORPEDO = 0.6
-COLLECT_RADIUS = 2.8
+COLLECT_RADIUS = 5.0
 LIFETIME = 12.0
 NO_DROP_TIME = 15.0
 
@@ -47,7 +47,7 @@ class PowerUp:
         v = GeomVertexWriter(vdata, "vertex")
         c = GeomVertexWriter(vdata, "color")
 
-        s = 0.25
+        s = 0.5
         verts = [
             Vec3(0, 0, s * 1.4),    # 0 top (allongé, style diamant)
             Vec3(0, 0, -s * 1.4),   # 1 bottom
@@ -154,7 +154,7 @@ class PowerUpManager:
                 dx = pu_pos.getX() - player_pos.getX()
                 dz = pu_pos.getZ() - player_pos.getZ()
                 dy = pu_pos.getY() - player_pos.getY()
-                dist = (dx*dx + dz*dz + dy*dy*0.3) ** 0.5  # Y compte moins
+                dist = (dx*dx + dz*dz + dy*dy*0.05) ** 0.5  # Y compte moins
                 if dist < COLLECT_RADIUS:
                     collected.append(pu.type)
                     pu.destroy()
