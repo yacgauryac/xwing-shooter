@@ -226,6 +226,18 @@ class BaseEnemy:
         self.node.setX(self.node.getX() + math.sin(self.drift_time) * self.drift_x * dt)
         self.node.setZ(self.node.getZ() + math.cos(self.drift_time * 0.7) * self.drift_z * dt)
 
+        # Clamp dans la zone jouable
+        x = self.node.getX()
+        z = self.node.getZ()
+        if x < -9:
+            self.node.setX(-9)
+        elif x > 9:
+            self.node.setX(9)
+        if z < -6:
+            self.node.setZ(-6)
+        elif z > 6:
+            self.node.setZ(6)
+
         # Flash de dégât
         if self.flash_timer > 0:
             self.flash_timer -= dt
@@ -406,25 +418,27 @@ class Formation:
     """Définit un pattern de spawn pour un groupe d'ennemis."""
 
     @staticmethod
-    def v_formation(center_x, center_z, count, spacing=3.0):
+    def v_formation(center_x, center_z, count, spacing=2.5):
         """Formation en V."""
         positions = []
         for i in range(count):
             side = 1 if i % 2 == 0 else -1
             row = (i + 1) // 2
             x = center_x + side * row * spacing
+            # Clamp X pour rester dans les bounds
+            x = max(-8, min(8, x))
             z = center_z + row * spacing * 0.3
-            y_offset = row * 8  # Décalage en profondeur
+            y_offset = row * 6
             positions.append((x, y_offset, z))
         return positions
 
     @staticmethod
-    def line_formation(center_x, center_z, count, spacing=3.5):
+    def line_formation(center_x, center_z, count, spacing=3.0):
         """Formation en ligne horizontale."""
         positions = []
         start_x = center_x - (count - 1) * spacing / 2
         for i in range(count):
-            x = start_x + i * spacing
+            x = max(-8, min(8, start_x + i * spacing))
             positions.append((x, 0, center_z))
         return positions
 
@@ -434,9 +448,9 @@ class Formation:
         positions = []
         per_side = count // 2
         for i in range(per_side):
-            positions.append((-7 - i * 1.5, i * 10, random.uniform(-2, 2)))
+            positions.append((-6 - i * 1, i * 10, random.uniform(-2, 2)))
         for i in range(count - per_side):
-            positions.append((7 + i * 1.5, i * 10, random.uniform(-2, 2)))
+            positions.append((6 + i * 1, i * 10, random.uniform(-2, 2)))
         return positions
 
     @staticmethod
@@ -444,8 +458,8 @@ class Formation:
         """Essaim aléatoire concentré."""
         positions = []
         for _ in range(count):
-            x = center_x + random.uniform(-5, 5)
-            z = center_z + random.uniform(-3, 3)
+            x = max(-8, min(8, center_x + random.uniform(-5, 5)))
+            z = max(-5, min(5, center_z + random.uniform(-3, 3)))
             y_offset = random.uniform(0, 20)
             positions.append((x, y_offset, z))
         return positions

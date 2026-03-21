@@ -15,14 +15,14 @@ import random
 class Starfield:
     """Champ d'étoiles avec effet de vitesse (streaks)."""
 
-    NUM_STARS = 600
+    NUM_STARS = 1000
     FIELD_DEPTH = 250.0
-    FIELD_WIDTH = 45.0
-    FIELD_HEIGHT = 35.0
+    FIELD_WIDTH = 50.0
+    FIELD_HEIGHT = 40.0
     RECYCLE_Z = -10.0
 
     # Longueur des traînées : proportionnelle à la vitesse
-    STREAK_FACTOR = 0.06  # Plus c'est grand, plus les traînées sont longues
+    STREAK_FACTOR = 0.10  # Plus long = plus filant
 
     def __init__(self, game):
         self.game = game

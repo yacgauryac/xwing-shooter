@@ -19,8 +19,8 @@ import math
 class Player:
     """Gère le vaisseau du joueur et ses contrôles."""
 
-    BOUNDS_X = 8.0
-    BOUNDS_Z = 5.0
+    BOUNDS_X = 11.0
+    BOUNDS_Z = 6.5
     MOVE_SPEED = 12.0
     LERP_SPEED = 12.0
 
@@ -311,15 +311,15 @@ class Player:
             rotation_per_frame = (360.0 / self.BARREL_DURATION) * dt
             self.barrel_roll_angle += rotation_per_frame * self.barrel_direction
 
-            # Spawne des traînées lumineuses en spirale
+            # Spawne des traînées en spirale AUTOUR du vaisseau
             progress = 1.0 - (self.barrel_timer / self.BARREL_DURATION)
             angle = progress * math.pi * 2 * self.barrel_direction
-            trail_radius = 1.2
-            trail_x = self.node.getX() + math.cos(angle) * trail_radius
-            trail_z = self.node.getZ() + math.sin(angle) * trail_radius
-            trail_y = self.node.getY()
+            trail_radius = 1.5
+            # Position relative au vaisseau
+            local_x = math.cos(angle) * trail_radius
+            local_z = math.sin(angle) * trail_radius
 
-            trail = self._spawn_trail_particle(trail_x, trail_y, trail_z)
+            trail = self._spawn_trail_particle(local_x, 0, local_z, attached=True)
             if trail:
                 self.barrel_trails.append(trail)
 
@@ -352,12 +352,12 @@ class Player:
         if self.barrel_fov_active:
             progress = 1.0 - (self.barrel_timer / self.BARREL_DURATION)
             # FOV augmente puis revient : sin curve
-            fov_boost = math.sin(progress * math.pi) * 15
+            fov_boost = math.sin(progress * math.pi) * 4
             self.game.camLens.setFov(self.base_fov + fov_boost)
         elif self.game.camLens.getFov()[0] != self.base_fov:
-            # Retour progressif au FOV normal
+            # Retour lent au FOV normal
             current = self.game.camLens.getFov()[0]
-            self.game.camLens.setFov(current + (self.base_fov - current) * 5 * dt)
+            self.game.camLens.setFov(current + (self.base_fov - current) * 2 * dt)
 
         # Speed lines (update + cleanup)
         for sl in self.speed_lines[:]:
@@ -378,11 +378,8 @@ class Player:
                 trail["node"].removeNode()
                 self.barrel_trails.remove(trail)
             else:
-                # Fade out
                 alpha = trail["life"] / trail["max_life"]
                 trail["node"].setColorScale(1, 1, 1, alpha)
-                # Recule avec le décor
-                trail["node"].setY(trail["node"].getY() - 40 * dt)
 
         # Déplace la cible
         self.target_x += move_x * self.MOVE_SPEED * dt
@@ -459,43 +456,49 @@ class Player:
 
         # Couleur : vert semi-transparent
         c = Vec4(0.2, 1.0, 0.3, 0.6)
-        c_dim = Vec4(0.2, 1.0, 0.3, 0.3)
 
-        size = 1.2  # Taille du réticule (en unités monde, loin = paraît petit)
-        half = size / 2
-        tick = size * 0.15  # Petites marques aux coins
+        radius = 0.6
+        gap = 0.15  # Espace entre les arcs (en radians)
+        segments_per_arc = 8
 
-        # 4 coins du carré (lignes)
-        # Chaque coin = 2 lignes (L shape)
-        corners = [
-            # Coin haut-gauche
-            (-half, 0, half), (-half + tick, 0, half),
-            (-half, 0, half), (-half, 0, half - tick),
-            # Coin haut-droit
-            (half, 0, half), (half - tick, 0, half),
-            (half, 0, half), (half, 0, half - tick),
-            # Coin bas-gauche
-            (-half, 0, -half), (-half + tick, 0, -half),
-            (-half, 0, -half), (-half, 0, -half + tick),
-            # Coin bas-droit
-            (half, 0, -half), (half - tick, 0, -half),
-            (half, 0, -half), (half, 0, -half + tick),
+        # 4 arcs de cercle séparés (haut, droite, bas, gauche)
+        # Chaque arc couvre ~70° avec un gap de ~20° entre eux
+        arc_angles = [
+            (math.pi/2 + gap, math.pi - gap),      # Haut-gauche → haut-droit
+            (0 + gap, math.pi/2 - gap),             # Droite-bas → droite-haut
+            (-math.pi/2 + gap, 0 - gap),            # Bas-droite → bas-gauche (ajusté)
+            (math.pi + gap, math.pi * 1.5 - gap),   # Gauche-haut → gauche-bas
         ]
+
+        verts = []
+        for a_start, a_end in arc_angles:
+            for i in range(segments_per_arc + 1):
+                t = i / segments_per_arc
+                a = a_start + t * (a_end - a_start)
+                verts.append((math.cos(a) * radius, 0, math.sin(a) * radius))
 
         # Croix centrale (petite)
-        cross = size * 0.08
-        corners += [
-            (-cross, 0, 0), (cross, 0, 0),  # horizontal
-            (0, 0, -cross), (0, 0, cross),   # vertical
+        cross = 0.06
+        verts += [
+            (-cross, 0, 0), (cross, 0, 0),
+            (0, 0, -cross), (0, 0, cross),
         ]
 
-        for v in corners:
+        for v in verts:
             vertex.addData3(*v)
             color.addData4(c)
 
         lines = GeomLines(Geom.UHStatic)
-        for i in range(0, len(corners), 2):
-            lines.addVertices(i, i + 1)
+        # Arcs : segments connectés
+        idx = 0
+        for _ in range(4):
+            for i in range(segments_per_arc):
+                lines.addVertices(idx + i, idx + i + 1)
+            idx += segments_per_arc + 1
+
+        # Croix centrale
+        lines.addVertices(idx, idx + 1)
+        lines.addVertices(idx + 2, idx + 3)
 
         geom = Geom(vdata)
         geom.addPrimitive(lines)
@@ -508,17 +511,17 @@ class Player:
 
         return root
 
-    def _spawn_trail_particle(self, x, y, z):
-        """Crée une particule de traînée lumineuse pour le barrel roll."""
+    def _spawn_trail_particle(self, x, y, z, attached=False):
+        """Crée une particule de traînée pour le barrel roll."""
         fmt = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("trail", fmt, Geom.UHStatic)
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        # Petite ligne lumineuse — courte et blanche
-        length = 0.3
-        c_bright = Vec4(1.0, 1.0, 1.0, 0.9)
-        c_dim = Vec4(0.6, 0.8, 1.0, 0.2)
+        # Ligne bleu/blanc courte
+        length = 0.4
+        c_bright = Vec4(0.7, 0.85, 1.0, 1.0)
+        c_dim = Vec4(0.3, 0.5, 1.0, 0.3)
 
         vertex.addData3(0, 0, 0)
         col.addData4(c_bright)
@@ -534,10 +537,14 @@ class Player:
         node.addGeom(geom)
 
         np = NodePath(node)
-        np.reparentTo(self.game.render)
+        if attached:
+            # Attaché au node joueur — suit le vaisseau
+            np.reparentTo(self.node)
+        else:
+            np.reparentTo(self.game.render)
         np.setPos(x, y, z)
         np.setLightOff()
-        np.setRenderModeThickness(2)
+        np.setRenderModeThickness(4)
         np.setTransparency(TransparencyAttrib.MAlpha)
 
         life = 0.25
@@ -550,19 +557,19 @@ class Player:
         py = self.node.getY()
         pz = self.node.getZ()
 
-        for _ in range(12):
+        for _ in range(25):
             fmt = GeomVertexFormat.getV3c4()
             vdata = GeomVertexData("speedline", fmt, Geom.UHStatic)
             vertex = GeomVertexWriter(vdata, "vertex")
             col = GeomVertexWriter(vdata, "color")
 
             # Lignes autour du vaisseau, allongées vers l'arrière
-            ox = px + random.uniform(-4, 4)
-            oz = pz + random.uniform(-3, 3)
-            oy = py + random.uniform(2, 15)
-            length = random.uniform(2, 5)
+            ox = px + random.uniform(-6, 6)
+            oz = pz + random.uniform(-4, 4)
+            oy = py + random.uniform(2, 20)
+            length = random.uniform(3, 8)
 
-            c_front = Vec4(1.0, 0.85, 0.5, 0.8)
+            c_front = Vec4(1.0, 0.85, 0.5, 0.9)
             c_back = Vec4(1.0, 0.6, 0.2, 0.0)
 
             vertex.addData3(0, 0, 0)
@@ -582,8 +589,8 @@ class Player:
             np.reparentTo(self.game.render)
             np.setPos(ox, oy, oz)
             np.setLightOff()
-            np.setRenderModeThickness(random.uniform(1.5, 3.0))
+            np.setRenderModeThickness(random.uniform(2.0, 4.0))
             np.setTransparency(TransparencyAttrib.MAlpha)
 
-            life = random.uniform(0.3, 0.6)
+            life = random.uniform(0.4, 0.8)
             self.speed_lines.append({"node": np, "life": life, "max_life": life})

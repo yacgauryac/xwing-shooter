@@ -126,11 +126,11 @@ class LaserBolt:
 class LaserSystem:
     """Tir par paires alternées avec système de surchauffe."""
 
-    FIRE_RATE = 0.12          # Temps entre chaque paire
+    FIRE_RATE = 0.12          # Temps entre chaque paire (original)
 
     # Surchauffe
-    MAX_HEAT = 100.0          # Jauge max
-    HEAT_PER_SHOT = 12.0      # Chaleur par paire tirée
+    MAX_HEAT = 100.0
+    HEAT_PER_SHOT = 8.0       # Moins de chaleur = ~2 salves de plus avant overheat
     HEAT_DECAY = 25.0         # Refroidissement par seconde (quand on tire pas)
     OVERHEAT_THRESHOLD = 100.0  # Seuil de surchauffe
     COOLDOWN_TIME = 2.5       # Durée du cooldown forcé (secondes)
