@@ -278,7 +278,13 @@ class BaseEnemy:
 
         return None
 
+    SPAWN_PROTECT_Y = 120.0  # Invincible tant qu'au-delà de cette distance
+
     def hit(self, damage=1):
+        # Protection au spawn — pas touchable tant que trop loin
+        if self.node.getY() > self.SPAWN_PROTECT_Y:
+            return False
+
         self.hp -= damage
         if self.hp <= 0:
             self.destroy()

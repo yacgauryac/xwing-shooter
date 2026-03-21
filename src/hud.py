@@ -270,6 +270,62 @@ class HUD:
             fg=Vec4(1, 0.65, 0.15, 0.15), align=TextNode.ACenter,
         )
 
+        # Attitude indicator (assiette)
+        self.attitude_root = game.aspect2d.attachNewNode("attitude")
+        self.attitude_root.setTransparency(TransparencyAttrib.MAlpha)
+        self.attitude_lines = None
+
+    def _update_attitude(self, roll, pitch):
+        """Met à jour l'indicateur d'assiette (lignes d'horizon)."""
+        if self.attitude_lines:
+            self.attitude_lines.removeNode()
+
+        fmt = GeomVertexFormat.getV3c4()
+        vd = GeomVertexData("att", fmt, Geom.UHDynamic)
+        v = GeomVertexWriter(vd, "vertex")
+        c = GeomVertexWriter(vd, "color")
+
+        # Convertit roll/pitch en radians
+        roll_rad = math.radians(roll * 0.015)  # Subtil
+        pitch_offset = pitch * 0.003
+
+        col_main = Vec4(1, 0.65, 0.15, 0.2)
+        col_center = Vec4(1, 0.65, 0.15, 0.35)
+
+        # Ligne centrale (plus visible)
+        half = 0.12
+        cos_r, sin_r = math.cos(roll_rad), math.sin(roll_rad)
+
+        v.addData3(-half * cos_r, 0, -half * sin_r + pitch_offset)
+        c.addData4(col_center)
+        v.addData3(half * cos_r, 0, half * sin_r + pitch_offset)
+        c.addData4(col_center)
+
+        # Lignes latérales (plus longues, plus dim)
+        for offset in [0.25, 0.4]:
+            for side in [-1, 1]:
+                x1 = side * offset
+                x2 = side * (offset + 0.08)
+                z1 = x1 * sin_r / cos_r + pitch_offset if cos_r != 0 else pitch_offset
+                z2 = x2 * sin_r / cos_r + pitch_offset if cos_r != 0 else pitch_offset
+                v.addData3(x1, 0, z1)
+                c.addData4(col_main)
+                v.addData3(x2, 0, z2)
+                c.addData4(col_main)
+
+        lines = GeomLines(Geom.UHDynamic)
+        num_lines = 1 + 4  # center + 4 lateral
+        for i in range(num_lines):
+            lines.addVertices(i * 2, i * 2 + 1)
+
+        g = Geom(vd)
+        g.addPrimitive(lines)
+        n = GeomNode("attitude_lines")
+        n.addGeom(g)
+        self.attitude_lines = NodePath(n)
+        self.attitude_lines.reparentTo(self.attitude_root)
+        self.attitude_lines.setRenderModeThickness(1.0)
+
     # =========================================
     # UPDATE
     # =========================================
@@ -320,7 +376,8 @@ class HUD:
         )
 
     def update(self, dt, score, wave, enemy_count, health, max_health,
-               heat_pct=0.0, overheated=False, cooldown_pct=0.0):
+               heat_pct=0.0, overheated=False, cooldown_pct=0.0,
+               roll=0.0, pitch=0.0):
         self.blink_timer += dt
 
         # Textes
@@ -343,6 +400,9 @@ class HUD:
         else:
             self.overheat_text.setText("")
             self.heat_text.setText(f"{int(heat_pct * 100)}" if heat_pct > 0.01 else "")
+
+        # Attitude indicator (assiette)
+        self._update_attitude(roll, pitch)
 
         # Vague
         if self.announce_timer > 0:

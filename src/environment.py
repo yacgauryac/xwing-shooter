@@ -87,8 +87,6 @@ class Asteroid:
         {"base": (0.18, 0.20, 0.26), "var": 0.03},
     ]
 
-    TARGET_SIZE = 2.0  # Taille cible pour l'auto-scale des modèles
-
     def __init__(self, parent, pos, size, speed):
         self.alive = True
         self.speed = speed
@@ -100,42 +98,10 @@ class Asteroid:
             random.uniform(-40, 40),
         )
 
-        # Essaye de charger un modèle du pack
-        model = AsteroidModelCache.get_random()
-        if model:
-            self.node = self._setup_model(model, size)
-        else:
-            self.node = self._make_deformed_sphere(size)
-
+        # Toujours procédural (les packs sont des amas, utilisés séparément)
+        self.node = self._make_deformed_sphere(size)
         self.node.reparentTo(parent)
         self.node.setPos(pos)
-
-    def _setup_model(self, model, size):
-        """Configure un modèle chargé avec auto-scale."""
-        root = NodePath("asteroid")
-        model.reparentTo(root)
-
-        # Auto-scale basé sur les bounds du modèle
-        bounds = model.getTightBounds()
-        if bounds:
-            bmin, bmax = bounds
-            dims = bmax - bmin
-            max_dim = max(dims.getX(), dims.getY(), dims.getZ())
-            if max_dim > 0:
-                scale = size / max_dim
-                model.setScale(scale)
-
-        # Rotation aléatoire initiale
-        model.setHpr(
-            random.uniform(0, 360),
-            random.uniform(0, 360),
-            random.uniform(0, 360),
-        )
-
-        # Léger boost de luminosité
-        model.setColorScale(Vec4(1.3, 1.3, 1.3, 1))
-
-        return root
 
     def _make_deformed_sphere(self, size):
         """Crée une sphère UV déformée aléatoirement — chaque astéroïde est unique."""
