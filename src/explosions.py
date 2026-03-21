@@ -24,14 +24,14 @@ class Particle:
 
 
 class DebrisChunk:
-    """Morceau de TIE solide qui vole."""
+    """Morceau de vaisseau — panneau plat, forme en L ou éclat."""
 
     def __init__(self, game, position):
         self.alive = True
         self.lifetime = random.uniform(0.8, 1.5)
         self.max_lifetime = self.lifetime
 
-        speed = random.uniform(8, 20)
+        speed = random.uniform(6, 18)
         theta = random.uniform(0, math.pi * 2)
         phi = random.uniform(0, math.pi)
         self.velocity = Vec3(
@@ -40,9 +40,9 @@ class DebrisChunk:
             math.cos(phi) * speed,
         )
         self.rot_speed = Vec3(
-            random.uniform(-200, 200),
-            random.uniform(-200, 200),
-            random.uniform(-200, 200),
+            random.uniform(-150, 150),
+            random.uniform(-150, 150),
+            random.uniform(-150, 150),
         )
 
         self.node = self._make_chunk()
@@ -56,16 +56,45 @@ class DebrisChunk:
         v = GeomVertexWriter(vdata, "vertex")
         c = GeomVertexWriter(vdata, "color")
 
-        s = random.uniform(0.1, 0.3)
-        gray = random.uniform(0.3, 0.6)
+        chunk_type = random.randint(0, 2)
+        gray = random.uniform(0.25, 0.5)
         col = Vec4(gray, gray, gray * 0.9, 1)
-
-        v.addData3(-s, 0, -s * 0.5); c.addData4(col)
-        v.addData3(s, 0, -s * 0.3); c.addData4(col)
-        v.addData3(0, 0, s * 0.6); c.addData4(col)
+        col2 = Vec4(gray * 1.3, gray * 1.2, gray, 1)
 
         tris = GeomTriangles(Geom.UHStatic)
-        tris.addVertices(0, 1, 2)
+
+        if chunk_type == 0:
+            # Panneau plat rectangulaire
+            w = random.uniform(0.2, 0.5)
+            h = random.uniform(0.3, 0.7)
+            v.addData3(-w, 0, -h); c.addData4(col)
+            v.addData3(w, 0, -h); c.addData4(col)
+            v.addData3(w, 0, h); c.addData4(col2)
+            v.addData3(-w, 0, h); c.addData4(col2)
+            tris.addVertices(0, 1, 2)
+            tris.addVertices(0, 2, 3)
+        elif chunk_type == 1:
+            # Forme en L (morceau d'aile)
+            s = random.uniform(0.2, 0.4)
+            v.addData3(-s, 0, -s*2); c.addData4(col)
+            v.addData3(s, 0, -s*2); c.addData4(col)
+            v.addData3(s, 0, 0); c.addData4(col2)
+            v.addData3(-s, 0, 0); c.addData4(col2)
+            v.addData3(-s, 0, 0); c.addData4(col2)
+            v.addData3(0, 0, 0); c.addData4(col2)
+            v.addData3(0, 0, s); c.addData4(col)
+            v.addData3(-s, 0, s); c.addData4(col)
+            tris.addVertices(0, 1, 2)
+            tris.addVertices(0, 2, 3)
+            tris.addVertices(4, 5, 6)
+            tris.addVertices(4, 6, 7)
+        else:
+            # Triangle irrégulier (éclat)
+            s = random.uniform(0.15, 0.4)
+            v.addData3(-s, 0, -s * 0.6); c.addData4(col)
+            v.addData3(s * 1.2, 0, -s * 0.2); c.addData4(col2)
+            v.addData3(s * 0.3, 0, s * 0.8); c.addData4(col)
+            tris.addVertices(0, 1, 2)
 
         geom = Geom(vdata)
         geom.addPrimitive(tris)
@@ -110,8 +139,8 @@ class Explosion:
         self.timer = 0.0
 
         # Couche interne (blanc/jaune, flash rapide)
-        for _ in range(15):
-            speed = random.uniform(3, 8)
+        for _ in range(25):
+            speed = random.uniform(4, 12)
             theta = random.uniform(0, math.pi * 2)
             phi = random.uniform(0, math.pi)
             vel = Vec3(
@@ -120,11 +149,11 @@ class Explosion:
                 math.cos(phi) * speed,
             )
             color = Vec4(1.0, random.uniform(0.7, 1.0), random.uniform(0.3, 0.6), 1.0)
-            self.particles.append(Particle(position, vel, color, random.uniform(0.2, 0.4)))
+            self.particles.append(Particle(position, vel, color, random.uniform(0.15, 0.4)))
 
-        # Couche externe (orange/rouge)
-        for _ in range(20):
-            speed = random.uniform(5, 12)
+        # Couche externe (orange/rouge, grosse)
+        for _ in range(35):
+            speed = random.uniform(5, 18)
             theta = random.uniform(0, math.pi * 2)
             phi = random.uniform(0, math.pi)
             vel = Vec3(
@@ -133,11 +162,11 @@ class Explosion:
                 math.cos(phi) * speed,
             )
             color = Vec4(random.uniform(0.9, 1.0), random.uniform(0.2, 0.5), 0.0, 1.0)
-            self.particles.append(Particle(position, vel, color, random.uniform(0.3, 0.7)))
+            self.particles.append(Particle(position, vel, color, random.uniform(0.3, 0.8)))
 
-        # Fumée grise
-        for _ in range(10):
-            speed = random.uniform(2, 5)
+        # Fumée grise (grosse)
+        for _ in range(15):
+            speed = random.uniform(2, 7)
             theta = random.uniform(0, math.pi * 2)
             phi = random.uniform(0, math.pi)
             vel = Vec3(
@@ -147,10 +176,10 @@ class Explosion:
             )
             gray = random.uniform(0.15, 0.3)
             self.particles.append(Particle(position, vel, Vec4(gray, gray, gray, 0.6),
-                                          random.uniform(0.5, 1.0)))
+                                          random.uniform(0.5, 1.2)))
 
-        # Débris solides
-        for _ in range(6):
+        # Débris solides (morceaux de vaisseau)
+        for _ in range(10):
             self.debris.append(DebrisChunk(game, position))
 
         self.node = NodePath("explosion")
