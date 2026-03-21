@@ -153,10 +153,11 @@ class Game(ShowBase):
 
         # Collisions tirs ennemis -> joueur (sauf pendant barrel roll)
         if not self.player.invincible:
-            damage = self.spawner.check_player_hit(player_pos)
+            damage, hit_positions = self.spawner.check_player_hit(player_pos)
             if damage > 0:
                 self.player_hp -= damage
                 self.hud.show_damage_flash()
+                self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
 
@@ -171,6 +172,7 @@ class Game(ShowBase):
             if asteroid_damage > 0:
                 self.player_hp -= asteroid_damage
                 self.hud.show_damage_flash()
+                self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
 

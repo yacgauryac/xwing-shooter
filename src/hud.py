@@ -207,6 +207,14 @@ class HUD:
         )
         self.flash_timer = 0.0
 
+        # Shield flash bleu (bords d'écran)
+        self.shield_flash = DirectFrame(
+            frameColor=Vec4(0.3, 0.5, 1.0, 0),
+            frameSize=(-2, 2, -2, 2),
+            pos=(0, 0, 0), sortOrder=99,
+        )
+        self.shield_flash_timer = 0.0
+
         self.game_over_text = OnscreenText(
             text="", pos=(0, 0.08), scale=0.1,
             fg=C_DANGER, align=TextNode.ACenter, mayChange=True, sort=50,
@@ -278,13 +286,22 @@ class HUD:
             if self.announce_timer <= 0:
                 self.wave_announce.setText("")
 
-        # Flash
+        # Flash dégâts orange
         if self.flash_timer > 0:
             self.flash_timer -= dt
             a = max(0, self.flash_timer / 0.3) * 0.2
             self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, a)
             if self.flash_timer <= 0:
                 self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, 0)
+
+        # Flash bouclier bleu
+        if self.shield_flash_timer > 0:
+            self.shield_flash_timer -= dt
+            progress = self.shield_flash_timer / 0.3
+            a = progress * 0.25
+            self.shield_flash["frameColor"] = Vec4(0.4, 0.6, 1.0, a)
+            if self.shield_flash_timer <= 0:
+                self.shield_flash["frameColor"] = Vec4(0.3, 0.5, 1.0, 0)
 
         # Pickup text fade
         if self.pickup_timer > 0:
@@ -339,6 +356,10 @@ class HUD:
 
     def show_damage_flash(self):
         self.flash_timer = 0.3
+
+    def show_shield_flash(self):
+        """Flash bleu-blanc sur les bords de l'écran."""
+        self.shield_flash_timer = 0.3
 
     def show_pickup(self, text):
         """Affiche un texte de pickup qui fade."""
