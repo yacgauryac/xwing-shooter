@@ -14,37 +14,114 @@ import math
 import os
 
 
-class Asteroid:
-    """Un astéroïde procédural — sphère déformée aléatoirement."""
+class AsteroidModelCache:
+    """Cache de modèles d'astéroïdes extraits du pack gltf."""
 
-    # Palettes de couleurs pour les astéroïdes
+    PACK_PATH = "assets/models/asteroids/scene.gltf"
+    _templates = []
+    _loaded = False
+
+    @classmethod
+    def load(cls, game):
+        """Charge le pack et extrait chaque astéroïde individuel."""
+        if cls._loaded:
+            return
+        cls._loaded = True
+
+        if not os.path.exists(cls.PACK_PATH):
+            print(f"[Asteroids] Pack non trouvé: {cls.PACK_PATH}, mode procédural")
+            return
+
+        try:
+            model = game.loader.loadModel(cls.PACK_PATH)
+            if model:
+                # Extraire les enfants (chaque astéroïde)
+                children = model.getChildren()
+                for child in children:
+                    # Clone le template
+                    template = NodePath(f"asteroid_tpl_{len(cls._templates)}")
+                    child.copyTo(template)
+                    cls._templates.append(template)
+
+                print(f"[Asteroids] Pack chargé: {len(cls._templates)} astéroïdes")
+
+                # Si le modèle n'a qu'un seul enfant (pas de sous-objets),
+                # on utilise le modèle entier
+                if len(cls._templates) == 0:
+                    cls._templates.append(model)
+                    print(f"[Asteroids] Modèle unique utilisé")
+        except Exception as e:
+            print(f"[Asteroids] Erreur chargement: {e}")
+
+    @classmethod
+    def get_random(cls):
+        """Retourne un clone d'un astéroïde aléatoire du pack, ou None."""
+        if not cls._templates:
+            return None
+        template = random.choice(cls._templates)
+        return template.copyTo(NodePath("asteroid_inst"))
+
+
+class Asteroid:
+    """Un astéroïde — modèle 3D du pack ou sphère déformée procédurale."""
+
     COLOR_PALETTES = [
-        # Gris foncé
         {"base": (0.28, 0.27, 0.26), "var": 0.05},
-        # Gris moyen
         {"base": (0.35, 0.34, 0.33), "var": 0.06},
-        # Gris clair
         {"base": (0.42, 0.41, 0.39), "var": 0.05},
-        # Gris bleuté
         {"base": (0.30, 0.31, 0.35), "var": 0.05},
-        # Gris chaud
         {"base": (0.36, 0.34, 0.32), "var": 0.06},
     ]
+
+    TARGET_SIZE = 2.0  # Taille cible pour l'auto-scale des modèles
 
     def __init__(self, parent, pos, size, speed):
         self.alive = True
         self.speed = speed
         self.size = size
-        self.hit_radius = size * 0.5  # Hitbox pour collisions
+        self.hit_radius = size * 0.5
         self.rot_speed = Vec3(
             random.uniform(-40, 40),
             random.uniform(-40, 40),
             random.uniform(-40, 40),
         )
 
-        self.node = self._make_deformed_sphere(size)
+        # Essaye de charger un modèle du pack
+        model = AsteroidModelCache.get_random()
+        if model:
+            self.node = self._setup_model(model, size)
+        else:
+            self.node = self._make_deformed_sphere(size)
+
         self.node.reparentTo(parent)
         self.node.setPos(pos)
+
+    def _setup_model(self, model, size):
+        """Configure un modèle chargé avec auto-scale."""
+        root = NodePath("asteroid")
+        model.reparentTo(root)
+
+        # Auto-scale basé sur les bounds du modèle
+        bounds = model.getTightBounds()
+        if bounds:
+            bmin, bmax = bounds
+            dims = bmax - bmin
+            max_dim = max(dims.getX(), dims.getY(), dims.getZ())
+            if max_dim > 0:
+                scale = size / max_dim
+                model.setScale(scale)
+
+        # Rotation aléatoire initiale
+        model.setHpr(
+            random.uniform(0, 360),
+            random.uniform(0, 360),
+            random.uniform(0, 360),
+        )
+
+        # Léger boost de luminosité
+        model.setColorScale(Vec4(1.3, 1.3, 1.3, 1))
+
+        return root
 
     def _make_deformed_sphere(self, size):
         """Crée une sphère UV déformée aléatoirement — chaque astéroïde est unique."""
@@ -340,6 +417,9 @@ class Environment:
 
     def __init__(self, game):
         self.game = game
+
+        # Charge le cache de modèles d'astéroïdes
+        AsteroidModelCache.load(game)
 
         self.asteroids = []
         self.planets = []
