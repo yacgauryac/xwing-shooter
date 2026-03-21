@@ -77,14 +77,14 @@ class AsteroidModelCache:
 
 
 class Asteroid:
-    """Un astéroïde — modèle 3D du pack ou sphère déformée procédurale."""
+    """Un astéroïde individuel — sphère déformée procédurale bleu-gris."""
 
     COLOR_PALETTES = [
-        {"base": (0.28, 0.27, 0.26), "var": 0.05},
-        {"base": (0.35, 0.34, 0.33), "var": 0.06},
-        {"base": (0.42, 0.41, 0.39), "var": 0.05},
-        {"base": (0.30, 0.31, 0.35), "var": 0.05},
-        {"base": (0.36, 0.34, 0.32), "var": 0.06},
+        {"base": (0.22, 0.24, 0.30), "var": 0.04},
+        {"base": (0.25, 0.27, 0.33), "var": 0.05},
+        {"base": (0.20, 0.22, 0.28), "var": 0.04},
+        {"base": (0.28, 0.30, 0.36), "var": 0.05},
+        {"base": (0.18, 0.20, 0.26), "var": 0.03},
     ]
 
     TARGET_SIZE = 2.0  # Taille cible pour l'auto-scale des modèles

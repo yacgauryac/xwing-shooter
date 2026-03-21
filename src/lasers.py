@@ -229,6 +229,14 @@ class LaserSystem:
         """Tire 2 bolts simultanés depuis la paire de canons active."""
         pair = self.CANNON_PAIRS[self.pair_index]
 
+        # Couleurs légèrement alternées (subtil)
+        if self.pair_index == 0:
+            c_back = Vec4(1.0, 0.15, 0.0, 1)
+            c_front = Vec4(1.0, 0.6, 0.35, 1)
+        else:
+            c_back = Vec4(1.0, 0.25, 0.0, 1)
+            c_front = Vec4(1.0, 0.7, 0.4, 1)
+
         for offset in pair:
             world_pos = self.game.render.getRelativePoint(player_node, offset)
 
@@ -243,7 +251,8 @@ class LaserSystem:
                     aim_dir.normalize()
                     base_dir = aim_dir
 
-            bolt = LaserBolt(self.game.render, world_pos, base_dir)
+            bolt = LaserBolt(self.game.render, world_pos, base_dir,
+                            color_back=c_back, color_front=c_front)
             self.bolts.append(bolt)
 
         self.pair_index = (self.pair_index + 1) % len(self.CANNON_PAIRS)
