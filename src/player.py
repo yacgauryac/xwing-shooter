@@ -386,14 +386,25 @@ class Player:
         new_pos = current_pos + (target_pos - current_pos) * lerp
         self.node.setPos(new_pos)
 
-        # --- Caméra suit le joueur (décale quand on va sur les côtés) ---
-        cam_offset_x = new_pos.getX() * 0.3  # 30% du déplacement joueur
-        cam_offset_z = new_pos.getZ() * 0.15
-        cam_target = Point3(cam_offset_x, -4, 3.0 + cam_offset_z * 0.5)
+        # --- Caméra : ne bouge que quand le vaisseau est près du bord ---
+        edge_x = self.BOUNDS_X * 0.8
+        edge_z = self.BOUNDS_Z * 0.8
+        px = new_pos.getX()
+        pz = new_pos.getZ()
+
+        cam_offset_x = 0
+        cam_offset_z = 0
+        if abs(px) > edge_x:
+            excess = (abs(px) - edge_x) / (self.BOUNDS_X - edge_x)
+            cam_offset_x = excess * 1.5 * (1 if px > 0 else -1)
+        if abs(pz) > edge_z:
+            excess = (abs(pz) - edge_z) / (self.BOUNDS_Z - edge_z)
+            cam_offset_z = excess * 0.8 * (1 if pz > 0 else -1)
+
+        cam_target = Point3(cam_offset_x, -4, 3.0 + cam_offset_z * 0.3)
         cam_current = self.game.camera.getPos()
-        cam_lerp = min(1.0, 3.0 * dt)
-        self.game.camera.setPos(cam_current + (cam_target - cam_current) * cam_lerp)
-        self.game.camera.lookAt(cam_offset_x * 0.5, 22, cam_offset_z * 0.3)
+        self.game.camera.setPos(cam_current + (cam_target - cam_current) * min(1.0, 6.0 * dt))
+        self.game.camera.lookAt(cam_offset_x * 0.3, 22, 0)
 
         # --- Rotation visuelle du modèle ---
         rot_lerp = self.ROT_SPEED * dt
