@@ -157,6 +157,7 @@ class Game(ShowBase):
             if damage > 0:
                 self.player_hp -= damage
                 self.hud.show_damage_flash()
+                self.player.show_shield_hit()
                 self.sounds.play("hit")
 
                 if self.player_hp <= 0:
@@ -170,6 +171,7 @@ class Game(ShowBase):
             if asteroid_damage > 0:
                 self.player_hp -= asteroid_damage
                 self.hud.show_damage_flash()
+                self.player.show_shield_hit()
                 self.sounds.play("hit")
 
                 if self.player_hp <= 0:
