@@ -1,10 +1,31 @@
 [
   {
+    "name": "YA",
+    "score": 14700,
+    "wave": 12,
+    "kills": 87,
+    "date": "2026-03-22"
+  },
+  {
     "name": "SDF",
     "score": 10300,
     "wave": 11,
     "kills": 67,
     "date": "2026-03-21"
+  },
+  {
+    "name": "DDD",
+    "score": 9550,
+    "wave": 11,
+    "kills": 58,
+    "date": "2026-03-22"
+  },
+  {
+    "name": "ZER",
+    "score": 9450,
+    "wave": 10,
+    "kills": 59,
+    "date": "2026-03-22"
   },
   {
     "name": "YAC",
@@ -35,38 +56,17 @@
     "date": "2026-03-21"
   },
   {
+    "name": "ZER",
+    "score": 5250,
+    "wave": 8,
+    "kills": 36,
+    "date": "2026-03-22"
+  },
+  {
     "name": "ZDD",
     "score": 5200,
     "wave": 9,
     "kills": 34,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "YAC",
-    "score": 4350,
-    "wave": 7,
-    "kills": 34,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "YAC",
-    "score": 4300,
-    "wave": 7,
-    "kills": 31,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "YAC",
-    "score": 4250,
-    "wave": 7,
-    "kills": 34,
-    "date": "2026-03-21"
-  },
-  {
-    "name": "ZER",
-    "score": 4250,
-    "wave": 7,
-    "kills": 33,
     "date": "2026-03-21"
   }
 ]

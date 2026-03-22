@@ -93,9 +93,10 @@ class MainMenu:
         self.game.accept("s", self._nav_down)
         self.game.accept("enter", self._select)
         self.game.accept("space", self._select)
+        self.game.accept("mouse1", self._mouse_click)
         self.game.accept("escape", self._back)
 
-        # Task pour l'animation
+        # Task pour l'animation + hover souris
         self.game.taskMgr.add(self._update_menu, "menu_update")
 
     def _build_entries(self, entries):
@@ -251,8 +252,30 @@ class MainMenu:
 
             self.current_menu = "leaderboard"
 
+    def _mouse_click(self):
+        """Clic souris — valide l'entrée survolée."""
+        if not self.active:
+            return
+        self._select()
+
+    def _get_mouse_hover_index(self):
+        """Retourne l'index du menu survolé par la souris, ou -1."""
+        if not self.game.mouseWatcherNode.hasMouse():
+            return -1
+        mouse_y = self.game.mouseWatcherNode.getMouseY()
+
+        entries = self._get_entries()
+        start_y = 0.2
+        spacing = 0.1
+
+        for i in range(len(entries)):
+            entry_y = start_y - i * spacing
+            if abs(mouse_y - entry_y) < spacing * 0.45:
+                return i
+        return -1
+
     def _update_menu(self, task):
-        """Animation du menu."""
+        """Animation du menu + hover souris."""
         if not self.active:
             return task.done
         self.timer += globalClock.getDt()
@@ -261,6 +284,13 @@ class MainMenu:
         if self.title:
             pulse = 0.95 + 0.05 * math.sin(self.timer * 2.0)
             self.title.setScale(0.12 * pulse)
+
+        # Hover souris
+        if self.current_menu != "leaderboard":
+            hover = self._get_mouse_hover_index()
+            if hover >= 0 and hover != self.selected:
+                self.selected = hover
+                self._update_selection()
 
         return task.cont
 
@@ -273,7 +303,7 @@ class MainMenu:
 
         # Unbind menu keys
         for key in ["arrow_up", "arrow_down", "z-repeat", "s-repeat",
-                     "z", "s", "enter", "space", "escape"]:
+                     "z", "s", "enter", "space", "escape", "mouse1"]:
             self.game.ignore(key)
 
         # Destroy elements

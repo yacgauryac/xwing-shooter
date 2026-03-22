@@ -23,6 +23,7 @@ from src.powerups import PowerUpManager
 from src.torpedoes import TorpedoSystem
 from src.force import ForceAbility
 from src.menu import MainMenu
+from src.levels import LevelManager
 
 
 class Game(ShowBase):
@@ -87,6 +88,7 @@ class Game(ShowBase):
         self.powerups = PowerUpManager(self)
         self.torpedoes = TorpedoSystem(self)
         self.force = ForceAbility()
+        self.level_manager = LevelManager(self)
 
         self.lasers.set_enemies(self.spawner)
 
@@ -150,6 +152,9 @@ class Game(ShowBase):
         if self.game_over:
             return task.cont
 
+        # Level transition — continue starfield/env mais pas combat
+        in_transition = hasattr(self, 'level_manager') and self.level_manager.transitioning
+
         # Force — update + time_scale
         self.force.update(dt)
         ts = self.force.get_time_scale()
@@ -166,15 +171,17 @@ class Game(ShowBase):
         self.player.update(dt_player)
         player_pos = self.player.node.getPos()
 
-        # Lasers joueur (temps normal, force_active pour auto-aim + no overheat)
-        self.lasers.update(dt_player, self.player.node,
-                          force_active=self.force.active)
+        if not in_transition:
+            # Lasers joueur
+            self.lasers.update(dt_player, self.player.node,
+                              force_active=self.force.active)
 
         # Score avant pour détecter les kills
         score_before = self.spawner.score
 
-        # Ennemis + tirs ennemis (temps ralenti)
-        self.spawner.update(dt_world, self.lasers, player_pos)
+        # Ennemis + tirs ennemis (temps ralenti) — pas pendant transition
+        if not in_transition:
+            self.spawner.update(dt_world, self.lasers, player_pos)
 
         # Détecte un kill → explosion + score + powerup + force
         if self.spawner.score > score_before:
@@ -259,10 +266,25 @@ class Game(ShowBase):
         # Explosions
         self.explosions.update(dt)
 
-        # Annonce nouvelle vague
+        # Level transition
+        if hasattr(self, 'level_manager') and self.level_manager.transitioning:
+            transition_done = self.level_manager.update(dt)
+            if transition_done:
+                # Nouveau niveau — prépare la prochaine vague
+                self.hud.announce_wave(self.level_manager.get_level_name())
+
+        # Annonce nouvelle vague + progression de niveau
         if self.spawner.wave != self.last_wave:
-            self.hud.announce_wave(self.spawner.wave)
             self.last_wave = self.spawner.wave
+            if hasattr(self, 'level_manager') and not self.level_manager.transitioning:
+                result = self.level_manager.on_wave_complete()
+                if result == "transition":
+                    pass  # Le level_manager gère l'affichage
+                elif result == "boss":
+                    # TODO: déclencher le boss fight
+                    self.hud.announce_wave("BOSS INCOMING!")
+                else:
+                    self.hud.announce_wave(self.level_manager.get_wave_display())
 
         # HUD
         self.hud.update(
@@ -331,6 +353,8 @@ class Game(ShowBase):
         self.powerups.reset()
         self.torpedoes.reset()
         self.force.reset()
+        if hasattr(self, 'level_manager'):
+            self.level_manager.reset()
 
         # Nettoie l'environnement
         for a in self.environment.asteroids:
