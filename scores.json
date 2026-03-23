@@ -56,17 +56,17 @@
     "date": "2026-03-21"
   },
   {
+    "name": "YAC",
+    "score": 6000,
+    "wave": 3,
+    "kills": 10,
+    "date": "2026-03-23"
+  },
+  {
     "name": "ZER",
     "score": 5250,
     "wave": 8,
     "kills": 36,
     "date": "2026-03-22"
-  },
-  {
-    "name": "ZDD",
-    "score": 5200,
-    "wave": 9,
-    "kills": 34,
-    "date": "2026-03-21"
   }
 ]

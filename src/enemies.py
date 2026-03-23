@@ -574,8 +574,10 @@ class EnemySpawner:
         self.enemies = [e for e in self.enemies if e.alive]
         self.enemy_bolts = [b for b in self.enemy_bolts if b.alive]
 
-        # Vague terminée ?
-        if (self.spawn_index >= len(self.wave_enemies_to_spawn)
+        # Vague terminée ? (seulement si on a fini de tout spawner ET plus d'ennemis)
+        if (self.wave_started
+                and self.spawn_index >= len(self.wave_enemies_to_spawn)
+                and len(self.wave_enemies_to_spawn) > 0
                 and len(self.enemies) == 0):
             self.next_wave()
 
@@ -652,5 +654,11 @@ class EnemySpawner:
         self._prepare_wave()
 
     def get_enemy_count(self):
-        remaining = len(self.wave_enemies_to_spawn) - self.spawn_index
+        remaining = max(0, len(self.wave_enemies_to_spawn) - self.spawn_index)
         return len(self.enemies) + remaining
+
+    def stop_spawning(self):
+        """Arrête le spawn — utilisé pour le boss."""
+        self.wave_enemies_to_spawn = []
+        self.spawn_index = 0
+        self.wave_started = False

@@ -23,7 +23,7 @@ from src.powerups import PowerUpManager
 from src.torpedoes import TorpedoSystem
 from src.force import ForceAbility
 from src.menu import MainMenu
-from src.levels import LevelManager
+from src.boss import BossTIEAdvanced, BOSS_TRIGGER_WAVE
 
 
 class Game(ShowBase):
@@ -88,7 +88,6 @@ class Game(ShowBase):
         self.powerups = PowerUpManager(self)
         self.torpedoes = TorpedoSystem(self)
         self.force = ForceAbility()
-        self.level_manager = LevelManager(self)
 
         self.lasers.set_enemies(self.spawner)
 
@@ -104,6 +103,8 @@ class Game(ShowBase):
         self.lb_rank = None
         self._was_overheated = False
         self.locking = False
+        self.boss = None
+        self.boss_phase = None  # None, "active", "destroying", "done"
 
         # Boucle de jeu
         self.taskMgr.add(self.update, "game_update")
@@ -152,9 +153,6 @@ class Game(ShowBase):
         if self.game_over:
             return task.cont
 
-        # Level transition — continue starfield/env mais pas combat
-        in_transition = hasattr(self, 'level_manager') and self.level_manager.transitioning
-
         # Force — update + time_scale
         self.force.update(dt)
         ts = self.force.get_time_scale()
@@ -171,17 +169,22 @@ class Game(ShowBase):
         self.player.update(dt_player)
         player_pos = self.player.node.getPos()
 
-        if not in_transition:
-            # Lasers joueur
-            self.lasers.update(dt_player, self.player.node,
-                              force_active=self.force.active)
+        # Lasers joueur (temps normal, force_active pour auto-aim + no overheat)
+        self.lasers.update(dt_player, self.player.node,
+                          force_active=self.force.active)
 
         # Score avant pour détecter les kills
         score_before = self.spawner.score
 
-        # Ennemis + tirs ennemis (temps ralenti) — pas pendant transition
-        if not in_transition:
+        # Ennemis + tirs ennemis (temps ralenti)
+        # Ennemis (pas pendant le boss)
+        if self.boss_phase is None:
             self.spawner.update(dt_world, self.lasers, player_pos)
+        else:
+            # Pendant le boss, update seulement les bolts ennemis (tourelles du SD)
+            for bolt in self.spawner.enemy_bolts:
+                bolt.update(dt_world)
+            self.spawner.enemy_bolts = [b for b in self.spawner.enemy_bolts if b.alive]
 
         # Détecte un kill → explosion + score + powerup + force
         if self.spawner.score > score_before:
@@ -266,25 +269,51 @@ class Game(ShowBase):
         # Explosions
         self.explosions.update(dt)
 
-        # Level transition
-        if hasattr(self, 'level_manager') and self.level_manager.transitioning:
-            transition_done = self.level_manager.update(dt)
-            if transition_done:
-                # Nouveau niveau — prépare la prochaine vague
-                self.hud.announce_wave(self.level_manager.get_level_name())
+        # Boss trigger
+        if self.spawner.wave >= BOSS_TRIGGER_WAVE and self.boss_phase is None:
+            self.spawner.stop_spawning()
 
-        # Annonce nouvelle vague + progression de niveau
-        if self.spawner.wave != self.last_wave:
-            self.last_wave = self.spawner.wave
-            if hasattr(self, 'level_manager') and not self.level_manager.transitioning:
-                result = self.level_manager.on_wave_complete()
-                if result == "transition":
-                    pass  # Le level_manager gère l'affichage
-                elif result == "boss":
-                    # TODO: déclencher le boss fight
-                    self.hud.announce_wave("BOSS INCOMING!")
-                else:
-                    self.hud.announce_wave(self.level_manager.get_wave_display())
+            if self.boss is None and len(self.spawner.enemies) == 0:
+                self.boss = BossTIEAdvanced(self)
+                self.boss.start()
+                self.boss_phase = "active"
+                self.hud.announce_wave("BOSS: DARTH VADER")
+
+        # Boss update
+        if self.boss and self.boss_phase == "active":
+            self.boss.update(dt, player_pos, self.spawner.enemy_bolts)
+
+            # Check tirs joueur → boss (distance simple)
+            for bolt in self.lasers.get_bolts():
+                if not bolt.alive:
+                    continue
+                boss_pos = self.boss.get_pos()
+                if boss_pos:
+                    dist = (bolt.node.getPos() - boss_pos).length()
+                    if dist < self.boss.hit_radius:
+                        self.boss.hit(bolt.DAMAGE)
+                        bolt.destroy()
+                        self.sounds.play("hit")
+
+            if self.boss.defeated:
+                self.boss_phase = "destroying"
+
+        elif self.boss and self.boss_phase == "destroying":
+            done = self.boss.update_destruction(dt, self.explosions)
+            if done:
+                self.boss_phase = "done"
+                self.spawner.score += 5000
+                self.boss.cleanup()
+                self.hud.announce_wave("VICTORY!")
+                self.game_over = True
+                self.hud.show_game_over(self.spawner.score)
+                self._trigger_leaderboard()
+
+        # Annonce nouvelle vague (seulement si pas de boss)
+        if self.boss_phase is None:
+            if self.spawner.wave != self.last_wave:
+                self.hud.announce_wave(self.spawner.wave)
+                self.last_wave = self.spawner.wave
 
         # HUD
         self.hud.update(
@@ -353,8 +382,10 @@ class Game(ShowBase):
         self.powerups.reset()
         self.torpedoes.reset()
         self.force.reset()
-        if hasattr(self, 'level_manager'):
-            self.level_manager.reset()
+        if self.boss:
+            self.boss.cleanup()
+        self.boss = None
+        self.boss_phase = None
 
         # Nettoie l'environnement
         for a in self.environment.asteroids:
