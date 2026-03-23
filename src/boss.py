@@ -71,7 +71,6 @@ class BossTIEAdvanced:
         self.node = self._make_tie_advanced()
         self.node.reparentTo(self.game.render)
         self.node.setPos(self.pos)
-        self.node.setLightOff()
 
         # Waypoints flight
         self.waypoints = []
@@ -92,15 +91,27 @@ class BossTIEAdvanced:
         )
 
     def _make_tie_advanced(self):
-        """Charge le modèle TIE Fighter, plus gros, teinté rouge."""
-        model_path = "assets/models/tie_fighter/scene.gltf"
+        """Charge le modèle TIE Fighter — réutilise le cache si dispo."""
+        from src.enemies import BaseEnemy
+
         root = NodePath("tie_advanced")
 
+        # Essaye le cache des ennemis d'abord
+        if "TIEFighter" in BaseEnemy._model_cache:
+            model = BaseEnemy._model_cache["TIEFighter"].copyTo(root)
+            scale = BaseEnemy._model_cache.get("TIEFighter_scale", 0.002)
+            model.setScale(scale * 1.8)  # 80% plus gros
+            model.setH(0)
+            model.setColorScale(Vec4(1.8, 1.8, 2.0, 1))
+            print("[Boss] TIE Advanced depuis cache")
+            return root
+
+        # Sinon charge le modèle
+        model_path = "assets/models/tie_fighter/scene.gltf"
         if os.path.exists(model_path):
             try:
                 model = self.game.loader.loadModel(model_path)
                 if model:
-                    # Auto-scale à taille boss (3.5 = plus gros que les TIE normaux)
                     bounds = model.getTightBounds()
                     if bounds:
                         bmin, bmax = bounds
@@ -108,19 +119,15 @@ class BossTIEAdvanced:
                         max_dim = max(dims.getX(), dims.getY(), dims.getZ())
                         if max_dim > 0:
                             model.setScale(3.5 / max_dim)
-
                     model.reparentTo(root)
                     model.setH(0)
-                    # Même rendu que les TIE normaux
                     model.setColorScale(Vec4(1.8, 1.8, 2.0, 1))
-                    print("[Boss] TIE Advanced chargé depuis modèle")
+                    print("[Boss] TIE Advanced depuis fichier")
                     return root
             except Exception as e:
                 print(f"[Boss] Erreur modèle: {e}")
 
-        # Fallback procédural simple
-        from src.enemies import TIEFighter
-        print("[Boss] Fallback procédural")
+        # Fallback
         cockpit = self._make_fallback()
         cockpit.reparentTo(root)
         root.setScale(2.0)
@@ -172,130 +179,73 @@ class BossTIEAdvanced:
         # Flash quand touché
         if self.flash_timer > 0:
             self.flash_timer -= dt
-            self.node.setColorScale(4, 4, 4, 1)
+            if self.node.getNumChildren() > 0:
+                self.node.getChild(0).setColorScale(Vec4(5, 5, 5, 1))
             if self.flash_timer <= 0:
-                self.node.setColorScale(1.8, 1.8, 2.0, 1)
+                if self.node.getNumChildren() > 0:
+                    self.node.getChild(0).setColorScale(Vec4(1.8, 1.8, 2.0, 1))
 
-        # --- Vol par waypoints ---
-        self.pattern_timer += dt
         self.move_timer += dt
-        prev_pos = Vec3(self.pos)
 
-        # Définit les waypoints selon le pattern
-        if not hasattr(self, 'waypoints') or len(self.waypoints) == 0:
-            self._set_pattern(phase, player_pos)
+        # Mouvement fluide — figure en 8 devant le joueur
+        speed_mult = 1.0 + (phase - 1) * 0.3
+        t = self.move_timer * speed_mult
 
-        # Avance vers le waypoint courant
-        if hasattr(self, 'waypoints') and self.wp_index < len(self.waypoints):
-            target = self.waypoints[self.wp_index]
-            to_target = target - self.pos
-            dist = to_target.length()
+        x = math.sin(t * 0.8) * 8
+        y = 55 + math.sin(t * 0.4) * 12
+        z = 3 + math.cos(t * 0.6) * 3
 
-            if dist < 3.0:
-                # Waypoint atteint — suivant
-                self.wp_index += 1
-                if self.wp_index >= len(self.waypoints):
-                    # Fin du pattern — en choisir un nouveau
-                    self._set_pattern(phase, player_pos)
-            else:
-                # Avance vers le waypoint
-                speed = 25 + phase * 8
-                to_target.normalize()
-                self.pos = self.pos + to_target * speed * dt
-
+        target = Vec3(x, y, z)
+        lerp = min(1.0, 2.5 * dt)
+        self.pos = self.pos + (target - self.pos) * lerp
         self.node.setPos(self.pos)
 
-        # --- Orientation naturelle ---
-        move_dir = self.pos - prev_pos
-        if move_dir.length() > 0.01:
-            move_dir.normalize()
-            h = math.degrees(math.atan2(-move_dir.getX(), move_dir.getY()))
-            p = math.degrees(math.asin(max(-1, min(1, move_dir.getZ()))))
-            r = move_dir.getX() * -50  # Banke dans les virages
+        # Orientation — face au joueur avec léger bank
+        dx = target.getX() - self.pos.getX()
+        roll = -dx * 15
 
-            cur_h, cur_p, cur_r = self.node.getHpr()
-            rl = min(1.0, 4.0 * dt)
-            self.node.setHpr(
-                cur_h + (h - cur_h) * rl,
-                cur_p + (p - cur_p) * rl,
-                cur_r + (r - cur_r) * rl,
-            )
+        look_dir = player_pos - self.pos
+        if look_dir.length() > 0:
+            h = math.degrees(math.atan2(-look_dir.getX(), look_dir.getY()))
+        else:
+            h = 0
 
-        # --- Tir (quand devant le joueur) ---
-        if self.pos.getY() > player_pos.getY() + 10:
-            fire_rate = 1.2 if phase == 1 else 0.7 if phase == 2 else 0.4
-            self.fire_timer -= dt
-            if self.fire_timer <= 0:
-                self.fire_timer = fire_rate
-                self._fire(player_pos, enemy_bolts)
-                if phase >= 2:
-                    self._fire(player_pos, enemy_bolts, offset=Vec3(0.8, 0, 0))
-                if phase >= 3:
-                    self._fire(player_pos, enemy_bolts, offset=Vec3(-0.8, 0, 0))
+        cur_h, cur_p, cur_r = self.node.getHpr()
+
+        # Normalise les angles pour éviter les tours
+        cur_h = cur_h % 360
+        if cur_h > 180:
+            cur_h -= 360
+
+        dh = h - cur_h
+        if dh > 180:
+            dh -= 360
+        elif dh < -180:
+            dh += 360
+
+        rl = min(1.0, 2.0 * dt)  # Plus lent = plus smooth
+        new_h = cur_h + dh * rl
+        self.node.setHpr(
+            new_h,
+            cur_p * (1 - rl),  # Pitch vers 0
+            cur_r + (roll - cur_r) * rl,
+        )
+
+        # Tir
+        fire_rate = 1.2 if phase == 1 else 0.7 if phase == 2 else 0.4
+        self.fire_timer -= dt
+        if self.fire_timer <= 0:
+            self.fire_timer = fire_rate
+            self._fire(player_pos, enemy_bolts)
+            if phase >= 2:
+                self._fire(player_pos, enemy_bolts, offset=Vec3(0.8, 0, 0))
+            if phase >= 3:
+                self._fire(player_pos, enemy_bolts, offset=Vec3(-0.8, 0, 0))
 
         # UI
         pct = self.hp / self.max_hp
         if self.phase_text:
             self.phase_text.setText(f"PHASE {phase} — {int(pct * 100)}%")
-
-    def _set_pattern(self, phase, player_pos):
-        """Choisit un nouveau pattern de vol avec waypoints."""
-        self.wp_index = 0
-        pattern = random.choice(["flyby_left", "flyby_right", "loop", "zigzag", "dive"])
-
-        px = player_pos.getX()
-
-        if pattern == "flyby_left":
-            # Passe à gauche du joueur, fait demi-tour
-            self.waypoints = [
-                Point3(-10, 80, 6),
-                Point3(-6, 50, 3),
-                Point3(-3, 25, 0),    # Passe proche
-                Point3(-8, 10, -2),   # Derrière
-                Point3(-12, 30, 5),   # Remonte sur le côté
-                Point3(-5, 70, 8),    # Revient devant
-                Point3(0, 60, 4),
-            ]
-        elif pattern == "flyby_right":
-            self.waypoints = [
-                Point3(10, 80, 6),
-                Point3(6, 50, 3),
-                Point3(3, 25, 0),
-                Point3(8, 10, -2),
-                Point3(12, 30, 5),
-                Point3(5, 70, 8),
-                Point3(0, 60, 4),
-            ]
-        elif pattern == "loop":
-            # Boucle verticale devant le joueur
-            segs = 12
-            self.waypoints = []
-            for i in range(segs):
-                a = i / segs * math.pi * 2
-                x = math.sin(a) * 6 + random.uniform(-2, 2)
-                y = 55 + math.cos(a) * 20
-                z = 4 + math.sin(a * 2) * 5
-                self.waypoints.append(Point3(x, y, z))
-        elif pattern == "zigzag":
-            # Zigzag rapide
-            self.waypoints = [
-                Point3(-8, 70, 5),
-                Point3(8, 55, 3),
-                Point3(-8, 45, 6),
-                Point3(8, 35, 2),
-                Point3(-5, 50, 4),
-                Point3(0, 65, 5),
-            ]
-        elif pattern == "dive":
-            # Piqué vers le joueur puis remontée
-            self.waypoints = [
-                Point3(px, 80, 10),
-                Point3(px, 40, 2),      # Piqué
-                Point3(px * 0.5, 25, -1),  # Très proche
-                Point3(-px, 30, 3),     # Esquive
-                Point3(-px * 0.5, 60, 8),
-                Point3(0, 70, 5),
-            ]
 
     def _fire(self, player_pos, enemy_bolts, offset=None):
         pos = Vec3(self.pos)
