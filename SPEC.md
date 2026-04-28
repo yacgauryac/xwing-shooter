@@ -245,9 +245,11 @@ main.py
 
 ## TODO / Roadmap
 
-- [ ] Intégrer les planètes texturées (9 modèles chargés mais non spawnés)
-- [ ] HUD overlay PNG en 16:9 (code d'intégration déjà prêt dans hud.py)
-- [ ] Câbler LevelManager (niveaux thématiques : surface planète, champ d'astéroïdes, station)
-- [ ] Sons améliorés (bibliothèque Sci-Fi SFX déjà téléchargée dans Download/)
-- [ ] Star Destroyer comme mini-boss de niveau (modèle déjà disponible)
-- [ ] V2 Free Flight (nouveau projet, ~80% code réutilisable)
+Voir [ROADMAP.md](ROADMAP.md) pour le détail complet V1 ✅ + V2 planifié.
+
+Prochaines priorités V2 :
+- Visuels distincts par niveau (L2 surface lunaire, L3 tranchée, L4 nébuleuse)
+- Nouveaux types d'ennemis (Shuttle, Probe Droid, tourelles sol)
+- Boss Star Destroyer avec tourelles destructibles
+- Audio upgrade (musiques ambiantes, dialogues radio)
+- Screenshake + effets caméra
