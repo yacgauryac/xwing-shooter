@@ -418,9 +418,10 @@ class Game(ShowBase):
         if self.game_over:
             self.locking = False
             return
-        self.locking = False
         player_pos = self.player.node.getPos()
-        if self.torpedoes.fire(player_pos):
+        fired = self.torpedoes.fire(player_pos)
+        self.locking = False  # Après fire() pour garder locked_target valide
+        if fired:
             self.sounds.play("explosion")
 
     def activate_force(self):
@@ -453,6 +454,10 @@ class Game(ShowBase):
         for c in "abcdefghijklmnopqrstuvwxyz":
             self.ignore(c)
         self.ignore("backspace")
+        # Restaure les bindings jeu écrasés par A-Z
+        if self.game_started:
+            self.accept("m", self.sounds.toggle)
+            self.accept("r", self.reset_game)
 
     def _lb_key(self, key):
         """Gère les touches pour la saisie du nom."""
@@ -539,7 +544,22 @@ class Game(ShowBase):
         """Bascule entre plein écran et fenêtré."""
         self.is_fullscreen = not self.is_fullscreen
         props = WindowProperties()
-        props.setFullscreen(self.is_fullscreen)
-        if not self.is_fullscreen:
+        if self.is_fullscreen:
+            info = self.pipe.getDisplayInformation()
+            w = info.getDisplayWidth()
+            h = info.getDisplayHeight()
+            props.setFullscreen(True)
+            props.setSize(w, h)
+        else:
+            props.setFullscreen(False)
             props.setSize(1280, 720)
         self.win.requestProperties(props)
+        self.taskMgr.doMethodLater(0.05, self._sync_aspect, "sync_aspect")
+
+    def _sync_aspect(self, task):
+        """Resynchronise le ratio caméra après un resize."""
+        w = self.win.getXSize()
+        h = self.win.getYSize()
+        if h > 0:
+            self.camLens.setAspectRatio(w / h)
+        return task.done

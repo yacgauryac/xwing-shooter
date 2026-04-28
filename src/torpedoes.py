@@ -23,7 +23,7 @@ TORPEDO_SPLASH_RADIUS = 15.0
 TORPEDO_SPLASH_DAMAGE = 10  # Tue tout dans le rayon
 TORPEDO_COOLDOWN = 1.0
 LOCK_RANGE = 120.0         # Distance max de lock
-LOCK_CONE = 8.0            # Rayon autour du réticule pour le lock
+LOCK_CONE = 14.0           # Rayon autour du réticule pour le lock
 
 
 class ProtonTorpedo:
@@ -320,22 +320,22 @@ class TorpedoSystem:
         self.locked_target = best
 
     def fire(self, player_pos):
-        """Tire une torpille si possible."""
+        """Tire une torpille si possible. Guidée si lock, dumb-fire sinon."""
         if self.stock <= 0:
             return False
         if self.cooldown > 0:
-            return False
-        if self.locked_target is None:
             return False
 
         self.stock -= 1
         self.cooldown = TORPEDO_COOLDOWN
 
+        target = self.locked_target
         direction = Vec3(0, 1, 0)
-        target_pos = self.locked_target.get_pos()
-        if target_pos:
-            direction = target_pos - player_pos
-            direction.normalize()
+        if target and hasattr(target, 'alive') and target.alive:
+            target_pos = target.get_pos()
+            if target_pos:
+                direction = target_pos - player_pos
+                direction.normalize()
 
         # 2 torpilles côte à côte (comme dans les films)
         offset = 0.8
@@ -343,10 +343,7 @@ class TorpedoSystem:
             pos = Vec3(player_pos.getX() + side * offset,
                        player_pos.getY(),
                        player_pos.getZ())
-            torpedo = ProtonTorpedo(
-                self.game, pos, direction,
-                target=self.locked_target
-            )
+            torpedo = ProtonTorpedo(self.game, pos, direction, target=target)
             self.torpedoes.append(torpedo)
         return True
 
