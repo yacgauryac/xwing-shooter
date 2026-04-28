@@ -404,6 +404,8 @@ class Game(ShowBase):
         self.player.node.setPos(0, 20, 0)
         self.player.target_x = 0
         self.player.target_z = 0
+        # Restaure les touches de mouvement (z/q/s/d écrasées par le leaderboard)
+        self.player.setup_controls()
 
         # Reset HUD
         self.hud.game_over_text.setText("")
@@ -545,9 +547,8 @@ class Game(ShowBase):
         self.is_fullscreen = not self.is_fullscreen
         props = WindowProperties()
         if self.is_fullscreen:
-            info = self.pipe.getDisplayInformation()
-            w = info.getDisplayWidth()
-            h = info.getDisplayHeight()
+            w = self.pipe.getDisplayWidth()
+            h = self.pipe.getDisplayHeight()
             props.setFullscreen(True)
             props.setSize(w, h)
         else:

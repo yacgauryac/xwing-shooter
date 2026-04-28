@@ -237,9 +237,9 @@ main.py
 - Création `SPEC.md` et `CLAUDE.md`
 
 ### v0.14 — Bugfixes : keys / torpilles / fullscreen
-- **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z (évite que les bindings jeu soient détruits par le leaderboard name entry)
-- **Bug torpilles** : `fire_torpedo()` appelle `fire()` avant de mettre `locking=False` (évite la perte du `locked_target` entre frames) ; `LOCK_CONE` 8→14 ; le tir sans lock (dumb-fire tout droit) est maintenant possible
-- **Bug fullscreen** : résolution native récupérée via `pipe.getDisplayInformation()` ; `camLens.setAspectRatio` resynchronisé 50ms après le resize
+- **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard)
+- **Bug torpilles** : `fire_torpedo()` appelle `fire()` avant de mettre `locking=False` ; `LOCK_CONE` 8→14 ; dumb-fire sans lock possible
+- **Bug fullscreen** : résolution native via `pipe.getDisplayWidth/Height()` ; `camLens.setAspectRatio` resynchronisé 50ms après resize
 
 ---
 
