@@ -372,9 +372,13 @@ class Game(ShowBase):
         self.spawner.enemy_bolts = []
         self.spawner.score = 0
         self.spawner.wave = 1
-        self.spawner.enemies_spawned = 0
-        self.spawner.enemies_per_wave = 5
-        self.spawner.spawn_timer = 1.0
+        self.spawner.spawn_timer = 2.0
+        self.spawner.wave_enemies_to_spawn = []
+        self.spawner.spawn_index = 0
+        self.spawner.wave_started = False
+        self.spawner.last_kill_pos = None
+        self.spawner.last_kill_class = None
+        self.spawner._prepare_wave()
 
         self.lasers.bolts = []
         self.explosions.explosions = []
@@ -400,6 +404,10 @@ class Game(ShowBase):
         self.environment.planets = []
         self.environment.nebulae = []
         self.environment.debris = []
+        self.environment.asteroid_timer = 2.0
+        self.environment.nebula_timer = 15.0
+        self.environment.debris_timer = 4.0
+        self.environment._spawn_fixed_planets()
 
         self.player.node.setPos(0, 20, 0)
         self.player.target_x = 0
