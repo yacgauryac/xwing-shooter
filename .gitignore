@@ -29,3 +29,14 @@ dist/
 *.egg-info/
 
 Download/
+
+# Junk / binaries
+*.exe
+*.zip
+*.pdf
+*.jpg
+*.jpeg
+*.png
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.jpeg
