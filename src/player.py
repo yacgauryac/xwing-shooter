@@ -142,6 +142,10 @@ class Player:
                     self.model_h = 180
                     model.setH(self.model_h)
                     model.setColorScale(Vec4(3.0, 3.0, 3.0, 1))
+
+                    # Moteurs rouges (4 points lumineux aux réacteurs)
+                    self._add_engine_glows(model)
+
                     return model
             except Exception as e:
                 print(f"[Player] Erreur chargement modèle: {e}")
@@ -276,9 +280,9 @@ class Player:
         if self.shield_flash_timer > 0:
             self.shield_flash_timer -= dt
             progress = self.shield_flash_timer / 0.25
-            white = progress * 4.0
+            red = progress * 3.0
             self.model_node.setColorScale(
-                3.0 + white, 3.0 + white, 3.0 + white * 1.5, 1.0
+                3.0 + red, 3.0, 3.0, 1.0
             )
             if self.shield_flash_timer <= 0:
                 self.model_node.setColorScale(Vec4(3.0, 3.0, 3.0, 1))
@@ -621,5 +625,40 @@ class Player:
             self.speed_lines.append({"node": np, "life": life, "max_life": life})
 
     def show_shield_hit(self, impact_pos=None):
-        """Flash blanc sur le vaisseau quand touché."""
+        """Flash rouge sur le vaisseau quand touché."""
         self.shield_flash_timer = 0.25
+
+    def _add_engine_glows(self, model):
+        """Ajoute des points rouges lumineux aux 4 réacteurs."""
+        from panda3d.core import (
+            GeomVertexFormat, GeomVertexData, GeomVertexWriter,
+            Geom, GeomPoints, GeomNode
+        )
+
+        # Positions approximatives des 4 moteurs (modèle orienté H=180)
+        engine_positions = [
+            Point3(0.9, 0.5, 0.3),
+            Point3(-0.9, 0.5, 0.3),
+            Point3(0.9, 0.5, -0.3),
+            Point3(-0.9, 0.5, -0.3),
+        ]
+
+        for epos in engine_positions:
+            fmt = GeomVertexFormat.getV3c4()
+            vdata = GeomVertexData("eng", fmt, Geom.UHStatic)
+            v = GeomVertexWriter(vdata, "vertex")
+            c = GeomVertexWriter(vdata, "color")
+            v.addData3(0, 0, 0)
+            c.addData4(Vec4(1.0, 0.2, 0.05, 1.0))
+            pts = GeomPoints(Geom.UHStatic)
+            pts.addVertex(0)
+            geom = Geom(vdata)
+            geom.addPrimitive(pts)
+            node = GeomNode("engine_glow")
+            node.addGeom(geom)
+            np = NodePath(node)
+            np.reparentTo(model)
+            np.setPos(epos)
+            np.setRenderModeThickness(6.0)
+            np.setLightOff()
+            np.setColorScale(3.0, 0.5, 0.1, 1.0)
