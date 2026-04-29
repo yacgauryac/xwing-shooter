@@ -2,14 +2,20 @@
 Explosions V2 — Flash + onde de choc + fireballs + étincelles + débris sombres.
 3 presets : small (TIE Fighter) / medium (torpille / TIE Bomber) / large (boss).
 Palette stricte : jamais de bleu/vert/violet — que du chaud.
+
+Géométrie entièrement procédurale — pas de CardMaker (évite les rectangles visibles) :
+  - Flash / fireballs  → disques avec gradient alpha centre→bord
+  - Onde de choc       → anneau (3 cercles concentriques, alpha pic au milieu)
+  - Étincelles         → GeomPoints
+  - Débris             → triangles colorés
 """
 
 from panda3d.core import (
     Vec3, Vec4, Point3,
-    CardMaker, ColorBlendAttrib,
+    ColorBlendAttrib, TransparencyAttrib,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomPoints, GeomTriangles, GeomNode,
-    NodePath, TextNode, TransparencyAttrib,
+    NodePath, TextNode,
 )
 from direct.gui.OnscreenText import OnscreenText
 import random
@@ -25,7 +31,7 @@ PRESETS = {
         "flash_size":   1.2,
         "shock_max_r":  2.5,
         "fb_count":     2,
-        "fb_size":      0.5,
+        "fb_size":      0.6,
         "sparks":       20,
         "duration":     0.5,
         "debris_count": 5,
@@ -34,7 +40,7 @@ PRESETS = {
         "flash_size":   2.0,
         "shock_max_r":  4.0,
         "fb_count":     3,
-        "fb_size":      1.0,
+        "fb_size":      1.1,
         "sparks":       30,
         "duration":     0.7,
         "debris_count": 6,
@@ -43,19 +49,122 @@ PRESETS = {
         "flash_size":   3.5,
         "shock_max_r":  6.0,
         "fb_count":     5,
-        "fb_size":      1.8,
+        "fb_size":      2.0,
         "sparks":       45,
         "duration":     1.2,
         "debris_count": 8,
     },
 }
 
-# Couleurs fireballs — chaud uniquement
+# Couleurs fireballs — palette chaude uniquement
 _FB_COLORS = [
     (2.8, 1.4, 0.15),   # Orange vif
     (2.2, 0.9, 0.05),   # Orange moyen
     (1.5, 0.5, 0.0),    # Orange brûlé / rouge
 ]
+
+# Blend additif standard : src*alpha + dst
+_ADDBLEND = ColorBlendAttrib.make(
+    ColorBlendAttrib.M_add,
+    ColorBlendAttrib.O_incoming_alpha,
+    ColorBlendAttrib.O_one,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers géométrie circulaire
+# ---------------------------------------------------------------------------
+
+def _make_disc(game, radius, segments=18, sort=50):
+    """
+    Disque billboard avec gradient alpha 1.0 (centre) → 0.0 (bord).
+    Utiliser setColorScale(r, g, b, 1.0) pour teinter + animer.
+    """
+    fmt   = GeomVertexFormat.getV3c4()
+    vdata = GeomVertexData("disc", fmt, Geom.UHStatic)
+    vdata.setNumRows(1 + segments)
+    vtx = GeomVertexWriter(vdata, "vertex")
+    col = GeomVertexWriter(vdata, "color")
+
+    # Centre : alpha plein
+    vtx.addData3(0, 0, 0)
+    col.addData4(1.0, 1.0, 1.0, 1.0)
+
+    # Bord : alpha zéro (bord invisible)
+    for i in range(segments):
+        a = 2 * math.pi * i / segments
+        vtx.addData3(math.cos(a) * radius, 0, math.sin(a) * radius)
+        col.addData4(1.0, 1.0, 1.0, 0.0)
+
+    tris = GeomTriangles(Geom.UHStatic)
+    for i in range(segments):
+        tris.addVertices(0, 1 + i, 1 + (i + 1) % segments)
+
+    geom = Geom(vdata)
+    geom.addPrimitive(tris)
+    node = GeomNode("disc")
+    node.addGeom(geom)
+
+    np = NodePath(node)
+    np.reparentTo(game.render)
+    np.setBillboardPointEye()
+    np.setLightOff()
+    np.setDepthWrite(False)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    np.setAttrib(_ADDBLEND)
+    np.setBin("fixed", sort)
+    return np
+
+
+def _make_ring(game, max_radius, segments=24, sort=49):
+    """
+    Anneau billboard : 3 cercles concentriques (in 60% / mid 80% / out 100%).
+    Gradient alpha : 0→1→0 (bord interne et externe invisibles, pic au milieu).
+    L'anneau est créé à max_radius=1.0 — utiliser setScale(r,1,r) pour expanser.
+    """
+    n   = segments
+    fmt = GeomVertexFormat.getV3c4()
+    vdata = GeomVertexData("ring", fmt, Geom.UHStatic)
+    vdata.setNumRows(n * 3)
+    vtx = GeomVertexWriter(vdata, "vertex")
+    col = GeomVertexWriter(vdata, "color")
+
+    rings = [
+        (0.55, 0.0),    # Interne : transparent
+        (0.80, 1.0),    # Milieu  : opaque (pic de luminosité)
+        (1.00, 0.0),    # Externe : transparent
+    ]
+    for r_frac, alpha in rings:
+        for i in range(n):
+            a = 2 * math.pi * i / n
+            vtx.addData3(math.cos(a) * r_frac, 0, math.sin(a) * r_frac)
+            col.addData4(1.0, 1.0, 1.0, alpha)
+
+    tris = GeomTriangles(Geom.UHStatic)
+    for ring_idx in range(2):   # 0: in→mid, 1: mid→out
+        base_a = ring_idx * n
+        base_b = (ring_idx + 1) * n
+        for i in range(n):
+            ni = (i + 1) % n
+            tris.addVertices(base_a + i,  base_b + i,  base_b + ni)
+            tris.addVertices(base_a + i,  base_b + ni, base_a + ni)
+
+    geom = Geom(vdata)
+    geom.addPrimitive(tris)
+    node = GeomNode("ring")
+    node.addGeom(geom)
+
+    np = NodePath(node)
+    np.reparentTo(game.render)
+    np.setBillboardPointEye()
+    np.setLightOff()
+    np.setDepthWrite(False)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    np.setAttrib(_ADDBLEND)
+    np.setBin("fixed", sort)
+    # Taille initiale minimale
+    np.setScale(0.3, 1, 0.3)
+    return np
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +175,8 @@ class DebrisChunk:
     """Morceau de vaisseau sombre qui se disperse puis fade."""
 
     def __init__(self, game, position):
-        self.alive       = True
-        self.lifetime    = random.uniform(0.4, 0.8)
+        self.alive        = True
+        self.lifetime     = random.uniform(0.4, 0.8)
         self.max_lifetime = self.lifetime
 
         speed = random.uniform(6, 18)
@@ -83,71 +192,66 @@ class DebrisChunk:
             random.uniform(-150, 150),
             random.uniform(-150, 150),
         )
-
         self.node = self._make_chunk()
         self.node.reparentTo(game.render)
         self.node.setPos(position)
         self.node.setLightOff()
 
     def _make_chunk(self):
-        fmt  = GeomVertexFormat.getV3c4()
+        fmt   = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("chunk", fmt, Geom.UHStatic)
-        v = GeomVertexWriter(vdata, "vertex")
-        c = GeomVertexWriter(vdata, "color")
+        vtx   = GeomVertexWriter(vdata, "vertex")
+        col   = GeomVertexWriter(vdata, "color")
 
-        chunk_type = random.randint(0, 2)
-        # Palette sombre — gris très sombre (0.08-0.18)
+        ctype = random.randint(0, 2)
         gray  = random.uniform(0.08, 0.18)
-        col   = Vec4(gray,        gray,        gray * 0.9,  1)
-        col2  = Vec4(gray * 1.3,  gray * 1.2,  gray,        1)
+        c1    = Vec4(gray,       gray,       gray * 0.9, 1)
+        c2    = Vec4(gray * 1.3, gray * 1.2, gray,       1)
+        tris  = GeomTriangles(Geom.UHStatic)
 
-        tris = GeomTriangles(Geom.UHStatic)
-
-        if chunk_type == 0:
+        if ctype == 0:
             w = random.uniform(0.2, 0.5)
             h = random.uniform(0.3, 0.7)
-            v.addData3(-w, 0, -h); c.addData4(col)
-            v.addData3( w, 0, -h); c.addData4(col)
-            v.addData3( w, 0,  h); c.addData4(col2)
-            v.addData3(-w, 0,  h); c.addData4(col2)
+            vtx.addData3(-w, 0, -h); col.addData4(c1)
+            vtx.addData3( w, 0, -h); col.addData4(c1)
+            vtx.addData3( w, 0,  h); col.addData4(c2)
+            vtx.addData3(-w, 0,  h); col.addData4(c2)
             tris.addVertices(0, 1, 2); tris.addVertices(0, 2, 3)
-        elif chunk_type == 1:
+        elif ctype == 1:
             s = random.uniform(0.2, 0.4)
-            v.addData3(-s, 0, -s*2); c.addData4(col)
-            v.addData3( s, 0, -s*2); c.addData4(col)
-            v.addData3( s, 0,  0);   c.addData4(col2)
-            v.addData3(-s, 0,  0);   c.addData4(col2)
-            v.addData3(-s, 0,  0);   c.addData4(col2)
-            v.addData3( 0, 0,  0);   c.addData4(col2)
-            v.addData3( 0, 0,  s);   c.addData4(col)
-            v.addData3(-s, 0,  s);   c.addData4(col)
+            vtx.addData3(-s, 0, -s*2); col.addData4(c1)
+            vtx.addData3( s, 0, -s*2); col.addData4(c1)
+            vtx.addData3( s, 0,  0);   col.addData4(c2)
+            vtx.addData3(-s, 0,  0);   col.addData4(c2)
+            vtx.addData3(-s, 0,  0);   col.addData4(c2)
+            vtx.addData3( 0, 0,  0);   col.addData4(c2)
+            vtx.addData3( 0, 0,  s);   col.addData4(c1)
+            vtx.addData3(-s, 0,  s);   col.addData4(c1)
             tris.addVertices(0, 1, 2); tris.addVertices(0, 2, 3)
             tris.addVertices(4, 5, 6); tris.addVertices(4, 6, 7)
         else:
             s = random.uniform(0.15, 0.4)
-            v.addData3(-s,      0, -s*0.6); c.addData4(col)
-            v.addData3( s*1.2,  0, -s*0.2); c.addData4(col2)
-            v.addData3( s*0.3,  0,  s*0.8); c.addData4(col)
+            vtx.addData3(-s,     0, -s*0.6); col.addData4(c1)
+            vtx.addData3( s*1.2, 0, -s*0.2); col.addData4(c2)
+            vtx.addData3( s*0.3, 0,  s*0.8); col.addData4(c1)
             tris.addVertices(0, 1, 2)
 
         geom = Geom(vdata)
         geom.addPrimitive(tris)
-        node = GeomNode("chunk")
-        node.addGeom(geom)
-        return NodePath(node)
+        n = GeomNode("chunk")
+        n.addGeom(geom)
+        return NodePath(n)
 
     def update(self, dt):
         if not self.alive:
             return
         self.lifetime -= dt
         if self.lifetime <= 0:
-            self.destroy()
-            return
+            self.destroy(); return
 
         self.node.setPos(self.node.getPos() + self.velocity * dt)
-        # Légère gravité
         self.velocity.setZ(self.velocity.getZ() - 2.0 * dt)
-        self.velocity *= (1.0 - 1.5 * dt)
+        self.velocity *= max(0.0, 1.0 - 1.5 * dt)
 
         h, p, r = self.node.getHpr()
         self.node.setHpr(
@@ -156,7 +260,7 @@ class DebrisChunk:
             r + self.rot_speed.getZ() * dt,
         )
         # Fade sur les 30% finaux de vie
-        pct = self.lifetime / self.max_lifetime
+        pct   = self.lifetime / self.max_lifetime
         alpha = min(1.0, pct / 0.3)
         self.node.setColorScale(1, 1, 1, alpha)
 
@@ -173,33 +277,27 @@ class DebrisChunk:
 class Explosion:
     """
     Explosion multi-composants avec preset.
-    Composants :
-      A. Flash initial       (0.0 → 0.1s)
-      B. Onde de choc        (0.0 → 0.25s)
-      C. Boules de feu       (0.0 → duration)
-      D. Étincelles GeomPts  (0.0 → 0.4s)
-      E. Débris sombres      (0.0 → 0.7s)
+    Tous les éléments lumineux sont des disques/anneaux procéduraux (pas de quads).
     """
 
-    SHOCK_DURATION  = 0.25
-    FLASH_DURATION  = 0.10
-    SPARK_DURATION  = 0.40
+    SHOCK_DURATION = 0.25
+    FLASH_DURATION = 0.10
+    SPARK_DURATION = 0.40
 
     def __init__(self, game, position, preset="small"):
         self.game     = game
         self.alive    = True
         self.timer    = 0.0
         self.position = Vec3(position)
-        self.preset   = preset
 
         cfg = PRESETS.get(preset, PRESETS["small"])
-        self.duration      = cfg["duration"]
-        self._flash_size   = cfg["flash_size"]
-        self._shock_max_r  = cfg["shock_max_r"]
-        self._fb_count     = cfg["fb_count"]
-        self._fb_size      = cfg["fb_size"]
-        self._sparks_count = cfg["sparks"]
-        self._debris_count = cfg["debris_count"]
+        self.duration       = cfg["duration"]
+        self._flash_size    = cfg["flash_size"]
+        self._shock_max_r   = cfg["shock_max_r"]
+        self._fb_count      = cfg["fb_count"]
+        self._fb_size       = cfg["fb_size"]
+        self._sparks_count  = cfg["sparks"]
+        self._debris_count  = cfg["debris_count"]
 
         self._fireballs  = []
         self._debris     = []
@@ -216,106 +314,69 @@ class Explosion:
         self._make_debris()
 
     # ------------------------------------------------------------------
-    # A. Flash initial
+    # A. Flash initial — disque blanc chaud
     # ------------------------------------------------------------------
 
     def _make_flash(self):
-        cm = CardMaker("flash")
-        s  = self._flash_size
-        cm.setFrame(-s, s, -s, s)
-        flash = NodePath(cm.generate())
-        flash.reparentTo(self.game.render)
-        flash.setPos(self.position)
-        flash.setBillboardPointEye()
-        flash.setLightOff()
-        flash.setDepthWrite(False)
-        flash.setAttrib(ColorBlendAttrib.make(
-            ColorBlendAttrib.M_add,
-            ColorBlendAttrib.O_incoming_color,
-            ColorBlendAttrib.O_one,
-        ))
-        # Blanc chaud très brillant
-        flash.setColorScale(4.0, 3.5, 2.5, 1.0)
-        flash.setBin("fixed", 51)
+        disc = _make_disc(self.game, 1.0, segments=16, sort=51)
+        disc.setPos(self.position)
+        disc.setScale(self._flash_size, 1, self._flash_size)
+        disc.setColorScale(4.0, 3.5, 2.5, 1.0)   # Blanc très chaud
         self._fireballs.append({
-            "node": flash,
-            "life": self.FLASH_DURATION,
+            "node":     disc,
+            "life":     self.FLASH_DURATION,
             "max_life": self.FLASH_DURATION,
-            "type": "flash",
+            "type":     "flash",
+            "base_scl": self._flash_size,
         })
 
     # ------------------------------------------------------------------
-    # B. Onde de choc
+    # B. Onde de choc — anneau qui s'expanse
     # ------------------------------------------------------------------
 
     def _make_shockwave(self):
-        cm = CardMaker("shockwave")
-        cm.setFrame(-1, 1, -0.08, 0.08)   # Très plat = anneau visuel
-        shock = NodePath(cm.generate())
-        shock.reparentTo(self.game.render)
-        shock.setPos(self.position)
-        shock.setBillboardPointEye()
-        shock.setLightOff()
-        shock.setDepthWrite(False)
-        shock.setAttrib(ColorBlendAttrib.make(
-            ColorBlendAttrib.M_add,
-            ColorBlendAttrib.O_incoming_color,
-            ColorBlendAttrib.O_one,
-        ))
-        # Gris chaud légèrement orangé
-        shock.setColorScale(1.3, 1.1, 0.8, 0.7)
-        shock.setBin("fixed", 49)
-        shock.setScale(0.3, 1, 0.3)   # Départ compact
-        self._shockwave   = shock
+        ring = _make_ring(self.game, 1.0, segments=24, sort=49)
+        ring.setPos(self.position)
+        ring.setColorScale(1.3, 1.1, 0.8, 1.0)   # Gris chaud
+        self._shockwave   = ring
         self._shock_timer = self.SHOCK_DURATION
 
     # ------------------------------------------------------------------
-    # C. Boules de feu
+    # C. Boules de feu — disques oranges
     # ------------------------------------------------------------------
 
     def _make_fireballs(self):
         for _ in range(self._fb_count):
-            cm = CardMaker("fireball")
-            s  = self._fb_size * random.uniform(0.7, 1.3)
-            cm.setFrame(-s, s, -s, s)
-            fb = NodePath(cm.generate())
-            fb.reparentTo(self.game.render)
+            base_scl = self._fb_size * random.uniform(0.7, 1.3)
+            disc = _make_disc(self.game, 1.0, segments=14, sort=50)
             offset = Vec3(
-                random.uniform(-self._fb_size, self._fb_size),
-                random.uniform(-self._fb_size, self._fb_size),
-                random.uniform(-self._fb_size * 0.6, self._fb_size * 0.6),
+                random.uniform(-self._fb_size * 0.8, self._fb_size * 0.8),
+                random.uniform(-self._fb_size * 0.8, self._fb_size * 0.8),
+                random.uniform(-self._fb_size * 0.5, self._fb_size * 0.5),
             )
-            fb.setPos(self.position + offset)
-            fb.setBillboardPointEye()
-            fb.setLightOff()
-            fb.setDepthWrite(False)
-            fb.setAttrib(ColorBlendAttrib.make(
-                ColorBlendAttrib.M_add,
-                ColorBlendAttrib.O_incoming_color,
-                ColorBlendAttrib.O_one,
-            ))
-            fb.setBin("fixed", 50)
+            disc.setPos(self.position + offset)
+            disc.setScale(base_scl, 1, base_scl)
 
             r, g, b = random.choice(_FB_COLORS)
-            fb.setColorScale(r, g, b, 1.0)
+            disc.setColorScale(r, g, b, 1.0)
 
             speed = random.uniform(2, 5)
             theta = random.uniform(0, math.pi * 2)
             phi   = random.uniform(0.2, math.pi - 0.2)
-            vel = Vec3(
+            vel   = Vec3(
                 math.sin(phi) * math.cos(theta) * speed,
                 math.sin(phi) * math.sin(theta) * speed,
                 math.cos(phi) * speed,
             )
             life = random.uniform(self.duration * 0.5, self.duration)
             self._fireballs.append({
-                "node": fb,
-                "life": life,
+                "node":     disc,
+                "life":     life,
                 "max_life": life,
-                "vel": vel,
-                "base_scale": s,
+                "vel":      vel,
+                "base_scl": base_scl,
                 "r": r, "g": g, "b": b,
-                "type": "fire",
+                "type":     "fire",
             })
 
     # ------------------------------------------------------------------
@@ -329,19 +390,19 @@ class Explosion:
             __slots__ = ("pos", "vel", "life", "max_life", "alive")
 
         for _ in range(n):
-            sp       = Spark()
-            speed    = random.uniform(20, 45)
-            theta    = random.uniform(0, math.pi * 2)
-            phi      = random.uniform(0, math.pi)
-            sp.vel   = Vec3(
+            sp    = Spark()
+            speed = random.uniform(20, 45)
+            theta = random.uniform(0, math.pi * 2)
+            phi   = random.uniform(0, math.pi)
+            sp.vel = Vec3(
                 math.sin(phi) * math.cos(theta) * speed,
                 math.sin(phi) * math.sin(theta) * speed,
                 math.cos(phi) * speed,
             )
-            sp.pos       = Vec3(self.position)
-            sp.life      = random.uniform(0.2, self.SPARK_DURATION)
-            sp.max_life  = sp.life
-            sp.alive     = True
+            sp.pos      = Vec3(self.position)
+            sp.life     = random.uniform(0.15, self.SPARK_DURATION)
+            sp.max_life = sp.life
+            sp.alive    = True
             self._particles.append(sp)
 
         fmt  = GeomVertexFormat.getV3c4()
@@ -353,19 +414,19 @@ class Explosion:
             vtx.addData3(sp.pos)
             col.addData4(1.0, 0.8, 0.1, 1.0)
 
-        points = GeomPoints(Geom.UHDynamic)
-        points.addConsecutiveVertices(0, n)
-        geom      = Geom(self._vdata)
-        geom.addPrimitive(points)
-        gnode     = GeomNode("sparks_geom")
-        gnode.addGeom(geom)
-        np = NodePath(gnode)
-        np.setRenderModeThickness(2)
+        pts   = GeomPoints(Geom.UHDynamic)
+        pts.addConsecutiveVertices(0, n)
+        geom  = Geom(self._vdata)
+        geom.addPrimitive(pts)
+        gn    = GeomNode("sparks_geom")
+        gn.addGeom(geom)
+        inner = NodePath(gn)
+        inner.setRenderModeThickness(2)
 
         self._spark_node = NodePath("sparks")
         self._spark_node.reparentTo(self.game.render)
         self._spark_node.setLightOff()
-        np.reparentTo(self._spark_node)
+        inner.reparentTo(self._spark_node)
 
     # ------------------------------------------------------------------
     # E. Débris
@@ -384,7 +445,7 @@ class Explosion:
             return
         self.timer += dt
 
-        # A/C — fireballs + flash
+        # A/C — Flash + fireballs
         for fb in self._fireballs:
             fb["life"] -= dt
             if fb["life"] <= 0:
@@ -392,31 +453,30 @@ class Explosion:
                     fb["node"].removeNode()
                 continue
 
-            progress = 1.0 - (fb["life"] / fb["max_life"])  # 0 → 1
+            progress = 1.0 - (fb["life"] / fb["max_life"])   # 0→1
 
             if fb["type"] == "flash":
-                # Fade rapide, quadratique
-                fade = (1.0 - progress) ** 2
-                fb["node"].setColorScale(
-                    4.0 * fade, 3.5 * fade, 2.5 * fade, 1.0
-                )
-            else:
-                # Phase expansion (0→40%) : grossit ×1.5
-                # Phase fade    (40→100%) : rétrécit + alpha→0
+                # Fade quadratique rapide — le disque rétrécit légèrement
+                fade  = (1.0 - progress) ** 2
+                scale = fb["base_scl"] * (1.0 + progress * 0.3)   # Légère expansion
+                fb["node"].setScale(scale, 1, scale)
+                fb["node"].setColorScale(4.0 * fade, 3.5 * fade, 2.5 * fade, 1.0)
+
+            else:  # fire
+                # Phase expansion (0→40%) : grossit × 1.5
+                # Phase fade    (40→100%) : fade out
                 if progress < 0.4:
-                    t = progress / 0.4        # 0→1
-                    scale = 1.0 + t * 0.5     # 1→1.5
+                    t     = progress / 0.4
+                    scale = fb["base_scl"] * (1.0 + t * 0.5)
+                    fb["node"].setScale(scale, 1, scale)
                 else:
-                    t     = (progress - 0.4) / 0.6   # 0→1
-                    scale = 1.5 - t * 1.0             # 1.5→0.5
-                    fade  = (1.0 - t) ** 1.5
+                    t     = (progress - 0.4) / 0.6
+                    scale = fb["base_scl"] * (1.5 - t * 1.0)
+                    fade  = max(0.0, (1.0 - t) ** 1.5)
+                    fb["node"].setScale(max(0.01, scale), 1, max(0.01, scale))
                     fb["node"].setColorScale(
-                        fb["r"] * fade,
-                        fb["g"] * fade,
-                        fb["b"] * fade,
-                        1.0,
+                        fb["r"] * fade, fb["g"] * fade, fb["b"] * fade, 1.0
                     )
-                fb["node"].setScale(scale * fb["base_scale"])
 
                 # Déplacement + résistance air
                 if "vel" in fb:
@@ -426,47 +486,43 @@ class Explosion:
 
         self._fireballs = [fb for fb in self._fireballs if fb["life"] > 0]
 
-        # B — onde de choc
+        # B — Onde de choc
         if self._shockwave is not None and not self._shockwave.isEmpty():
             self._shock_timer -= dt
             if self._shock_timer <= 0:
                 self._shockwave.removeNode()
                 self._shockwave = None
             else:
-                progress = 1.0 - (self._shock_timer / self.SHOCK_DURATION)
-                r        = 0.3 + progress * self._shock_max_r
-                alpha    = 0.7 * (1.0 - progress)
+                t      = 1.0 - (self._shock_timer / self.SHOCK_DURATION)   # 0→1
+                r      = 0.3 + t * self._shock_max_r
+                alpha  = (1.0 - t) ** 0.6   # Fade assez vite
                 self._shockwave.setScale(r, 1, r)
                 self._shockwave.setColorScale(1.3, 1.1, 0.8, alpha)
 
-        # D — étincelles
+        # D — Étincelles
         spark_alive = False
         if self._vdata is not None:
             vtx = GeomVertexWriter(self._vdata, "vertex")
             col = GeomVertexWriter(self._vdata, "color")
             for sp in self._particles:
                 if not sp.alive:
-                    vtx.addData3(0, 0, 0)
-                    col.addData4(0, 0, 0, 0)
+                    vtx.addData3(0, 0, 0); col.addData4(0, 0, 0, 0)
                     continue
                 sp.life -= dt
                 if sp.life <= 0:
                     sp.alive = False
-                    vtx.addData3(0, 0, 0)
-                    col.addData4(0, 0, 0, 0)
+                    vtx.addData3(0, 0, 0); col.addData4(0, 0, 0, 0)
                     continue
                 spark_alive = True
                 sp.pos += sp.vel * dt
-                # Décélération rapide
                 sp.vel *= max(0.0, 1.0 - 4.0 * dt)
-                # Couleur : jaune vif → orange → transparent
                 progress = 1.0 - (sp.life / sp.max_life)
-                alpha    = (1.0 - progress) ** 0.5
-                green    = 0.8 * (1.0 - progress)   # Jaune→orange
+                alpha  = (1.0 - progress) ** 0.5
+                green  = 0.8 * (1.0 - progress * 0.8)   # Jaune → orange
                 vtx.addData3(sp.pos)
-                col.addData4(1.0, green, 0.1, alpha)
+                col.addData4(1.0, green, 0.05, alpha)
 
-        # E — débris
+        # E — Débris
         for chunk in self._debris:
             chunk.update(dt)
         self._debris = [d for d in self._debris if d.alive]
@@ -533,8 +589,7 @@ class ScorePopup:
         self.timer += dt
         progress = self.timer / self.duration
         if progress >= 1.0:
-            self.destroy()
-            return
+            self.destroy(); return
         self.text.setPos(self.text.getPos()[0], self.start_y + progress * 0.15)
         self.text.setFg(Vec4(1.0, 0.7, 0.2, 1.0 - progress))
         self.text.setScale(0.05 + progress * 0.01)
