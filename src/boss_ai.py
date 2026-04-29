@@ -152,7 +152,7 @@ class BossUtilityAI:
     celle avec le meilleur score toutes les EVAL_INTERVAL secondes.
     """
 
-    EVAL_INTERVAL = 0.45   # Réévalue toutes les N secondes
+    EVAL_INTERVAL = 0.70   # Réévalue toutes les N secondes
 
     def __init__(self):
         self.perception     = BossPerception()

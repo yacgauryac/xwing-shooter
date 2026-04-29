@@ -61,8 +61,9 @@ class BossTIEAdvanced:
         self.hit_radius = BOSS_HIT_RADIUS
 
         # Mouvement
-        self.pos         = Vec3(0, 80, 5)
-        self.move_timer  = 0.0
+        self.pos             = Vec3(0, 80, 5)
+        self.smoothed_target = Vec3(0, 80, 5)  # Buffer de lissage — absorbe les sauts
+        self.move_timer      = 0.0
 
         # État charge
         self._charging       = False
@@ -178,9 +179,15 @@ class BossTIEAdvanced:
 
         # ── Mouvement ─────────────────────────────────────────────────────
         self.move_timer += dt
-        target, lerp_speed = self._compute_move_target(player_pos, dt)
+        raw_target, lerp_speed = self._compute_move_target(player_pos, dt)
+
+        # 1er lissage : smoothed_target absorbe les sauts de move_intent
+        sm = min(1.0, 1.8 * dt)
+        self.smoothed_target = self.smoothed_target + (raw_target - self.smoothed_target) * sm
+
+        # 2e lissage : boss suit la cible lissée
         lerp = min(1.0, lerp_speed * dt)
-        self.pos = self.pos + (target - self.pos) * lerp
+        self.pos = self.pos + (self.smoothed_target - self.pos) * lerp
         self.node.setPos(self.pos)
 
         # ── Orientation ──────────────────────────────────────────────────
@@ -246,24 +253,22 @@ class BossTIEAdvanced:
             )
             return target, LERP_NORMAL * 1.3
 
-        # ── Orbite (défaut) ───────────────────────────────────────────────
-        if hp_pct > 0.65:
-            p = ORBIT_HIGH
-        elif hp_pct > 0.32:
-            p = ORBIT_MID
-        else:
-            # Phase rage — paramètres erratiques basés sur le temps
-            noise = math.sin(t * 3.7) * 0.25
-            p = dict(
-                rx  = 5.0 + abs(math.sin(t * 0.4)) * 4.0,
-                rz  = 2.0 + abs(math.cos(t * 0.9)) * 3.0,
-                spd = 1.35 + noise,
-                yo  = ORBIT_LOW["yo"],
-            )
+        # ── Orbite — paramètres interpolés en continu selon HP% ─────────────
+        # Pas de seuils → pas de sauts. t_dmg : 0 = plein HP, 1 = mort.
+        t_dmg = 1.0 - max(0.0, min(1.0, hp_pct))
+        rx  = 9.0  - t_dmg * 3.5          # 9.0  → 5.5
+        rz  = 4.0  - t_dmg * 1.5          # 4.0  → 2.5
+        spd = 0.65 + t_dmg * 0.55         # 0.65 → 1.20
+        yo  = 35.0 - t_dmg * 7.0          # 35   → 28
 
-        x = player_pos.getX() + math.sin(t * p["spd"])        * p["rx"]
-        y = player_pos.getY() + p["yo"] + math.sin(t * p["spd"] * 0.4) * 10
-        z = player_pos.getZ() + math.cos(t * p["spd"] * 0.75) * p["rz"]
+        # En rage (hp < ~30%) : légère variation lente de l'orbite, sans haute fréquence
+        if hp_pct < 0.32:
+            rx  += abs(math.sin(t * 0.25)) * 2.5
+            rz  += abs(math.cos(t * 0.35)) * 1.2
+
+        x = player_pos.getX() + math.sin(t * spd)        * rx
+        y = player_pos.getY() + yo + math.sin(t * spd * 0.4) * 10
+        z = player_pos.getZ() + math.cos(t * spd * 0.75) * rz
         return Vec3(x, y, z), LERP_NORMAL
 
     def _update_orientation(self, player_pos, target, dt):
