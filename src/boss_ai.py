@@ -217,12 +217,13 @@ class BossUtilityAI:
             # Fonce sur le joueur — désactivée si trop proche ou HP critique
             BossAction(
                 name          = "charge",
-                base_priority = 68,
-                cooldown      = 4.5,
-                dist_curve    = lerp_curve([(0,0),(.25,.3),(.5,1.0),(.85,1.2),(1,.7)]),
-                hp_curve      = lerp_curve([(0,.05),(.25,.5),(.5,1.0),(1,1.1)]),
-                threat_curve  = lerp_curve([(0,1.3),(.5,1.0),(1,.6)]),
-                min_dist      = 22.0,
+                base_priority = 28,          # Priorité basse — action rare
+                cooldown      = 9.0,         # Cooldown long
+                dist_curve    = lerp_curve([(0,0),(.45,.3),(.7,1.0),(1,.5)]),
+                hp_curve      = lerp_curve([(0,.05),(.3,.4),(.55,1.0),(1,.8)]),
+                threat_curve  = lerp_curve([(0,1.2),(.5,1.0),(1,.5)]),
+                min_dist      = 35.0,        # Seulement de loin
+                max_hp        = 0.55,        # Seulement en dessous de 55% HP
                 move_intent   = "charge",
             ),
 
