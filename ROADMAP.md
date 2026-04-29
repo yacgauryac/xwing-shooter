@@ -66,20 +66,22 @@
 - [ ] Gestion volume dynamique
 
 #### 5. VFX & Game Feel — `VFX_EXPLOSIONS_PROMPT_FR.md`
-- [ ] **Screenshake** (`src/screenshake.py`) — décroissance quadratique, intensités par événement
+- [x] **Screenshake** (`src/screenshake.py`) — décroissance quadratique, intensités par événement
   - TIE Fighter mort : 0.15 / 0.2s | TIE Bomber : 0.25 / 0.25s
   - Hit torpille : 0.4 / 0.3s | Joueur touché : 0.5 / 0.3s
   - Transition phase boss : 0.8 / 0.5s | Mort boss : 1.0 / 0.8s
-- [ ] **Explosions rewrite** (`src/explosions.py`) — 3 presets (small/medium/large)
+- [x] **Explosions rewrite** (`src/explosions.py`) — 3 presets (small/medium/large)
   - Flash initial (0.1s, blanc chaud `4.0, 3.5, 2.5`)
-  - Onde de choc expansive (anneau 0.3→5 units, 0.25s)
+  - Onde de choc expansive (anneau 0.3→max_r, 0.25s)
   - Fireballs billboard (2-5 boules, expansion 40% + fade, couleurs chaudes uniquement)
   - Étincelles GeomPoints (20-45, vitesse 20-45 u/s, jaune→orange)
   - Débris sombres (`0.08-0.18` gris, gravité légère)
-- [ ] **Flash écran** (`src/hud.py`) — quad blanc plein écran, 0.15s, grosses explosions et mort boss
-- [ ] **Slow-motion combo** (`src/game.py`) — 3 kills en 2s → world ×0.65 pendant 0.4s + texte "x3 COMBO !"
+- [x] **Flash écran** (`src/hud.py`) — quad blanc plein écran, 0.15s, grosses explosions et mort boss
+- [x] **Slow-motion combo** (`src/game.py`) — 3 kills en 2s → world ×0.65 pendant 0.4s + texte "xN COMBO !"
+- [x] **Barre HP boss** — affichée en combat, couleur dynamique, label de phase
+- [x] **Curseur souris** masqué en jeu, restauré au menu
 - [ ] Légère inclinaison écran au barrel roll
-- [ ] Palette stricte : jamais de bleu/vert/violet dans les explosions
+- [ ] Palette stricte : jamais de bleu/vert/violet dans les explosions ✅ (déjà appliquée)
 
 ---
 

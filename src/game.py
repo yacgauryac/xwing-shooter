@@ -24,6 +24,7 @@ from src.torpedoes import TorpedoSystem
 from src.force import ForceAbility
 from src.menu import MainMenu
 from src.boss import BossTIEAdvanced, BOSS_TRIGGER_WAVE
+from src.screenshake import Screenshake
 
 
 class Game(ShowBase):
@@ -77,6 +78,7 @@ class Game(ShowBase):
             return
 
         self.game_started = True
+        self._set_cursor(False)   # Masque le curseur en jeu
 
         # Systèmes de jeu
         self.environment = Environment(self)
@@ -104,7 +106,14 @@ class Game(ShowBase):
         self._was_overheated = False
         self.locking = False
         self.boss = None
-        self.boss_phase = None  # None, "active", "destroying", "done"
+        self.boss_phase = None       # None, "active", "destroying", "done"
+        self._boss_phase_label = ""  # Suivi transitions de phase boss
+
+        # VFX — screenshake + slow-mo combo
+        self.screenshake   = Screenshake(self)
+        self.time_scale    = 1.0     # ×0.65 pendant combo slow-mo
+        self.slowmo_timer  = 0.0
+        self.combo_kills   = []      # Timestamps des kills récents
 
         # Boucle de jeu
         self.taskMgr.add(self.update, "game_update")
@@ -124,6 +133,12 @@ class Game(ShowBase):
         props.setSize(1280, 720)
         self.win.requestProperties(props)
         self.disableMouse()
+
+    def _set_cursor(self, visible: bool):
+        """Affiche ou masque le curseur de la souris."""
+        props = WindowProperties()
+        props.setCursorHidden(not visible)
+        self.win.requestProperties(props)
 
     def setup_lights(self):
         # Lumière ambiante — bleutée, espace froid
@@ -153,9 +168,18 @@ class Game(ShowBase):
         if self.game_over:
             return task.cont
 
+        # Screenshake (toujours en temps réel)
+        self.screenshake.update(dt)
+
+        # Slow-mo combo
+        if self.slowmo_timer > 0:
+            self.slowmo_timer -= dt
+            if self.slowmo_timer <= 0:
+                self.time_scale = 1.0
+
         # Force — update + time_scale
         self.force.update(dt)
-        ts = self.force.get_time_scale()
+        ts = self.force.get_time_scale() * self.time_scale
         dt_world = dt * ts   # Temps ralenti pour le monde
         dt_player = dt       # Temps normal pour le joueur
 
@@ -188,17 +212,24 @@ class Game(ShowBase):
 
         # Détecte un kill → explosion + score + powerup + force
         if self.spawner.score > score_before:
-            kill_score = self.spawner.score - score_before
+            kill_score  = self.spawner.score - score_before
+            kill_class  = getattr(self.spawner, 'last_kill_class', 'TIEFighter')
             self.total_kills += 1
             if hasattr(self.spawner, 'last_kill_pos'):
-                self.explosions.spawn(self.spawner.last_kill_pos, score=kill_score)
+                # Preset selon classe de vaisseau
+                if kill_class == 'TIEBomber':
+                    preset = "medium"
+                    self.screenshake.trigger(0.25, 0.25)
+                else:
+                    preset = "small"
+                    self.screenshake.trigger(0.15, 0.2)
+                self.explosions.spawn(self.spawner.last_kill_pos, preset=preset, score=kill_score)
                 self.sounds.play("explosion")
                 self.powerups.try_spawn(self.spawner.last_kill_pos)
                 # Force gauge
-                if hasattr(self.spawner, 'last_kill_class'):
-                    self.force.add_kill(self.spawner.last_kill_class)
-                else:
-                    self.force.add_kill("TIEFighter")
+                self.force.add_kill(kill_class)
+                # Combo
+                self._register_combo_kill()
 
         # Power-ups
         collected = self.powerups.update(dt_world, player_pos, self.scroll_speed)
@@ -244,6 +275,7 @@ class Game(ShowBase):
                 self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
+                self.screenshake.trigger(0.5, 0.3)
 
                 if self.player_hp <= 0:
                     self.player_hp = 0
@@ -259,6 +291,7 @@ class Game(ShowBase):
                 self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
+                self.screenshake.trigger(0.4, 0.25)
 
                 if self.player_hp <= 0:
                     self.player_hp = 0
@@ -278,10 +311,23 @@ class Game(ShowBase):
                 self.boss.start()
                 self.boss_phase = "active"
                 self.hud.announce_wave("BOSS: DARTH VADER")
+                self.hud.show_boss_bar()
+                self._boss_phase_label = self.boss.ai.get_phase_label()
 
         # Boss update
         if self.boss and self.boss_phase == "active":
             self.boss.update(dt, player_pos, self.spawner.enemy_bolts, self.player_hp)
+
+            # Barre HP boss
+            hp_pct       = self.boss.hp / self.boss.max_hp
+            phase_label  = self.boss.ai.get_phase_label()
+            self.hud.update_boss_bar(hp_pct, phase_label)
+
+            # Détecte transition de phase → screenshake + flash
+            if phase_label != self._boss_phase_label:
+                self._boss_phase_label = phase_label
+                self.screenshake.trigger(0.8, 0.5)
+                self.hud.trigger_screen_flash(0.25, 0.2)
 
             # Check tirs joueur → boss (distance simple)
             for bolt in self.lasers.get_bolts():
@@ -294,16 +340,25 @@ class Game(ShowBase):
                         self.boss.hit(bolt.DAMAGE)
                         bolt.destroy()
                         self.sounds.play("hit")
+                        self.screenshake.trigger(0.15, 0.15)
 
             if self.boss.defeated:
                 self.boss_phase = "destroying"
+                self.hud.hide_boss_bar()
 
         elif self.boss and self.boss_phase == "destroying":
             done = self.boss.update_destruction(dt, self.explosions)
             if done:
                 self.boss_phase = "done"
                 self.spawner.score += 5000
+                # Capture la position AVANT cleanup
+                boss_final_pos = self.boss.get_pos()
                 self.boss.cleanup()
+                # Explosion cinématique finale
+                if boss_final_pos:
+                    self.explosions.spawn(boss_final_pos, preset="large", score=0)
+                self.screenshake.trigger(1.0, 0.8)
+                self.hud.trigger_screen_flash(0.4, 0.2)
                 self.hud.announce_wave("VICTORY!")
                 self.game_over = True
                 self.hud.show_game_over(self.spawner.score)
@@ -390,6 +445,14 @@ class Game(ShowBase):
             self.boss.cleanup()
         self.boss = None
         self.boss_phase = None
+        self._boss_phase_label = ""
+        self.hud.hide_boss_bar()
+
+        # VFX reset
+        self.screenshake.reset()
+        self.time_scale   = 1.0
+        self.slowmo_timer = 0.0
+        self.combo_kills  = []
 
         # Nettoie l'environnement
         for a in self.environment.asteroids:
@@ -485,6 +548,29 @@ class Game(ShowBase):
             self.lb_state = "showing"
             self.hud.show_leaderboard(self.leaderboard.entries, highlight_rank=rank)
 
+    # ------------------------------------------------------------------
+    # Combo / slow-motion
+    # ------------------------------------------------------------------
+
+    def _register_combo_kill(self):
+        """Enregistre un kill pour le suivi combo (3 kills en 2s = slow-mo)."""
+        now = globalClock.getFrameTime()
+        self.combo_kills = [t for t in self.combo_kills if now - t < 2.0]
+        self.combo_kills.append(now)
+        if len(self.combo_kills) >= 3:
+            self._trigger_combo_slowmo()
+
+    def _trigger_combo_slowmo(self):
+        """Déclenche le slow-motion combo."""
+        count = len(self.combo_kills)
+        self.time_scale  = 0.65
+        self.slowmo_timer = 0.4
+        self.hud.show_combo(count)
+        extra_shake = min(0.1, (count - 3) * 0.05)
+        self.screenshake.trigger(0.3 + extra_shake, 0.3)
+
+    # ------------------------------------------------------------------
+
     def quit_game(self):
         self.userExit()
 
@@ -541,6 +627,7 @@ class Game(ShowBase):
 
         self.game_started = False
         self.game_over = False
+        self._set_cursor(True)    # Restaure le curseur au menu
 
         # Réaffiche le menu
         self.menu.show()

@@ -399,13 +399,13 @@ class TorpedoSystem:
                 impact_pos = torp_pos
                 torp.destroy()
 
-                # Grosse explosion x3
-                explosion_manager.spawn(impact_pos, score=0)
+                # Grosse explosion torpille — preset medium + 2 petites autour
+                explosion_manager.spawn(impact_pos, preset="medium", score=0)
                 for _ in range(2):
                     offset = Vec3(random.uniform(-2, 2),
                                   random.uniform(-2, 2),
                                   random.uniform(-1, 1))
-                    explosion_manager.spawn(impact_pos + offset, score=0)
+                    explosion_manager.spawn(impact_pos + offset, preset="small", score=0)
 
                 # Dégâts splash sur tous les ennemis dans le rayon
                 for enemy in enemies:
@@ -420,7 +420,7 @@ class TorpedoSystem:
                         if destroyed:
                             total_score += enemy.SCORE_VALUE
                             score_tracker["last_kill_pos"] = Vec3(epos)
-                            explosion_manager.spawn(epos, score=enemy.SCORE_VALUE)
+                            explosion_manager.spawn(epos, preset="small", score=enemy.SCORE_VALUE)
 
         return total_score
 

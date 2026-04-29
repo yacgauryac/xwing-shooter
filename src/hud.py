@@ -117,7 +117,7 @@ class HUD:
             self.overlay.setDepthTest(False)
             self.overlay.setDepthWrite(False)
             # Transparence sur l'overlay
-            self.overlay.setColorScale(0.45, 0.45, 0.45, 0.45)
+            self.overlay.setColorScale(0.65, 0.65, 0.65, 0.65)
         else:
             self.overlay = None
 
@@ -209,7 +209,7 @@ class HUD:
 
         # Shield flash bleu (bords d'écran)
         self.shield_flash = DirectFrame(
-            frameColor=Vec4(0.3, 0.5, 1.0, 0),
+            frameColor=Vec4(0.8, 0.1, 0.0, 0),
             frameSize=(-2, 2, -2, 2),
             pos=(0, 0, 0), sortOrder=99,
         )
@@ -256,6 +256,45 @@ class HUD:
             frameColor=Vec4(0.1, 0.15, 0.4, 0),
             frameSize=(-2, 2, -2, 2),
             pos=(0, 0, 0), sortOrder=98,
+        )
+
+        # ===== SCREEN FLASH (blanc, grosses explosions / mort boss) =====
+        self.screen_flash = DirectFrame(
+            frameColor=Vec4(1, 1, 1, 0),
+            frameSize=(-2, 2, -2, 2),
+            pos=(0, 0, 0), sortOrder=102,
+        )
+        self.screen_flash_timer     = 0.0
+        self.screen_flash_duration  = 0.15
+        self.screen_flash_intensity = 0.35
+
+        # ===== COMBO TEXT =====
+        self.combo_text = OnscreenText(
+            text="", pos=(0, 0.55), scale=0.09,
+            fg=Vec4(1.0, 0.55, 0.1, 0.0),
+            align=TextNode.ACenter, mayChange=True, sort=65,
+            shadow=(0, 0, 0, 0.6),
+        )
+        self.combo_timer = 0.0
+
+        # ===== BOSS HP BAR =====
+        self._boss_bar_visible = False
+        self.boss_bar_root = game.aspect2d.attachNewNode("boss_bar")
+        self.boss_bar_root.setTransparency(TransparencyAttrib.MAlpha)
+        self.boss_bar_root.setBin("fixed", 48)
+        self.boss_bar_root.hide()
+
+        self.boss_name_text = OnscreenText(
+            text="", pos=(0, 0.20), scale=0.028,
+            fg=Vec4(1.0, 0.2, 0.05, 0.9),
+            align=TextNode.ACenter, mayChange=True, sort=55,
+            shadow=(0, 0, 0, 0.8),
+        )
+        self.boss_bar  = _make_bar(self.boss_bar_root, -0.35, 0.12, 0.70, 0.025, segments=20)
+        self.boss_phase_text = OnscreenText(
+            text="", pos=(0, 0.10), scale=0.022,
+            fg=Vec4(1.0, 0.4, 0.05, 0.7),
+            align=TextNode.ACenter, mayChange=True, sort=55,
         )
 
     def update(self, dt, score, wave, enemy_count, health, max_health,
@@ -337,10 +376,10 @@ class HUD:
         if self.shield_flash_timer > 0:
             self.shield_flash_timer -= dt
             progress = self.shield_flash_timer / 0.3
-            a = progress * 0.25
-            self.shield_flash["frameColor"] = Vec4(0.4, 0.6, 1.0, a)
+            a = progress * 0.35
+            self.shield_flash["frameColor"] = Vec4(0.9, 0.15, 0.0, a)
             if self.shield_flash_timer <= 0:
-                self.shield_flash["frameColor"] = Vec4(0.3, 0.5, 1.0, 0)
+                self.shield_flash["frameColor"] = Vec4(0.8, 0.1, 0.0, 0)
 
         # Pickup text fade
         if self.pickup_timer > 0:
@@ -350,6 +389,25 @@ class HUD:
             self.pickup_text.setScale(0.04 + (1.0 - progress) * 0.005)
             if self.pickup_timer <= 0:
                 self.pickup_text.setText("")
+
+        # Screen flash blanc
+        if self.screen_flash_timer > 0:
+            self.screen_flash_timer -= dt
+            a = max(0.0, (self.screen_flash_timer / self.screen_flash_duration)
+                    * self.screen_flash_intensity)
+            self.screen_flash["frameColor"] = Vec4(1, 1, 1, a)
+            if self.screen_flash_timer <= 0:
+                self.screen_flash["frameColor"] = Vec4(1, 1, 1, 0)
+
+        # Combo text
+        if self.combo_timer > 0:
+            self.combo_timer -= dt
+            progress = self.combo_timer / 1.5
+            pulse = 0.85 + 0.15 * abs(math.sin(self.blink_timer * 8))
+            self.combo_text.setFg(Vec4(1.0 * pulse, 0.55 * pulse, 0.1, progress))
+            self.combo_text.setScale(0.09 + (1.0 - progress) * 0.02)
+            if self.combo_timer <= 0:
+                self.combo_text.setText("")
 
     def _update_attitude(self, roll, pitch):
         if self.attitude_lines:
@@ -388,6 +446,45 @@ class HUD:
         self.attitude_lines = NodePath(n)
         self.attitude_lines.reparentTo(self.attitude_root)
         self.attitude_lines.setRenderModeThickness(1.0)
+
+    # ------------------------------------------------------------------
+    # Nouveaux effets V2
+    # ------------------------------------------------------------------
+
+    def trigger_screen_flash(self, intensity=0.35, duration=0.15):
+        """Flash blanc plein écran — grosses explosions ou mort boss."""
+        self.screen_flash_timer     = duration
+        self.screen_flash_duration  = duration
+        self.screen_flash_intensity = intensity
+
+    def show_combo(self, count):
+        """Affiche 'xN COMBO !' en orange pulsant en haut de l'écran."""
+        self.combo_text.setText(f"x{count} COMBO!")
+        boost = min(0.15, (count - 3) * 0.02)
+        self.combo_text.setScale(0.09 + boost)
+        self.combo_text.setFg(Vec4(1.0, 0.55, 0.1, 1.0))
+        self.combo_timer = 1.5
+
+    def show_boss_bar(self, name="DARTH VADER — TIE ADVANCED"):
+        """Affiche la barre HP du boss."""
+        self.boss_name_text.setText(name)
+        self.boss_bar_root.show()
+        self._boss_bar_visible = True
+
+    def hide_boss_bar(self):
+        self.boss_bar_root.hide()
+        self._boss_bar_visible = False
+        self.boss_name_text.setText("")
+        self.boss_phase_text.setText("")
+
+    def update_boss_bar(self, hp_pct, phase_label=""):
+        if not self._boss_bar_visible:
+            return
+        bar_c = C_DANGER if hp_pct < 0.35 else (C_WARN if hp_pct < 0.65 else C_ORANGE)
+        _update_bar(self.boss_bar, max(0.0, hp_pct), bar_c)
+        self.boss_phase_text.setText(phase_label)
+
+    # ------------------------------------------------------------------
 
     def announce_wave(self, wave_num):
         self.wave_announce.setText(f"WAVE {wave_num} INCOMING")

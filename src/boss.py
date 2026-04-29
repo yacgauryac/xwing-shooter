@@ -422,9 +422,9 @@ class BossTIEAdvanced:
                     random.uniform(-2, 2),
                     random.uniform(-1, 1),
                 )
-                explosion_manager.spawn(self.pos + offset, score=0)
+                explosion_manager.spawn(self.pos + offset, preset="small", score=0)
             return False
-        explosion_manager.spawn(self.pos, score=5000)
+        explosion_manager.spawn(self.pos, preset="medium", score=0)
         return True
 
     def cleanup(self):

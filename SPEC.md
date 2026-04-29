@@ -255,6 +255,38 @@ main.py
 - `player_hp` passé à `boss.update()` depuis `game.py`
 - Tous les paramètres de tuning centralisés en constantes (`ORBIT_HIGH/MID/LOW`, `CHARGE_SPEED`, `CONE_BOLT_COUNT`, etc.)
 
+### v0.16 — VFX Explosions V2 + Screenshake + Curseur (nouveau)
+
+#### `src/screenshake.py` — Nouveau module
+- Classe `Screenshake` : décroissance quadratique (pas linéaire)
+- Capture la position caméra "au repos" au déclenchement, applique jitter X/Z
+- `trigger(intensity, duration)` : si un shake plus fort est déjà en cours il est ignoré
+- Intensités : TIEFighter 0.15/0.2s | TIEBomber 0.25/0.25s | astéroïde 0.4/0.25s | joueur touché 0.5/0.3s | hit boss 0.15/0.15s | transition phase 0.8/0.5s | mort boss 1.0/0.8s
+
+#### `src/explosions.py` — Réécriture complète
+- 3 presets : `small` (TIE Fighter) / `medium` (torpille / TIE Bomber) / `large` (boss)
+- 5 composants :
+  - **Flash** (0.1s) : blanc chaud `(4.0, 3.5, 2.5)`, billboard additif
+  - **Onde de choc** (0.25s) : carte très plate, s'expanse 0.3→max_radius, alpha 0.7→0
+  - **Fireballs** : expansion 40% puis fade, palette chaude uniquement (orange vif/moyen/brûlé), résistance air
+  - **Étincelles GeomPoints** : 20-45 pts, jaune→orange, décélération ×4/s
+  - **Débris sombres** : gris 0.08-0.18, gravité légère, fade sur 30% finaux
+- Palette stricte : jamais de bleu/vert/violet — que du chaud
+- API : `spawn(position, preset="small", score=0)`
+
+#### `src/hud.py` — Nouveaux éléments
+- **Screen flash blanc** : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s, séparé du flash rouge dégâts
+- **Barre HP boss** : affichée à l'entrée du boss, masquée à sa mort, couleur ORANGE→WARN→DANGER selon HP
+- **Texte combo** : `show_combo(count)` — "xN COMBO!" orange pulsant, 1.5s, animé
+
+#### `src/game.py` — Intégration
+- Curseur souris masqué en jeu (`setCursorHidden(True)`), restauré au menu
+- `Screenshake` instancié dans `start_game()`, `update()` chaque frame, `reset()` au restart
+- `time_scale` combo slow-mo (×0.65 pendant 0.4s, 3 kills en 2s) combiné avec `force.get_time_scale()`
+- Explosion preset par classe ennemi (TIEBomber → medium, autres → small)
+- Torpilles : impact principal → medium, splash et kills → small
+- Boss mort → preset large + screenshake 1.0 + screen flash 0.4
+
 ### v0.14 — Bugfixes : keys / torpilles / fullscreen
 - **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)
 - **Bug torpilles** : `fire_torpedo()` appelle `fire()` avant de mettre `locking=False` ; `LOCK_CONE` 8→14 ; dumb-fire sans lock possible
