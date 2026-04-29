@@ -191,7 +191,7 @@ class BossTIEAdvanced:
         self.node.setPos(self.pos)
 
         # ── Orientation ──────────────────────────────────────────────────
-        self._update_orientation(player_pos, target, dt)
+        self._update_orientation(player_pos, raw_target, dt)
 
         # ── Flash hit ────────────────────────────────────────────────────
         if self.flash_timer > 0:
