@@ -271,7 +271,7 @@ class BossTIEAdvanced:
         z = player_pos.getZ() + math.cos(t * spd * 0.75) * rz
         return Vec3(x, y, z), LERP_NORMAL
 
-    def _update_orientation(self, player_pos, target, dt):
+    def _update_orientation(self, player_pos, raw_target, dt):
         """Oriente le boss vers le joueur avec un léger bank."""
         look_dir = player_pos - self.pos
         if look_dir.length() > 0:
@@ -279,8 +279,9 @@ class BossTIEAdvanced:
         else:
             h = 0
 
-        dx = target.getX() - self.pos.getX()
-        roll = -dx * 12
+        # Roll clampé ±40° — évite les flips quand dx est grand
+        dx   = raw_target.getX() - self.pos.getX()
+        roll = max(-40.0, min(40.0, -dx * 6))
 
         cur_h, cur_p, cur_r = self.node.getHpr()
         cur_h = cur_h % 360
@@ -290,9 +291,10 @@ class BossTIEAdvanced:
         if dh >  180: dh -= 360
         if dh < -180: dh += 360
 
-        rl     = min(1.0, 2.2 * dt)
-        new_h  = cur_h + dh * rl
-        self.node.setHpr(new_h, cur_p * (1 - rl), cur_r + (roll - cur_r) * rl)
+        rl    = min(1.0, 2.2 * dt)
+        new_h = cur_h + dh * rl
+        new_p = max(-25.0, min(25.0, cur_p * (1 - rl)))  # Pitch clampé — jamais tête en bas
+        self.node.setHpr(new_h, new_p, cur_r + (roll - cur_r) * rl)
 
     # ── Actions de tir ───────────────────────────────────────────────────────
 

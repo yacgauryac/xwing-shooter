@@ -65,10 +65,21 @@
 - [ ] Dialogues radio ("Rebel squadron, engage!", "Enemy destroyed!", …)
 - [ ] Gestion volume dynamique
 
-#### 5. Effets caméra / visuels
-- [ ] Screenshake sur grosses explosions
+#### 5. VFX & Game Feel — `VFX_EXPLOSIONS_PROMPT_FR.md`
+- [ ] **Screenshake** (`src/screenshake.py`) — décroissance quadratique, intensités par événement
+  - TIE Fighter mort : 0.15 / 0.2s | TIE Bomber : 0.25 / 0.25s
+  - Hit torpille : 0.4 / 0.3s | Joueur touché : 0.5 / 0.3s
+  - Transition phase boss : 0.8 / 0.5s | Mort boss : 1.0 / 0.8s
+- [ ] **Explosions rewrite** (`src/explosions.py`) — 3 presets (small/medium/large)
+  - Flash initial (0.1s, blanc chaud `4.0, 3.5, 2.5`)
+  - Onde de choc expansive (anneau 0.3→5 units, 0.25s)
+  - Fireballs billboard (2-5 boules, expansion 40% + fade, couleurs chaudes uniquement)
+  - Étincelles GeomPoints (20-45, vitesse 20-45 u/s, jaune→orange)
+  - Débris sombres (`0.08-0.18` gris, gravité légère)
+- [ ] **Flash écran** (`src/hud.py`) — quad blanc plein écran, 0.15s, grosses explosions et mort boss
+- [ ] **Slow-motion combo** (`src/game.py`) — 3 kills en 2s → world ×0.65 pendant 0.4s + texte "x3 COMBO !"
 - [ ] Légère inclinaison écran au barrel roll
-- [ ] Angles cinématiques optionnels
+- [ ] Palette stricte : jamais de bleu/vert/violet dans les explosions
 
 ---
 
@@ -107,6 +118,54 @@
 - [ ] Mode défi (patterns de vagues spécifiques)
 - [ ] Éditeur de difficulté custom
 - [ ] Système de replay (save + playback)
+
+---
+
+## V3 — Multijoueur LAN — `MULTIJOUEUR_LAN_PROMPT.md`
+
+**Stack :** Python `socket` + `threading` + `json` — UDP, 0 dépendance externe.  
+**Architecture :** Host fait autorité (logique, collisions, ennemis) — Client envoie inputs, reçoit état du monde.  
+**Latence cible :** <5ms LAN, pas de rollback nécessaire.
+
+### Lancement
+```bash
+python main.py --host --port 5000          # Joueur 1
+python main.py --client --ip 192.168.1.10 --port 5000  # Joueur 2
+```
+
+### Étapes d'implémentation
+- [ ] **Étape 1 — Réseau de base**
+  - `src/network.py` : `NetworkManager` UDP (socket, thread réception, queue thread-safe)
+  - Parser `sys.argv` dans `main.py` (--host / --client / --ip / --port)
+  - Test ping/pong 2 terminaux
+- [ ] **Étape 2 — Synchronisation minimale**
+  - Host envoie `world_state` (positions ennemis, bolts, wave, score) à 20 ticks/s
+  - Client envoie `player_input` (x, z, shooting, torpedo, barrel_roll) à 20 ticks/s
+  - Affichage P2 chez host (même modèle X-Wing, teinte teal `2.5, 3.0, 2.5`)
+  - Affichage P1 ghost chez client
+- [ ] **Étape 3 — Gameplay complet**
+  - Tirs P2 → host calcule collisions → synchronise résultat
+  - Score partagé (`shared_score`)
+  - HP séparés — si P2 mort, P1 continue seul
+  - Game over synchronisé (`{"type": "game_over", "score": ..., "wave": ...}`)
+- [ ] **Étape 4 — Polish**
+  - Lobby host (affiche IP) + lobby client (saisie IP)
+  - Countdown 3-2-1 synchronisé
+  - Option COOP LAN dans menu (remplace "COMING SOON")
+  - Reconnexion si coupure (optionnel)
+
+### Format paquets (JSON)
+| Direction | Type | Contenu |
+|-----------|------|---------|
+| Host→Client | `world_state` | enemies[], bolts_enemy[], p2_hp, score, wave |
+| Client→Host | `player_input` | x, z, shooting, torpedo, barrel_roll |
+| Événements | `explosion`, `enemy_killed`, `game_over`, `phase_change` | selon type |
+
+### Notes techniques
+- Thread réseau séparé — jamais bloquer le thread Panda3D
+- UDP : pertes <0.1% en LAN, positions envoyées 20×/s → paquet perdu invisible
+- Pas de simulation déterministe : effets (particules) locaux à chaque machine
+- Firewall Windows : autoriser Python sur le port UDP si 2 PCs différents
 
 ---
 

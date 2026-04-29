@@ -183,34 +183,34 @@ class BossUtilityAI:
             # Plus efficace à distance moyenne, monte en priorité quand HP bas
             BossAction(
                 name          = "burst_fire",
-                base_priority = 55,
-                cooldown      = 2.2,
+                base_priority = 48,           # Réduit — ne doit pas écraser aimed/predictive
+                cooldown      = 2.8,
                 dist_curve    = lerp_curve([(0,.2),(.2,.8),(.5,1.0),(.75,.6),(1,.15)]),
-                hp_curve      = lerp_curve([(0,2.2),(.3,1.6),(.6,1.0),(1,.7)]),
-                threat_curve  = lerp_curve([(0,.7),(.5,1.0),(1,1.5)]),
+                hp_curve      = lerp_curve([(0,1.4),(.3,1.2),(.6,1.0),(1,.7)]),  # Max 1.4 au lieu de 2.2
+                threat_curve  = lerp_curve([(0,.7),(.5,1.0),(1,1.4)]),
             ),
 
             # ── Tir en cône ─────────────────────────────────────────────────
             # Arrose la zone, optimal à longue distance, mode rage basse HP
             BossAction(
                 name          = "cone_shot",
-                base_priority = 50,
-                cooldown      = 3.5,
-                dist_curve    = lerp_curve([(0,.05),(.3,.5),(.55,1.0),(1,.8)]),
-                hp_curve      = lerp_curve([(0,2.0),(.4,1.2),(.7,1.0),(1,.5)]),
-                threat_curve  = lerp_curve([(0,.4),(.5,1.0),(1,1.3)]),
-                min_dist      = 18.0,
+                base_priority = 56,           # Relevé pour plus de présence
+                cooldown      = 3.0,
+                dist_curve    = lerp_curve([(0,.05),(.25,.5),(.5,1.0),(1,.8)]),
+                hp_curve      = lerp_curve([(0,1.6),(.4,1.1),(.7,1.0),(1,.5)]),
+                threat_curve  = lerp_curve([(0,.5),(.5,1.0),(1,1.2)]),
+                min_dist      = 12.0,         # Réduit — tire plus souvent
             ),
 
             # ── Tir prédictif ────────────────────────────────────────────────
             # Vise où le joueur sera — activé seulement si le joueur se déplace
             BossAction(
                 name          = "predictive_shot",
-                base_priority = 72,
-                cooldown      = 1.6,
+                base_priority = 70,
+                cooldown      = 1.2,          # Cooldown réduit — tire plus souvent
                 dist_curve    = lerp_curve([(0,.3),(.25,1.0),(.6,1.0),(.9,.4),(1,.1)]),
                 hp_curve      = FLAT,
-                threat_curve  = lerp_curve([(0,.4),(.4,1.0),(1,1.6)]),
+                threat_curve  = lerp_curve([(0,.5),(.4,1.0),(1,1.5)]),
             ),
 
             # ── Charge ──────────────────────────────────────────────────────
