@@ -281,7 +281,7 @@ class Game(ShowBase):
 
         # Boss update
         if self.boss and self.boss_phase == "active":
-            self.boss.update(dt, player_pos, self.spawner.enemy_bolts)
+            self.boss.update(dt, player_pos, self.spawner.enemy_bolts, self.player_hp)
 
             # Check tirs joueur → boss (distance simple)
             for bolt in self.lasers.get_bolts():

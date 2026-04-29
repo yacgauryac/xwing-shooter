@@ -56,8 +56,8 @@
 - [ ] Ennemis sol / tourelles (niveaux surface)
 
 #### 3. Boss améliorés
+- [x] Boss TIE Advanced — Utility AI (8 actions, scoring dynamique, mouvement adaptatif)
 - [ ] Star Destroyer (phase 2) — tourelles destructibles, générateurs de bouclier
-- [ ] Second pattern TIE Advanced (variante plus rapide)
 - [ ] Intro boss avec dialogue radio
 
 #### 4. Audio upgrade

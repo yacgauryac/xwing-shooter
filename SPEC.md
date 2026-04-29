@@ -74,9 +74,20 @@ main.py
 
 ### `src/boss.py` — Boss TIE Advanced
 - Déclenché à partir de la vague 2
-- 50 HP, tirs bolts verts
-- 3 phases comportementales
-- Défaite détectée → fin de séquence boss
+- 50 HP, `BOSS_HIT_RADIUS=3.0`, `BOSS_BOLT_SPEED=58.0`
+- Piloté par **BossUtilityAI** (voir `src/boss_ai.py`)
+- 4 intentions de mouvement : orbit / charge / strafe / retreat
+- 6 actions de tir : aimed_fire, burst_fire, cone_shot, predictive_shot, aoe_burst, (+ dodge/retreat sans tir)
+- Label cosmétique 3 phases (CALIBRATION / AGGRESSION / RAGE) basé sur HP%
+- Défaite → explosion en chaîne 2.5s + explosion finale +5000 pts
+
+### `src/boss_ai.py` — Utility AI du boss (nouveau)
+- **`lerp_curve(points)`** : courbe linéaire par morceaux, base du scoring
+- **`BossPerception`** : collecte boss_hp_pct, player_hp_pct, distance normalisée, vélocité joueur, player_threat (monte sur hit, décroît naturellement), bolt_count
+- **`BossAction`** : base_priority × dist_curve × hp_curve × threat_curve ; contraintes min/max distance et HP ; move_intent associé ; cooldown individuel
+- **`BossUtilityAI`** : 8 actions configurées, réévaluation toutes les 0.45s, choisit le meilleur score
+- Actions disponibles : `aimed_fire` (base 60), `burst_fire` (55), `cone_shot` (50), `predictive_shot` (72, nécessite joueur mobile), `charge` (68), `dodge` (48), `aoe_burst` (58, HP<38% seulement), `retreat` (38)
+- Tous les paramètres de tuning centralisés en constantes en tête de `boss.py`
 
 ### `src/environment.py` — Environnement
 - **Astéroïdes** : models texturés (8 variants × 2 packs) + fallback procédural
@@ -235,6 +246,14 @@ main.py
 - Suppression fichiers parasites (`files.zip`, `UnityHubSetup-x64.exe`, PDF, `setup.exe`)
 - `.gitignore` étendu (*.exe, *.zip, *.pdf)
 - Création `SPEC.md` et `CLAUDE.md`
+
+### v0.15 — Boss Utility AI (nouveau)
+- Nouveau fichier `src/boss_ai.py` : BossPerception + BossAction + BossUtilityAI
+- Boss réévalué toutes les 0.45s — choisit parmi 8 actions selon scores dynamiques
+- Mouvement : orbit (paramètres HP-dépendants) / charge / strafe / retraite
+- Tirs : aimed_fire, burst_fire (salve 3 coups), cone_shot (10 bolts éventail), predictive_shot (vise position future), aoe_burst (12 bolts circulaires, HP<38%)
+- `player_hp` passé à `boss.update()` depuis `game.py`
+- Tous les paramètres de tuning centralisés en constantes (`ORBIT_HIGH/MID/LOW`, `CHARGE_SPEED`, `CONE_BOLT_COUNT`, etc.)
 
 ### v0.14 — Bugfixes : keys / torpilles / fullscreen
 - **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)
