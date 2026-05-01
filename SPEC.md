@@ -318,13 +318,14 @@ main.py
 - `EnemySpawner(game, level=1)` : paramètre level, wave_defs instance (plus de variable de classe)
 
 #### Nouvelles classes décor (`src/environment.py`)
-- **LunarTerrain** : dalle 80×22u à Z=-7.8, courbure parabolique sphérique (R=380), palette gris-bleutée, `setLightOff()`
+- **LunarTerrain** : dalle 240×22u à Z=-7.8, courbure parabolique sphérique (R=420), palette gris-bleutée, `setLightOff()`
 - **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
 - **TrenchWallPanel** : mur YZ (h=16, d=22) avec voyants ambre (1.8%) et rouge (1%) aléatoires, `setLightOff()`
 - **TrenchFloorPanel** : dalle XY à Z=-7.5, carrelage alternant + lueurs ambre (1.2%), `setLightOff()`
 - `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
 - Tuilage init : `step = TILE_DEPTH` (exact, zéro overlap) de Y=15 à SPAWN_DEPTH+d
 - Spawn runtime : nouvelle dalle/rangée à `max_y + TILE_DEPTH` quand `max_y < SPAWN_DEPTH - TILE_DEPTH/2`
+- Largeur 240u couvre les tuiles à Y=200 (distance cam ≈ 184u, demi-largeur visible ≈ 106u avec FOV 60°)
 
 #### Sélection de niveau (`src/menu.py`)
 - Entrée "CHOISIR NIVEAU" dans le menu principal

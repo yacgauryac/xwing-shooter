@@ -393,7 +393,7 @@ class LunarTerrain:
 
     GROUND_Z = -7.8
 
-    def __init__(self, parent, x_center, y_pos, width=80.0, depth=22.0):
+    def __init__(self, parent, x_center, y_pos, width=240.0, depth=22.0):
         self.alive = True
         self._depth = depth
         self.node = self._make_tile(width, depth)
@@ -402,7 +402,8 @@ class LunarTerrain:
         self.node.setLightOff()   # Pas de lumière scène — couleurs vertex brutes
 
     # Rayon de courbure planétaire (plus grand = plus plat)
-    SPHERE_R = 380.0
+    # À x=±120 (width=240) : chute = 120²/(2×420) ≈ 17u → horizon bien visible
+    SPHERE_R = 420.0
 
     def _make_tile(self, w, d):
         root = NodePath("lunar_tile")
@@ -411,7 +412,8 @@ class LunarTerrain:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        segs_x = max(8, int(w / 4))
+        # Densité réduite sur X (w grand) pour rester performant
+        segs_x = max(16, int(w / 8))
         segs_y = max(8, int(d / 2))
         R = self.SPHERE_R
 
