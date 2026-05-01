@@ -692,12 +692,12 @@ class Environment:
     ASTEROID_INTERVAL = 1.8
     NEBULA_INTERVAL = 35.0
     DEBRIS_INTERVAL = 5.0
-    TERRAIN_INTERVAL = 1.5    # L2: dalles de sol
-    WALL_INTERVAL = 1.5       # L3: panneaux de mur
 
     SPAWN_DEPTH = 200.0
     FIELD_WIDTH = 25.0
     FIELD_HEIGHT = 15.0
+
+    TILE_DEPTH = 22.0   # Profondeur d'une dalle/panneau (L2 + L3)
 
     def __init__(self, game, level=1):
         self.game = game
@@ -720,8 +720,6 @@ class Environment:
         self.asteroid_timer = 2.0
         self.nebula_timer   = 15.0
         self.debris_timer   = 4.0
-        self.terrain_timer  = 0.5
-        self.wall_timer     = 0.5
 
         self.star_destroyer = None
 
@@ -749,23 +747,29 @@ class Environment:
     # ----------------------------------------------------------
 
     def _init_lunar(self):
-        """L2 — Prérempli quelques dalles au départ."""
-        for n in range(5):
-            y = 30 + n * 22
-            self.terrain_tiles.append(
-                LunarTerrain(self.game.render, 0, y)
-            )
+        """L2 — Sol continu du joueur jusqu'à SPAWN_DEPTH (zéro trou)."""
+        d = self.TILE_DEPTH
+        y = 15.0
+        while y <= self.SPAWN_DEPTH + d:
+            self.terrain_tiles.append(LunarTerrain(self.game.render, 0, y, depth=d))
+            y += d
 
     def _init_trench(self):
-        """L3 — Prérempli murs + sol initiaux."""
-        for n in range(5):
-            y = 30 + n * 20
-            self.wall_panels.append(TrenchWallPanel(
-                self.game.render, TrenchWallPanel.WALL_X_LEFT, y))
-            self.wall_panels.append(TrenchWallPanel(
-                self.game.render, TrenchWallPanel.WALL_X_RIGHT, y))
-            self.floor_panels.append(TrenchFloorPanel(
-                self.game.render, 0, y))
+        """L3 — Tranchée continue du joueur jusqu'à SPAWN_DEPTH (zéro trou)."""
+        d = self.TILE_DEPTH
+        y = 15.0
+        while y <= self.SPAWN_DEPTH + d:
+            self._spawn_trench_row(y)
+            y += d
+
+    def _spawn_trench_row(self, y):
+        d = self.TILE_DEPTH
+        self.wall_panels.append(TrenchWallPanel(
+            self.game.render, TrenchWallPanel.WALL_X_LEFT, y, depth=d))
+        self.wall_panels.append(TrenchWallPanel(
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
+        self.floor_panels.append(TrenchFloorPanel(
+            self.game.render, 0, y, depth=d))
 
     def _spawn_nebula_planet(self):
         """L4 — Nébuleuse colorée en fond."""
@@ -831,28 +835,26 @@ class Environment:
             d.update(dt)
 
     def _update_l2(self, dt, scroll_speed):
-        """L2 — Surface lunaire : rochers gris + terrain."""
+        """L2 — Surface lunaire : rochers gris + terrain continu."""
         speed_factor = scroll_speed / 20.0
 
-        # Rochers lunaires (remplace astéroïdes)
+        # Rochers lunaires
         self.asteroid_timer -= dt
         if self.asteroid_timer <= 0:
             self._spawn_lunar_rock(scroll_speed)
             self.asteroid_timer = (self.ASTEROID_INTERVAL * 0.85) / speed_factor
-
         for a in self.asteroids:
             a.update(dt)
 
-        # Terrain sol
-        self.terrain_timer -= dt
-        if self.terrain_timer <= 0:
-            self.terrain_tiles.append(
-                LunarTerrain(self.game.render, 0, self.SPAWN_DEPTH)
-            )
-            self.terrain_timer = self.TERRAIN_INTERVAL / speed_factor
-
+        # Terrain sol — spawn basé sur la position Y (pas de timer)
         for t in self.terrain_tiles:
             t.update(dt, scroll_speed)
+
+        alive_tiles = [t for t in self.terrain_tiles if t.alive and not t.node.isEmpty()]
+        max_tile_y = max((t.node.getY() for t in alive_tiles), default=0)
+        if max_tile_y < self.SPAWN_DEPTH - self.TILE_DEPTH * 0.4:
+            self.terrain_tiles.append(
+                LunarTerrain(self.game.render, 0, self.SPAWN_DEPTH, depth=self.TILE_DEPTH))
 
         # Débris rocheux légers
         self.debris_timer -= dt
@@ -863,26 +865,23 @@ class Environment:
             d.update(dt)
 
     def _update_l3(self, dt, scroll_speed):
-        """L3 — Tranchée : murs + sol industriels."""
-        speed_factor = scroll_speed / 20.0
-
-        self.wall_timer -= dt
-        if self.wall_timer <= 0:
-            y = self.SPAWN_DEPTH
-            self.wall_panels.append(
-                TrenchWallPanel(self.game.render, TrenchWallPanel.WALL_X_LEFT, y))
-            self.wall_panels.append(
-                TrenchWallPanel(self.game.render, TrenchWallPanel.WALL_X_RIGHT, y))
-            self.floor_panels.append(
-                TrenchFloorPanel(self.game.render, 0, y))
-            self.wall_timer = self.WALL_INTERVAL / speed_factor
-
+        """L3 — Tranchée : murs + sol continus (spawn basé sur position Y)."""
+        # Update
         for w in self.wall_panels:
             w.update(dt, scroll_speed)
         for f in self.floor_panels:
             f.update(dt, scroll_speed)
 
-        # Quelques débris métalliques
+        # Spawn : ajoute une rangée quand le dernier panneau se rapproche trop
+        alive_walls = [w for w in self.wall_panels if w.alive and not w.node.isEmpty()]
+        if alive_walls:
+            max_wall_y = max(w.node.getY() for w in alive_walls)
+        else:
+            max_wall_y = 0
+        if max_wall_y < self.SPAWN_DEPTH - self.TILE_DEPTH * 0.4:
+            self._spawn_trench_row(self.SPAWN_DEPTH)
+
+        # Débris métalliques rares
         self.debris_timer -= dt
         if self.debris_timer <= 0:
             self._spawn_debris(scroll_speed)

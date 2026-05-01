@@ -502,8 +502,6 @@ class Game(ShowBase):
         self.environment.asteroid_timer = 2.0
         self.environment.nebula_timer   = 15.0
         self.environment.debris_timer   = 4.0
-        self.environment.terrain_timer  = 0.5
-        self.environment.wall_timer     = 0.5
 
         # Réinitialise le décor selon le niveau sélectionné
         lvl = getattr(self, 'selected_level', 1)
