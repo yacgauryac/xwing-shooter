@@ -401,6 +401,9 @@ class LunarTerrain:
         self.node.setPos(x_center, y_pos, self.GROUND_Z)
         self.node.setLightOff()   # Pas de lumière scène — couleurs vertex brutes
 
+    # Rayon de courbure planétaire (plus grand = plus plat)
+    SPHERE_R = 380.0
+
     def _make_tile(self, w, d):
         root = NodePath("lunar_tile")
         fmt = GeomVertexFormat.getV3c4()
@@ -408,23 +411,31 @@ class LunarTerrain:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        segs_x = max(6, int(w / 4))
-        segs_y = max(6, int(d / 3))
+        segs_x = max(8, int(w / 4))
+        segs_y = max(8, int(d / 2))
+        R = self.SPHERE_R
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
-                # Z = 0 aux bordures Y (j=0 et j=segs_y) pour joints sans trou
-                # Déformation uniquement à l'intérieur
-                edge_y = (j == 0 or j == segs_y)
-                z = 0.0 if edge_y else random.uniform(-0.30, 0.30)
+
+                # ── Courbure sphérique (approximation parabolique) ──────────
+                # z = -(x²+y²)/(2R) → centre haut, bords courbés vers le bas
+                # Déterministe aux bords → joints seamless entre dalles
+                sphere_z = -(x * x + y * y) / (2.0 * R)
+
+                # Déformation de cratères uniquement à l'intérieur
+                edge = (j == 0 or j == segs_y)
+                bump = 0.0 if edge else random.uniform(-0.35, 0.35)
+                z = sphere_z + bump
+
                 vertex.addData3(x, y, z)
 
                 # Gris lunaire — légèrement bleuté, pas de rouge
-                g = 0.28 + random.uniform(-0.05, 0.07)
-                # Cratères (creux) plus sombres
-                dark = 0.75 if z < -0.15 else 1.0
+                g = 0.30 + random.uniform(-0.05, 0.07)
+                # Zones creuses (cratères) plus sombres
+                dark = 0.72 if bump < -0.18 else (0.88 if bump < 0 else 1.0)
                 col.addData4(g * 0.93 * dark, g * 0.95 * dark, g * dark, 1.0)
 
         tris = GeomTriangles(Geom.UHStatic)
@@ -757,22 +768,20 @@ class Environment:
     # ----------------------------------------------------------
 
     def _init_lunar(self):
-        """L2 — Sol continu du joueur jusqu'à SPAWN_DEPTH, léger overlap anti-trou."""
+        """L2 — Sol continu du joueur jusqu'à SPAWN_DEPTH, pas d'overlap (bords déterministes)."""
         d = self.TILE_DEPTH
-        step = d - 1.0   # 1u d'overlap pour garantir zéro fissure
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
             self.terrain_tiles.append(LunarTerrain(self.game.render, 0, y, depth=d))
-            y += step
+            y += d
 
     def _init_trench(self):
-        """L3 — Tranchée continue du joueur jusqu'à SPAWN_DEPTH, léger overlap."""
+        """L3 — Tranchée continue, step exact = pas de Z-fighting."""
         d = self.TILE_DEPTH
-        step = d - 1.0
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
             self._spawn_trench_row(y)
-            y += step
+            y += d
 
     def _spawn_trench_row(self, y):
         d = self.TILE_DEPTH
@@ -864,10 +873,12 @@ class Environment:
 
         alive_tiles = [t for t in self.terrain_tiles if t.alive and not t.node.isEmpty()]
         max_tile_y = max((t.node.getY() for t in alive_tiles), default=0)
-        # Spawn dès que le plus lointain descend sous SPAWN_DEPTH - 1 (overlap garanti)
-        if max_tile_y < self.SPAWN_DEPTH - 1.0:
+        # Spawn quand le bord avant de la dernière dalle arrive à SPAWN_DEPTH
+        # → nouvelle dalle exactement un TILE_DEPTH devant la dernière, zéro overlap
+        if max_tile_y < self.SPAWN_DEPTH - self.TILE_DEPTH / 2:
+            new_y = max_tile_y + self.TILE_DEPTH
             self.terrain_tiles.append(
-                LunarTerrain(self.game.render, 0, self.SPAWN_DEPTH, depth=self.TILE_DEPTH))
+                LunarTerrain(self.game.render, 0, new_y, depth=self.TILE_DEPTH))
 
         # Débris rocheux légers
         self.debris_timer -= dt
@@ -891,8 +902,10 @@ class Environment:
             max_wall_y = max(w.node.getY() for w in alive_walls)
         else:
             max_wall_y = 0
-        if max_wall_y < self.SPAWN_DEPTH - 1.0:
-            self._spawn_trench_row(self.SPAWN_DEPTH)
+        # Spawn quand le bord avant du dernier panneau arrive à SPAWN_DEPTH
+        # → nouveau panneau exactement un TILE_DEPTH devant, zéro overlap, zéro Z-fighting
+        if max_wall_y < self.SPAWN_DEPTH - self.TILE_DEPTH / 2:
+            self._spawn_trench_row(max_wall_y + self.TILE_DEPTH)
 
         # Débris métalliques rares
         self.debris_timer -= dt

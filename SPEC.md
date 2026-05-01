@@ -98,11 +98,12 @@ main.py
 ### `src/environment.py` — Environnement (level-aware)
 - **`Environment(game, level=1)`** : décor adapté selon le niveau actif
 - **L1 (Astéroïdes)** : astéroïdes déformés + nébuleuses + débris + 2 planètes fixes
-- **L2 (Surface lunaire)** : `LunarTerrain` (dalles grises tuilées à Z=-7.8) + `LunarRock` (rochers aplatis gris-bleutés)
+- **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés)
 - **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
 - **L4 (Nébuleuse)** : nébuleuses denses × 2 + planète violette de fond
 - Couleur de fond `setBackgroundColor` appliquée depuis `LEVELS` au lancement
-- Toutes les classes : `update(dt, scroll_speed)` + `destroy()`
+- Toutes les classes : `update(dt, scroll_speed)` + `destroy()`, `setLightOff()` systématique
+- Tuilage : step exact = `TILE_DEPTH`, spawn runtime à `max_y + TILE_DEPTH` → 0 overlap, 0 Z-fighting
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague, hostiles restants
@@ -317,11 +318,13 @@ main.py
 - `EnemySpawner(game, level=1)` : paramètre level, wave_defs instance (plus de variable de classe)
 
 #### Nouvelles classes décor (`src/environment.py`)
-- **LunarTerrain** : dalle 32×22u à Z=-7.8, géométrie grille procédurale gris-orangée, tuilage Y
+- **LunarTerrain** : dalle 80×22u à Z=-7.8, courbure parabolique sphérique (R=380), palette gris-bleutée, `setLightOff()`
 - **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
-- **TrenchWallPanel** : mur YZ (h=16, d=20) avec voyants ambre (1.8%) et rouge (1%) aléatoires
-- **TrenchFloorPanel** : dalle XY à Z=-7.5, carrelage alternant + lueurs ambre (1.2%)
+- **TrenchWallPanel** : mur YZ (h=16, d=22) avec voyants ambre (1.8%) et rouge (1%) aléatoires, `setLightOff()`
+- **TrenchFloorPanel** : dalle XY à Z=-7.5, carrelage alternant + lueurs ambre (1.2%), `setLightOff()`
 - `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
+- Tuilage init : `step = TILE_DEPTH` (exact, zéro overlap) de Y=15 à SPAWN_DEPTH+d
+- Spawn runtime : nouvelle dalle/rangée à `max_y + TILE_DEPTH` quand `max_y < SPAWN_DEPTH - TILE_DEPTH/2`
 
 #### Sélection de niveau (`src/menu.py`)
 - Entrée "CHOISIR NIVEAU" dans le menu principal
@@ -360,6 +363,16 @@ main.py
 - **`_make_disc()`** : disque fan de triangles, alpha centre=1.0 / bord=0.0, billboard additif `M_add + O_incoming_alpha`
 - **`_make_ring()`** : 3 cercles concentriques (0.55/0.80/1.00), alpha 0→1→0, billboard additif
 - Débris plus visibles : couleur 0.08-0.18 → **0.20-0.45** (teinte chaude), vitesse 6-18 → **10-28**, durée 0.4-0.8 → **0.7-1.3s**, compte : 7/10/16
+
+### v0.19 — Fix tuilage L2/L3 : zéro overlap, zéro Z-fighting, courbure planétaire
+
+#### `src/environment.py` — Tuilage sans fissures et sans scintillement
+- **Init** (`_init_lunar`, `_init_trench`) : `step = d` exact (était `d-1`), zéro overlap entre dalles adjacentes
+- **Runtime** (`_update_l2`, `_update_l3`) : nouvelle dalle spawned à `max_y + TILE_DEPTH` (était à `SPAWN_DEPTH` fixe → overlap ~20u avec la précédente)
+- Condition de spawn : `max_y < SPAWN_DEPTH - TILE_DEPTH/2` — garantit une dalle toujours en réserve avant la zone de tir
+- **LunarTerrain** : courbure parabolique sphérique `z = -(x²+y²)/(2×380)` sur tous les vertices; bords Y (`j=0`, `j=segs_y`) déterministes (bump=0) → joints seamless entre dalles consécutives
+- Taux de cratères 3 niveaux : `bump < -0.18` → dark 0.72 / `bump < 0` → 0.88 / positif → 1.0
+- Toutes les surfaces décor : `setLightOff()` → couleurs vertex brutes sans teinte de l'éclairage scène
 
 ### v0.14 — Bugfixes : keys / torpilles / fullscreen
 - **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)
