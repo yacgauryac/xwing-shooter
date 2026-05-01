@@ -6,7 +6,7 @@ Rail shooter 3D en Python/Panda3D, thème Star Wars. Le joueur pilote un X-Wing 
 
 **Stack :** Python 3, Panda3D 1.10.14+, panda3d-gltf 0.13+  
 **Plateforme :** Windows / Linux  
-**Fenêtre :** 1280×720 (F11 = plein écran)
+**Fenêtre :** Plein écran natif au lancement (F11 = bascule fenêtré/plein écran)
 
 ---
 
@@ -73,10 +73,11 @@ main.py
 - Durée 6s, vitesse monde × 0.3, auto-aim parfait, pas de surchauffe
 
 ### `src/boss.py` — Boss TIE Advanced
-- Déclenché à partir de la vague 2
-- 50 HP, `BOSS_HIT_RADIUS=3.0`, `BOSS_BOLT_SPEED=58.0`
+- Déclenché à partir de la vague 8 (`BOSS_TRIGGER_WAVE=8`)
+- **150 HP**, `BOSS_HIT_RADIUS=2.5`, `BOSS_BOLT_SPEED=58.0`
 - Piloté par **BossUtilityAI** (voir `src/boss_ai.py`)
 - 4 intentions de mouvement : orbit / charge / strafe / retreat
+- Orbite : `RETREAT_Y=25.0`, `STRAFE_RADIUS=11.0`, yo 15→11 selon dégâts — boss reste 10-20 u devant le joueur
 - 6 actions de tir : aimed_fire, burst_fire, cone_shot, predictive_shot, aoe_burst, (+ dodge/retreat sans tir)
 - Label cosmétique 3 phases (CALIBRATION / AGGRESSION / RAGE) basé sur HP%
 - Défaite → explosion en chaîne 2.5s + explosion finale +5000 pts
@@ -101,6 +102,9 @@ main.py
 - Jauge heat en arc (orange → rouge, clignotement surchauffe)
 - Flash de dégât orange
 - Annonce "WAVE X INCOMING" avec fade
+- **Panneau radio boss** (bas d'écran) : rectangle + 2 demi-cercles procéduraux en GeomTriangles, fond sombre + bordure orange, barre HP couleur dynamique, texte nom + phase. Visible uniquement pendant le combat boss.
+- Screen flash blanc : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s
+- Texte combo : `show_combo(count)` — "xN COMBO!" orange pulsant 1.5s
 - Overlay PNG `assets/textures/hud_overlay.png` : code prêt, non intégré (WIP)
 
 ### `src/sounds.py` — Audio
@@ -286,6 +290,34 @@ main.py
 - Explosion preset par classe ennemi (TIEBomber → medium, autres → small)
 - Torpilles : impact principal → medium, splash et kills → small
 - Boss mort → preset large + screenshake 1.0 + screen flash 0.4
+
+### v0.17 — Fullscreen au lancement + Boss équilibré + Panneau radio boss + Explosions circulaires
+
+#### `src/game.py` — Plein écran natif au lancement
+- `setup_window()` : `setFullscreen(True)` + résolution détectée via `pipe.getDisplayWidth/Height()`
+- `is_fullscreen` initialisé à `True` dans `setup_window()` (plus de `False` dans `__init__`)
+- Aspect ratio synchronisé 50ms après la fenêtre via `doMethodLater`
+
+#### `src/boss.py` — Boss rebalancé
+- HP : 50 → **150**  
+- `BOSS_HIT_RADIUS` : 3.0 → 2.5
+- `BOSS_TRIGGER_WAVE` : 2 → **8** (vagues normales restaurées)
+- `RETREAT_Y` : 62.0 → **25.0** — boss ne sort plus du range de tir
+- `STRAFE_RADIUS` : 13.0 → 11.0
+- Orbite yo : 35→28 → **15→11**, variation sin×5 (était ×10) — boss reste 10-20 u devant le joueur
+
+#### `src/hud.py` — Panneau radio boss
+- Panneau procédural en bas d'écran (Z≈-0.810) à la place de la barre centrée
+- `_make_panel_bg()` : rectangle + 2 demi-cercles (GeomTriangles), fond sombre `(0.02,0,0,0.82)`
+- `_make_panel_border()` : contour GeomLines avec arcs latéraux, épaisseur 1.5px
+- Ligne déco intérieure supplémentaire (alpha 0.30)
+- Barre HP dans le panneau, texte "◈ DARTH VADER — TIE ADVANCED" + label de phase
+
+#### `src/explosions.py` — Géométrie circulaire procédurale
+- Flash et onde de choc passent de CardMaker (rectangles visibles) à géométrie procédurale
+- **`_make_disc()`** : disque fan de triangles, alpha centre=1.0 / bord=0.0, billboard additif `M_add + O_incoming_alpha`
+- **`_make_ring()`** : 3 cercles concentriques (0.55/0.80/1.00), alpha 0→1→0, billboard additif
+- Débris plus visibles : couleur 0.08-0.18 → **0.20-0.45** (teinte chaude), vitesse 6-18 → **10-28**, durée 0.4-0.8 → **0.7-1.3s**, compte : 7/10/16
 
 ### v0.14 — Bugfixes : keys / torpilles / fullscreen
 - **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)

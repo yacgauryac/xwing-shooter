@@ -52,7 +52,7 @@ class Game(ShowBase):
 
         # État
         self.game_started = False
-        self.is_fullscreen = False
+        # is_fullscreen est déjà positionné à True par setup_window()
         self.fps_visible = True
         self.setFrameRateMeter(True)
 
@@ -131,9 +131,15 @@ class Game(ShowBase):
     def setup_window(self):
         props = WindowProperties()
         props.setTitle("X-Wing Shooter")
-        props.setSize(1280, 720)
+        w = self.pipe.getDisplayWidth()
+        h = self.pipe.getDisplayHeight()
+        props.setFullscreen(True)
+        props.setSize(w, h)
         self.win.requestProperties(props)
         self.disableMouse()
+        self.is_fullscreen = True
+        # Sync aspect ratio after window opens
+        self.taskMgr.doMethodLater(0.05, self._sync_aspect, "sync_aspect_init")
 
     def _set_cursor(self, visible: bool):
         """Affiche ou masque le curseur de la souris."""
