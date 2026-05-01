@@ -34,7 +34,7 @@ PRESETS = {
         "fb_size":      0.6,
         "sparks":       20,
         "duration":     0.5,
-        "debris_count": 5,
+        "debris_count": 7,
     },
     "medium": {
         "flash_size":   2.0,
@@ -43,7 +43,7 @@ PRESETS = {
         "fb_size":      1.1,
         "sparks":       30,
         "duration":     0.7,
-        "debris_count": 6,
+        "debris_count": 10,
     },
     "large": {
         "flash_size":   3.5,
@@ -52,7 +52,7 @@ PRESETS = {
         "fb_size":      2.0,
         "sparks":       45,
         "duration":     1.2,
-        "debris_count": 8,
+        "debris_count": 16,
     },
 }
 
@@ -176,10 +176,10 @@ class DebrisChunk:
 
     def __init__(self, game, position):
         self.alive        = True
-        self.lifetime     = random.uniform(0.4, 0.8)
+        self.lifetime     = random.uniform(0.7, 1.3)   # Plus long (était 0.4-0.8)
         self.max_lifetime = self.lifetime
 
-        speed = random.uniform(6, 18)
+        speed = random.uniform(10, 28)                  # Plus rapide (était 6-18)
         theta = random.uniform(0, math.pi * 2)
         phi   = random.uniform(0, math.pi)
         self.velocity = Vec3(
@@ -188,9 +188,9 @@ class DebrisChunk:
             math.cos(phi) * speed,
         )
         self.rot_speed = Vec3(
-            random.uniform(-150, 150),
-            random.uniform(-150, 150),
-            random.uniform(-150, 150),
+            random.uniform(-200, 200),
+            random.uniform(-200, 200),
+            random.uniform(-200, 200),
         )
         self.node = self._make_chunk()
         self.node.reparentTo(game.render)
@@ -204,9 +204,10 @@ class DebrisChunk:
         col   = GeomVertexWriter(vdata, "color")
 
         ctype = random.randint(0, 2)
-        gray  = random.uniform(0.08, 0.18)
-        c1    = Vec4(gray,       gray,       gray * 0.9, 1)
-        c2    = Vec4(gray * 1.3, gray * 1.2, gray,       1)
+        gray  = random.uniform(0.20, 0.45)   # Plus clair (était 0.08-0.18)
+        # Légère teinte chaude pour rester cohérent avec la palette explosion
+        c1    = Vec4(gray * 1.1, gray * 0.8, gray * 0.6, 1)
+        c2    = Vec4(gray * 1.3, gray * 1.0, gray * 0.7, 1)
         tris  = GeomTriangles(Geom.UHStatic)
 
         if ctype == 0:

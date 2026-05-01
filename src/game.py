@@ -78,7 +78,8 @@ class Game(ShowBase):
             return
 
         self.game_started = True
-        self._set_cursor(False)   # Masque le curseur en jeu
+        # Masque le curseur — doMethodLater évite le conflit avec le clic DirectGUI
+        self.taskMgr.doMethodLater(0.05, self._hide_cursor_task, "hide_cursor")
 
         # Systèmes de jeu
         self.environment = Environment(self)
@@ -139,6 +140,11 @@ class Game(ShowBase):
         props = WindowProperties()
         props.setCursorHidden(not visible)
         self.win.requestProperties(props)
+
+    def _hide_cursor_task(self, task):
+        """Tâche différée — cache le curseur après le traitement du clic menu."""
+        self._set_cursor(False)
+        return task.done
 
     def setup_lights(self):
         # Lumière ambiante — bleutée, espace froid

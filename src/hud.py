@@ -284,16 +284,17 @@ class HUD:
         self.boss_bar_root.setBin("fixed", 48)
         self.boss_bar_root.hide()
 
+        # Barre en haut, sous le score (score est à 0.78)
         self.boss_name_text = OnscreenText(
-            text="", pos=(0, 0.20), scale=0.028,
-            fg=Vec4(1.0, 0.2, 0.05, 0.9),
+            text="", pos=(0, 0.64), scale=0.026,
+            fg=Vec4(1.0, 0.25, 0.05, 0.95),
             align=TextNode.ACenter, mayChange=True, sort=55,
             shadow=(0, 0, 0, 0.8),
         )
-        self.boss_bar  = _make_bar(self.boss_bar_root, -0.35, 0.12, 0.70, 0.025, segments=20)
+        self.boss_bar  = _make_bar(self.boss_bar_root, -0.42, 0.56, 0.84, 0.024, segments=20)
         self.boss_phase_text = OnscreenText(
-            text="", pos=(0, 0.10), scale=0.022,
-            fg=Vec4(1.0, 0.4, 0.05, 0.7),
+            text="", pos=(0, 0.52), scale=0.020,
+            fg=Vec4(1.0, 0.4, 0.05, 0.75),
             align=TextNode.ACenter, mayChange=True, sort=55,
         )
 

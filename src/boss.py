@@ -19,10 +19,10 @@ import os
 
 # ── Constantes globales ──────────────────────────────────────────────────────
 
-BOSS_TRIGGER_WAVE = 2
+BOSS_TRIGGER_WAVE = 2   # ← TESTING : remettre à 8 avant release
 
-BOSS_HP           = 50
-BOSS_HIT_RADIUS   = 3.0
+BOSS_HP           = 150   # HP augmenté (était 50)
+BOSS_HIT_RADIUS   = 2.5
 BOSS_BOLT_SPEED   = 58.0   # Vitesse des bolts boss (légèrement plus rapide que TIE)
 
 # ── Mouvement — orbite selon HP ───────────────────────────────────────────────
