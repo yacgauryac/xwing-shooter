@@ -98,6 +98,102 @@ def _update_bar(bar, pct, color=C_ORANGE):
             seg.hide()
 
 
+# ---------------------------------------------------------------------------
+# Panneau radio boss — géométrie procédurale (rectangle + 2 demi-cercles)
+# ---------------------------------------------------------------------------
+
+def _make_panel_bg(parent, cx, cz, hw, hh, color, segs=14):
+    """Fond rempli : rectangle central + 2 demi-cercles aux extrémités."""
+    fmt = GeomVertexFormat.getV3c4()
+    vd  = GeomVertexData("pbg", fmt, Geom.UHStatic)
+    vtx = GeomVertexWriter(vd, "vertex")
+    col = GeomVertexWriter(vd, "color")
+    tri = GeomTriangles(Geom.UHStatic)
+    idx = [0]
+
+    def av(x, z):
+        vtx.addData3(x, 0, z); col.addData4(color); idx[0] += 1
+
+    # Rectangle central
+    av(cx - hw, cz - hh)  # 0
+    av(cx + hw, cz - hh)  # 1
+    av(cx + hw, cz + hh)  # 2
+    av(cx - hw, cz + hh)  # 3
+    tri.addVertices(0, 1, 2); tri.addVertices(0, 2, 3)
+
+    # Demi-cercle gauche (90° → 270°)
+    lc = idx[0]; av(cx - hw, cz)
+    ls = idx[0]
+    for i in range(segs + 1):
+        a = math.pi/2 + math.pi * i / segs
+        av(cx - hw + math.cos(a) * hh, cz + math.sin(a) * hh)
+    for i in range(segs):
+        tri.addVertices(lc, ls + i, ls + i + 1)
+
+    # Demi-cercle droit (-90° → 90°)
+    rc = idx[0]; av(cx + hw, cz)
+    rs = idx[0]
+    for i in range(segs + 1):
+        a = -math.pi/2 + math.pi * i / segs
+        av(cx + hw + math.cos(a) * hh, cz + math.sin(a) * hh)
+    for i in range(segs):
+        tri.addVertices(rc, rs + i, rs + i + 1)
+
+    geom = Geom(vd); geom.addPrimitive(tri)
+    gn = GeomNode("panel_bg"); gn.addGeom(geom)
+    np = NodePath(gn)
+    np.reparentTo(parent)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    np.setBin("fixed", 43)
+    np.setDepthTest(False); np.setDepthWrite(False)
+    return np
+
+
+def _make_panel_border(parent, cx, cz, hw, hh, color, segs=16, thickness=1.5):
+    """Contour lumineux : 2 lignes droites + 2 arcs demi-cercles."""
+    from panda3d.core import GeomLines
+    fmt = GeomVertexFormat.getV3c4()
+    vd  = GeomVertexData("pb", fmt, Geom.UHStatic)
+    vtx = GeomVertexWriter(vd, "vertex")
+    col = GeomVertexWriter(vd, "color")
+    lines = GeomLines(Geom.UHStatic)
+    idx = [0]
+
+    def av(x, z):
+        vtx.addData3(x, 0, z); col.addData4(color); idx[0] += 1
+
+    # Ligne haute
+    av(cx - hw, cz + hh); av(cx + hw, cz + hh); lines.addVertices(0, 1)
+    # Ligne basse
+    av(cx - hw, cz - hh); av(cx + hw, cz - hh); lines.addVertices(2, 3)
+
+    # Arc gauche
+    ls = idx[0]
+    for i in range(segs + 1):
+        a = math.pi/2 + math.pi * i / segs
+        av(cx - hw + math.cos(a) * hh, cz + math.sin(a) * hh)
+    for i in range(segs):
+        lines.addVertices(ls + i, ls + i + 1)
+
+    # Arc droit
+    rs = idx[0]
+    for i in range(segs + 1):
+        a = -math.pi/2 + math.pi * i / segs
+        av(cx + hw + math.cos(a) * hh, cz + math.sin(a) * hh)
+    for i in range(segs):
+        lines.addVertices(rs + i, rs + i + 1)
+
+    geom = Geom(vd); geom.addPrimitive(lines)
+    gn = GeomNode("panel_border"); gn.addGeom(geom)
+    np = NodePath(gn)
+    np.reparentTo(parent)
+    np.setRenderModeThickness(thickness)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    np.setBin("fixed", 44)
+    np.setDepthTest(False); np.setDepthWrite(False)
+    return np
+
+
 class HUD:
     def __init__(self, game):
         self.game = game
@@ -277,24 +373,50 @@ class HUD:
         )
         self.combo_timer = 0.0
 
-        # ===== BOSS HP BAR =====
-        self._boss_bar_visible = False
-        self.boss_bar_root = game.aspect2d.attachNewNode("boss_bar")
-        self.boss_bar_root.setTransparency(TransparencyAttrib.MAlpha)
-        self.boss_bar_root.setBin("fixed", 48)
-        self.boss_bar_root.hide()
+        # ===== PANNEAU RADIO BOSS (bas d'écran, style HUD militaire) =====
+        # Géométrie : rectangle + 2 demi-cercles — affiché uniquement pendant le boss
+        _P_CZ = -0.810    # Centre Z du panneau
+        _P_HW = 0.55      # Demi-largeur rectangle
+        _P_HH = 0.060     # Demi-hauteur = rayon demi-cercles
+        # Panneau spans Z : -0.870 à -0.750
 
-        # Barre en haut, sous le score (score est à 0.78)
+        self._boss_bar_visible = False
+        self._boss_panel_root  = game.aspect2d.attachNewNode("boss_radio")
+        self._boss_panel_root.setTransparency(TransparencyAttrib.MAlpha)
+        self._boss_panel_root.hide()
+
+        # Fond sombre semi-transparent
+        _make_panel_bg(
+            self._boss_panel_root, 0, _P_CZ, _P_HW, _P_HH,
+            Vec4(0.02, 0.0, 0.0, 0.82),
+        )
+        # Bordure orange-rouge lumineuse
+        _make_panel_border(
+            self._boss_panel_root, 0, _P_CZ, _P_HW, _P_HH,
+            Vec4(1.0, 0.25, 0.04, 0.95), thickness=1.5,
+        )
+        # Ligne décorative intérieure (séparateur entre nom et barre)
+        _make_panel_border(
+            self._boss_panel_root, 0, _P_CZ, _P_HW * 0.88, _P_HH * 0.30,
+            Vec4(0.8, 0.2, 0.03, 0.30), thickness=1.0,
+        )
+
+        # Barre HP à l'intérieur
+        self.boss_bar_root = self._boss_panel_root   # alias pour compatibilité
+        self.boss_bar = _make_bar(
+            self._boss_panel_root, -0.42, _P_CZ - 0.013, 0.84, 0.017, segments=20
+        )
+
+        # Textes (hors hiérarchie NodePath → gérés manuellement)
         self.boss_name_text = OnscreenText(
-            text="", pos=(0, 0.64), scale=0.026,
+            text="", pos=(0, _P_CZ + 0.036), scale=0.025,
             fg=Vec4(1.0, 0.25, 0.05, 0.95),
             align=TextNode.ACenter, mayChange=True, sort=55,
-            shadow=(0, 0, 0, 0.8),
+            shadow=(0, 0, 0, 0.9),
         )
-        self.boss_bar  = _make_bar(self.boss_bar_root, -0.42, 0.56, 0.84, 0.024, segments=20)
         self.boss_phase_text = OnscreenText(
-            text="", pos=(0, 0.52), scale=0.020,
-            fg=Vec4(1.0, 0.4, 0.05, 0.75),
+            text="", pos=(0, _P_CZ - 0.033), scale=0.018,
+            fg=Vec4(1.0, 0.50, 0.10, 0.80),
             align=TextNode.ACenter, mayChange=True, sort=55,
         )
 
@@ -467,13 +589,13 @@ class HUD:
         self.combo_timer = 1.5
 
     def show_boss_bar(self, name="DARTH VADER — TIE ADVANCED"):
-        """Affiche la barre HP du boss."""
-        self.boss_name_text.setText(name)
-        self.boss_bar_root.show()
+        """Affiche le panneau radio boss."""
+        self.boss_name_text.setText(f"◈  {name}")
+        self._boss_panel_root.show()
         self._boss_bar_visible = True
 
     def hide_boss_bar(self):
-        self.boss_bar_root.hide()
+        self._boss_panel_root.hide()
         self._boss_bar_visible = False
         self.boss_name_text.setText("")
         self.boss_phase_text.setText("")

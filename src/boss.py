@@ -19,22 +19,22 @@ import os
 
 # ── Constantes globales ──────────────────────────────────────────────────────
 
-BOSS_TRIGGER_WAVE = 2   # ← TESTING : remettre à 8 avant release
+BOSS_TRIGGER_WAVE = 8   # Remettre à 2 pour tester rapidement
 
-BOSS_HP           = 150   # HP augmenté (était 50)
+BOSS_HP           = 150
 BOSS_HIT_RADIUS   = 2.5
-BOSS_BOLT_SPEED   = 58.0   # Vitesse des bolts boss (légèrement plus rapide que TIE)
+BOSS_BOLT_SPEED   = 58.0
 
 # ── Mouvement — orbite selon HP ───────────────────────────────────────────────
-# Chaque entrée : radius_x, radius_z, speed (fréquence sinusoïdale), y_offset
-ORBIT_HIGH   = dict(rx=9.0,  rz=4.0, spd=0.65, yo=35)   # HP > 65 %
-ORBIT_MID    = dict(rx=7.0,  rz=3.2, spd=0.95, yo=32)   # HP 32-65 %
-ORBIT_LOW    = dict(rx=5.5,  rz=2.5, spd=1.35, yo=28)   # HP < 32 % (erratique)
+# yo = décalage Y devant le joueur (boss reste proche pour rester visible et hittable)
+ORBIT_HIGH   = dict(rx=9.0,  rz=4.0, spd=0.65, yo=15)   # HP > 65 %
+ORBIT_MID    = dict(rx=7.0,  rz=3.2, spd=0.95, yo=13)   # HP 32-65 %
+ORBIT_LOW    = dict(rx=5.5,  rz=2.5, spd=1.35, yo=11)   # HP < 32 % (erratique)
 
-CHARGE_SPEED    = 38.0   # Vitesse de charge
-CHARGE_DURATION = 0.85   # Durée de la phase charge (secondes)
-STRAFE_RADIUS   = 13.0   # Amplitude du strafe latéral (unités)
-RETREAT_Y       = 62.0   # Profondeur de retraite (Y monde)
+CHARGE_SPEED    = 38.0
+CHARGE_DURATION = 0.85
+STRAFE_RADIUS   = 11.0
+RETREAT_Y       = 25.0   # Retraite modérée — boss reste à portée
 LERP_NORMAL     = 2.5    # Lerp mouvement normal
 LERP_CHARGE     = 8.0    # Lerp pendant la charge
 
@@ -259,15 +259,15 @@ class BossTIEAdvanced:
         rx  = 9.0  - t_dmg * 3.5          # 9.0  → 5.5
         rz  = 4.0  - t_dmg * 1.5          # 4.0  → 2.5
         spd = 0.65 + t_dmg * 0.55         # 0.65 → 1.20
-        yo  = 35.0 - t_dmg * 7.0          # 35   → 28
+        yo  = 15.0 - t_dmg * 4.0          # 15   → 11  (réduit — boss reste proche)
 
-        # En rage (hp < ~30%) : légère variation lente de l'orbite, sans haute fréquence
+        # En rage (hp < ~30%) : légère variation lente de l'orbite
         if hp_pct < 0.32:
             rx  += abs(math.sin(t * 0.25)) * 2.5
             rz  += abs(math.cos(t * 0.35)) * 1.2
 
         x = player_pos.getX() + math.sin(t * spd)        * rx
-        y = player_pos.getY() + yo + math.sin(t * spd * 0.4) * 10
+        y = player_pos.getY() + yo + math.sin(t * spd * 0.4) * 5   # ×5 (était ×10)
         z = player_pos.getZ() + math.cos(t * spd * 0.75) * rz
         return Vec3(x, y, z), LERP_NORMAL
 
