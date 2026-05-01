@@ -389,15 +389,17 @@ class Nebula:
 # ============================================================
 
 class LunarTerrain:
-    """Dalle de terrain lunaire — plan horizontal défilant à Z=-7.8 (sous la zone de jeu)."""
+    """Dalle de terrain lunaire — plan horizontal défilant à Z=-7.8."""
 
     GROUND_Z = -7.8
 
-    def __init__(self, parent, x_center, y_pos, width=32.0, depth=22.0):
+    def __init__(self, parent, x_center, y_pos, width=80.0, depth=22.0):
         self.alive = True
+        self._depth = depth
         self.node = self._make_tile(width, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_center, y_pos, self.GROUND_Z)
+        self.node.setLightOff()   # Pas de lumière scène — couleurs vertex brutes
 
     def _make_tile(self, w, d):
         root = NodePath("lunar_tile")
@@ -406,18 +408,24 @@ class LunarTerrain:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        segs_x = max(4, int(w / 3))
-        segs_y = max(4, int(d / 3))
+        segs_x = max(6, int(w / 4))
+        segs_y = max(6, int(d / 3))
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
-                z = random.uniform(-0.25, 0.25)   # légère rugosité
+                # Z = 0 aux bordures Y (j=0 et j=segs_y) pour joints sans trou
+                # Déformation uniquement à l'intérieur
+                edge_y = (j == 0 or j == segs_y)
+                z = 0.0 if edge_y else random.uniform(-0.30, 0.30)
                 vertex.addData3(x, y, z)
-                g = 0.22 + random.uniform(-0.04, 0.06)
-                # Teinte légèrement chaude (poussière lunaire orangée)
-                col.addData4(g + 0.03, g * 0.98, g * 0.90, 1.0)
+
+                # Gris lunaire — légèrement bleuté, pas de rouge
+                g = 0.28 + random.uniform(-0.05, 0.07)
+                # Cratères (creux) plus sombres
+                dark = 0.75 if z < -0.15 else 1.0
+                col.addData4(g * 0.93 * dark, g * 0.95 * dark, g * dark, 1.0)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
@@ -438,7 +446,7 @@ class LunarTerrain:
         if not self.alive:
             return
         self.node.setY(self.node.getY() - scroll_speed * dt)
-        if self.node.getY() < -35:
+        if self.node.getY() < -45:
             self.destroy()
 
     def destroy(self):
@@ -551,6 +559,7 @@ class TrenchWallPanel:
         self.node = self._make_wall(height, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_side, y_pos, 0)
+        self.node.setLightOff()   # Couleurs vertex brutes
 
     def _make_wall(self, h, d):
         root = NodePath("trench_wall")
@@ -624,6 +633,7 @@ class TrenchFloorPanel:
         self.node = self._make_floor(width, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_center, y_pos, self.FLOOR_Z)
+        self.node.setLightOff()   # Couleurs vertex brutes
 
     def _make_floor(self, w, d):
         root = NodePath("trench_floor")
@@ -747,20 +757,22 @@ class Environment:
     # ----------------------------------------------------------
 
     def _init_lunar(self):
-        """L2 — Sol continu du joueur jusqu'à SPAWN_DEPTH (zéro trou)."""
+        """L2 — Sol continu du joueur jusqu'à SPAWN_DEPTH, léger overlap anti-trou."""
         d = self.TILE_DEPTH
+        step = d - 1.0   # 1u d'overlap pour garantir zéro fissure
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
             self.terrain_tiles.append(LunarTerrain(self.game.render, 0, y, depth=d))
-            y += d
+            y += step
 
     def _init_trench(self):
-        """L3 — Tranchée continue du joueur jusqu'à SPAWN_DEPTH (zéro trou)."""
+        """L3 — Tranchée continue du joueur jusqu'à SPAWN_DEPTH, léger overlap."""
         d = self.TILE_DEPTH
+        step = d - 1.0
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
             self._spawn_trench_row(y)
-            y += d
+            y += step
 
     def _spawn_trench_row(self, y):
         d = self.TILE_DEPTH
@@ -852,7 +864,8 @@ class Environment:
 
         alive_tiles = [t for t in self.terrain_tiles if t.alive and not t.node.isEmpty()]
         max_tile_y = max((t.node.getY() for t in alive_tiles), default=0)
-        if max_tile_y < self.SPAWN_DEPTH - self.TILE_DEPTH * 0.4:
+        # Spawn dès que le plus lointain descend sous SPAWN_DEPTH - 1 (overlap garanti)
+        if max_tile_y < self.SPAWN_DEPTH - 1.0:
             self.terrain_tiles.append(
                 LunarTerrain(self.game.render, 0, self.SPAWN_DEPTH, depth=self.TILE_DEPTH))
 
@@ -878,7 +891,7 @@ class Environment:
             max_wall_y = max(w.node.getY() for w in alive_walls)
         else:
             max_wall_y = 0
-        if max_wall_y < self.SPAWN_DEPTH - self.TILE_DEPTH * 0.4:
+        if max_wall_y < self.SPAWN_DEPTH - 1.0:
             self._spawn_trench_row(self.SPAWN_DEPTH)
 
         # Débris métalliques rares
