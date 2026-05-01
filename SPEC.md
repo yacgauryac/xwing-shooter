@@ -46,14 +46,19 @@ main.py
 - Boucliers : 10 HP max
 
 ### `src/enemies.py` — Ennemis
-- **TIEFighter** : 15 u/s, charge à 35 u/s, 2 HP, 2 bolts, équilibré
-- **TIEInterceptor** : 20 u/s, charge à 40 u/s, 1 HP, 1 bolt, drift agressif
-- **TIEBomber** : 10 u/s, charge à 25 u/s, 4 HP, 2 bolts, tank
-- Tous avec modèles 3D texturés + auto-scale
+- **TIEFighter** : 18 u/s, charge à 65 u/s, 2 HP, 2 bolts, équilibré
+- **TIEInterceptor** : 25 u/s, charge à 80 u/s, 1 HP, 1 bolt, drift agressif
+- **TIEBomber** : 10 u/s, charge à 30 u/s, 5 HP, 2 bolts, tank
+- **ImperialShuttle** *(V2)* : 8 u/s, 8 HP, 2 bolts, 500 pts — procédural (ailes trilobées, dérive dorsale)
+- **AttackBomber** *(V2)* : 7 u/s, 10 HP, triple tir en éventail, 400 pts — procédural (3 pods + pont)
+- **ProbeDroid** *(V2)* : 22 u/s, drift très agressif, 2 HP, 200 pts — procédural (corps cubique + 4 bras + œil rouge)
+- **GroundTurret** *(V2)* : stationnaire au sol (Z=-5.2), défile monde, 6 HP, vise joueur, 300 pts — procédural (base + canon incliné)
+- Tous avec modèles 3D texturés (si disponibles) + fallback procédural
 - Accélération kamikaze à l'approche joueur
 - Tirs laser verts (EnemyBolt)
 - **Formations** : V, ligne, tenaille (pincer), essaim
-- **7 vagues** pré-définies + escalade automatique après vague 7
+- **`WAVE_DEFS_BY_LEVEL`** : dict par niveau (1-4), 7 vagues pré-définies + escalade automatique
+- **`EnemySpawner(game, level=1)`** : utilise les wave defs du niveau sélectionné
 
 ### `src/lasers.py` — Système laser
 - 2 bolts par salve (4 canons en 2 paires alternées)
@@ -90,11 +95,14 @@ main.py
 - Actions disponibles : `aimed_fire` (base 60), `burst_fire` (55), `cone_shot` (50), `predictive_shot` (72, nécessite joueur mobile), `charge` (68), `dodge` (48), `aoe_burst` (58, HP<38% seulement), `retreat` (38)
 - Tous les paramètres de tuning centralisés en constantes en tête de `boss.py`
 
-### `src/environment.py` — Environnement
-- **Astéroïdes** : models texturés (8 variants × 2 packs) + fallback procédural
-- **Planètes** : 9 modèles chargés (non spawnés actuellement — WIP)
-- **Nébuleuses** : éléments colorés procéduraux en arrière-plan
-- **Débris** : objets flottants
+### `src/environment.py` — Environnement (level-aware)
+- **`Environment(game, level=1)`** : décor adapté selon le niveau actif
+- **L1 (Astéroïdes)** : astéroïdes déformés + nébuleuses + débris + 2 planètes fixes
+- **L2 (Surface lunaire)** : `LunarTerrain` (dalles grises tuilées à Z=-7.8) + `LunarRock` (rochers aplatis gris-bleutés)
+- **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
+- **L4 (Nébuleuse)** : nébuleuses denses × 2 + planète violette de fond
+- Couleur de fond `setBackgroundColor` appliquée depuis `LEVELS` au lancement
+- Toutes les classes : `update(dt, scroll_speed)` + `destroy()`
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague, hostiles restants
@@ -118,15 +126,22 @@ main.py
 - Champs : nom, score, vague, kills, date
 
 ### `src/levels.py` — Niveaux
-- LevelManager : 4 niveaux thématiques + boss
-- Infrastructure en place, non entièrement câblé (WIP)
+- `LEVELS` dict : 4 niveaux avec `name`, `waves`, `intro_text`, `bg_color`, `description`
+- L1 Asteroid Field → L2 Lunar Surface → L3 Death Star Trench → L4 Nebula
+- `LevelManager` : transitions entre niveaux (infrastructure, partiellement câblée)
+
+### `src/menu.py` — Menu principal
+- **Sélecteur de niveau** `"CHOISIR NIVEAU"` : sous-menu dynamique généré depuis `LEVELS`
+- Chaque entrée affiche `"LN — NOM"` et déclenche `start_game(start_level=N)`
+- `subtitle` affiche la description des ennemis du niveau survolé
+- `"SOLO"` démarre toujours depuis L1
 
 ### `src/powerups.py` — Collectibles
 - 20% de chance de drop par kill ennemi
 - **Torpedo** : +3 ammo (poids 60%)
 - **Repair** : +2 HP (poids 40%)
 
-### `src/menu.py` — Menu principal
+### `src/menu.py` — Menu principal *(section déjà mise à jour ci-dessus)*
 - Écran titre avec starfield en fond
 - Options, affichage leaderboard
 
@@ -290,6 +305,33 @@ main.py
 - Explosion preset par classe ennemi (TIEBomber → medium, autres → small)
 - Torpilles : impact principal → medium, splash et kills → small
 - Boss mort → preset large + screenshake 1.0 + screen flash 0.4
+
+### v0.18 — Niveaux L2/L3/L4 + 4 nouveaux ennemis + sélection niveau menu
+
+#### Nouveaux ennemis procéduraux (`src/enemies.py`)
+- **ImperialShuttle** : 8 u/s, 8 HP, 2 bolts, 500 pts — navette avec grandes ailes angled + dérive dorsale
+- **AttackBomber** : 7 u/s, 10 HP, triple tir éventail ±0.6u, 400 pts — 3 pods + pont + ailes 2.5u
+- **ProbeDroid** : 22 u/s, drift ×2 plus agressif, 2 HP, 200 pts — corps cubique + 4 bras + œil rouge frontal
+- **GroundTurret** : stationnaire sol (Z=-5.2), défile à 14 u/s, 6 HP, rotation H vers joueur, 300 pts
+- `WAVE_DEFS_BY_LEVEL` : 4 niveaux × 7 vagues configurés — pool d'escalade adapté au niveau
+- `EnemySpawner(game, level=1)` : paramètre level, wave_defs instance (plus de variable de classe)
+
+#### Nouvelles classes décor (`src/environment.py`)
+- **LunarTerrain** : dalle 32×22u à Z=-7.8, géométrie grille procédurale gris-orangée, tuilage Y
+- **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
+- **TrenchWallPanel** : mur YZ (h=16, d=20) avec voyants ambre (1.8%) et rouge (1%) aléatoires
+- **TrenchFloorPanel** : dalle XY à Z=-7.5, carrelage alternant + lueurs ambre (1.2%)
+- `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
+
+#### Sélection de niveau (`src/menu.py`)
+- Entrée "CHOISIR NIVEAU" dans le menu principal
+- Sous-menu dynamique : `L1 — ASTEROID FIELD` … `L4 — NEBULA`
+- Subtitle affiche la description des ennemis du niveau survolé
+- Action `play_level_N` → `start_game(start_level=N)`
+
+#### Intégration (`src/game.py`)
+- `start_game(start_level=1)` : `selected_level` stocké, bg color appliqué, Level passé à env + spawner
+- `reset_game()` : nettoie terrain_tiles/wall_panels/floor_panels + réinitialise décor et wave_defs au niveau en cours
 
 ### v0.17 — Fullscreen au lancement + Boss équilibré + Panneau radio boss + Explosions circulaires
 

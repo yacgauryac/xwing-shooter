@@ -25,6 +25,7 @@ from src.force import ForceAbility
 from src.menu import MainMenu
 from src.boss import BossTIEAdvanced, BOSS_TRIGGER_WAVE
 from src.screenshake import Screenshake
+from src.levels import LEVELS
 
 
 class Game(ShowBase):
@@ -72,20 +73,26 @@ class Game(ShowBase):
         self.starfield.update(dt, 20.0)  # Vitesse lente au menu
         return task.cont
 
-    def start_game(self):
+    def start_game(self, start_level=1):
         """Lance la partie — appelé depuis le menu."""
         if self.game_started:
             return
 
         self.game_started = True
+        self.selected_level = max(1, min(4, start_level))
+
         # Masque le curseur — doMethodLater évite le conflit avec le clic DirectGUI
         self.taskMgr.doMethodLater(0.05, self._hide_cursor_task, "hide_cursor")
 
+        # Couleur de fond selon le niveau
+        bg = LEVELS.get(self.selected_level, LEVELS[1]).get("bg_color", (0, 0, 0))
+        self.setBackgroundColor(bg[0], bg[1], bg[2], 1)
+
         # Systèmes de jeu
-        self.environment = Environment(self)
+        self.environment = Environment(self, level=self.selected_level)
         self.player = Player(self)
         self.lasers = LaserSystem(self)
-        self.spawner = EnemySpawner(self)
+        self.spawner = EnemySpawner(self, level=self.selected_level)
         self.explosions = ExplosionManager(self)
         self.hud = HUD(self)
         self.powerups = PowerUpManager(self)
@@ -229,9 +236,12 @@ class Game(ShowBase):
             self.total_kills += 1
             if hasattr(self.spawner, 'last_kill_pos'):
                 # Preset selon classe de vaisseau
-                if kill_class == 'TIEBomber':
+                if kill_class in ('TIEBomber', 'AttackBomber', 'ImperialShuttle'):
                     preset = "medium"
-                    self.screenshake.trigger(0.25, 0.25)
+                    self.screenshake.trigger(0.30, 0.28)
+                elif kill_class == 'GroundTurret':
+                    preset = "small"
+                    self.screenshake.trigger(0.20, 0.22)
                 else:
                     preset = "small"
                     self.screenshake.trigger(0.15, 0.2)
@@ -475,14 +485,43 @@ class Game(ShowBase):
             n.destroy()
         for d in self.environment.debris:
             d.destroy()
-        self.environment.asteroids = []
-        self.environment.planets = []
-        self.environment.nebulae = []
-        self.environment.debris = []
+        for t in self.environment.terrain_tiles:
+            t.destroy()
+        for w in self.environment.wall_panels:
+            w.destroy()
+        for f in self.environment.floor_panels:
+            f.destroy()
+
+        self.environment.asteroids     = []
+        self.environment.planets       = []
+        self.environment.nebulae       = []
+        self.environment.debris        = []
+        self.environment.terrain_tiles = []
+        self.environment.wall_panels   = []
+        self.environment.floor_panels  = []
         self.environment.asteroid_timer = 2.0
-        self.environment.nebula_timer = 15.0
-        self.environment.debris_timer = 4.0
-        self.environment._spawn_fixed_planets()
+        self.environment.nebula_timer   = 15.0
+        self.environment.debris_timer   = 4.0
+        self.environment.terrain_timer  = 0.5
+        self.environment.wall_timer     = 0.5
+
+        # Réinitialise le décor selon le niveau sélectionné
+        lvl = getattr(self, 'selected_level', 1)
+        bg = LEVELS.get(lvl, LEVELS[1]).get("bg_color", (0, 0, 0))
+        self.setBackgroundColor(bg[0], bg[1], bg[2], 1)
+        if lvl == 1:
+            self.environment._spawn_fixed_planets()
+        elif lvl == 2:
+            self.environment._init_lunar()
+        elif lvl == 3:
+            self.environment._init_trench()
+        elif lvl == 4:
+            self.environment._spawn_nebula_planet()
+
+        # Reset spawner au bon niveau
+        self.spawner.level = lvl
+        from src.enemies import WAVE_DEFS_BY_LEVEL
+        self.spawner.wave_defs = list(WAVE_DEFS_BY_LEVEL.get(lvl, WAVE_DEFS_BY_LEVEL[1]))
 
         self.player.node.setPos(0, 20, 0)
         self.player.target_x = 0

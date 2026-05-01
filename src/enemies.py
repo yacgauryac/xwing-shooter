@@ -417,6 +417,268 @@ class TIEBomber(BaseEnemy):
 
 
 # ============================================================
+# Nouveaux types d'ennemis — V2
+# ============================================================
+
+class ImperialShuttle(BaseEnemy):
+    """Imperial Shuttle — lent, très résistant, bon loot."""
+    SPEED_BASE = 8.0
+    SPEED_CHARGE = 20.0
+    CHARGE_DISTANCE = 80.0
+    HP = 8
+    HIT_RADIUS = 2.8
+    FIRE_COOLDOWN_MIN = 2.0
+    FIRE_COOLDOWN_MAX = 4.0
+    BOLTS_PER_SHOT = 2
+    SCORE_VALUE = 500
+
+    MODEL_PATH = None
+    TARGET_SIZE = 3.5
+
+    def create_procedural(self):
+        root = NodePath("shuttle")
+        c_hull  = Vec4(0.42, 0.42, 0.47, 1)
+        c_dark  = Vec4(0.30, 0.30, 0.34, 1)
+        c_metal = Vec4(0.50, 0.50, 0.55, 1)
+        # Fuselage central
+        body = self._make_box(0.55, 1.8, 0.40, c_hull)
+        body.reparentTo(root)
+        # Cockpit pod (avant)
+        cock = self._make_box(0.42, 0.55, 0.35, c_dark)
+        cock.reparentTo(root)
+        cock.setPos(0, -1.0, 0.12)
+        # Dérive dorsale (empennage vertical)
+        fin = self._make_box(0.06, 1.0, 1.6, c_hull)
+        fin.reparentTo(root)
+        fin.setPos(0, 0.2, 0.55)
+        # Ailes principales (grandes, angled upward)
+        for x_s in [-1, 1]:
+            w = self._make_box(2.2, 0.06, 0.55, c_hull)
+            w.reparentTo(root)
+            w.setPos(x_s * 1.25, 0.1, 0.1)
+            w.setR(x_s * -20)
+        # Ailerons secondaires (petits, bas)
+        for x_s in [-1, 1]:
+            sw = self._make_box(1.2, 0.05, 0.32, c_dark)
+            sw.reparentTo(root)
+            sw.setPos(x_s * 0.7, 0.4, -0.22)
+        # Nacelle moteur (arrière)
+        eng = self._make_box(0.38, 0.55, 0.38, c_metal)
+        eng.reparentTo(root)
+        eng.setPos(0, 1.0, -0.05)
+        return root
+
+
+class AttackBomber(BaseEnemy):
+    """Attack Bomber — plus lourd que le TIE Bomber, très résistant, triple tir."""
+    SPEED_BASE = 7.0
+    SPEED_CHARGE = 18.0
+    CHARGE_DISTANCE = 70.0
+    HP = 10
+    HIT_RADIUS = 2.6
+    FIRE_COOLDOWN_MIN = 2.5
+    FIRE_COOLDOWN_MAX = 5.0
+    BOLTS_PER_SHOT = 3
+    SCORE_VALUE = 400
+
+    MODEL_PATH = None
+    TARGET_SIZE = 3.2
+
+    def _try_fire(self, player_pos):
+        """Triple tir en éventail."""
+        my_pos = self.node.getPos()
+        dist = (my_pos - player_pos).length()
+        if dist < self.FIRE_RANGE and my_pos.getY() > player_pos.getY():
+            self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
+            base_dir = player_pos - my_pos
+            base_dir.normalize()
+            results = []
+            for spread in [-0.6, 0.0, 0.6]:
+                d = Vec3(base_dir.getX() + spread * 0.25,
+                         base_dir.getY(),
+                         base_dir.getZ() + random.uniform(-0.3, 0.3))
+                d.normalize()
+                results.append((Vec3(my_pos.getX() + spread, my_pos.getY(), my_pos.getZ()), d))
+            return results
+        return None
+
+    def create_procedural(self):
+        root = NodePath("attack_bomber")
+        c_body = Vec4(0.26, 0.26, 0.30, 1)
+        c_pod  = Vec4(0.22, 0.22, 0.26, 1)
+        c_wing = Vec4(0.20, 0.20, 0.24, 1)
+        # 3 pods en triangle
+        for i, (px, pz) in enumerate([(0, 0.15), (-0.75, -0.20), (0.75, -0.20)]):
+            pod = self._make_box(0.58, 1.1, 0.52, c_pod if i > 0 else c_body)
+            pod.reparentTo(root)
+            pod.setPos(px, 0, pz)
+        # Passerelle horizontale
+        bridge = self._make_box(1.7, 0.22, 0.16, c_body)
+        bridge.reparentTo(root)
+        bridge.setPos(0, 0.1, -0.20)
+        # Grands panneaux alaires
+        for y_s in [-1, 1]:
+            panel = self._make_box(0.07, 0.10, 2.5, c_wing)
+            panel.reparentTo(root)
+            panel.setPos(0, 0.9 * y_s, 0)
+        root.setH(90)
+        return root
+
+
+class ProbeDroid(BaseEnemy):
+    """Probe Droid — rapide, trajectoire erratique, fragile mais agaçant."""
+    SPEED_BASE = 22.0
+    SPEED_CHARGE = 58.0
+    CHARGE_DISTANCE = 130.0
+    HP = 2
+    HIT_RADIUS = 1.2
+    FIRE_COOLDOWN_MIN = 0.8
+    FIRE_COOLDOWN_MAX = 2.2
+    BOLTS_PER_SHOT = 1
+    SCORE_VALUE = 200
+
+    MODEL_PATH = None
+    TARGET_SIZE = 1.5
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Dérive très agressive et irrégulière
+        self.drift_x = random.uniform(-8.0, 8.0)
+        self.drift_z = random.uniform(-4.5, 4.5)
+        self.drift_speed = random.uniform(3.0, 6.5)
+        # Phase aléatoire pour désynchroniser les droids
+        self.drift_time = random.uniform(0, math.pi * 2)
+
+    def create_procedural(self):
+        root = NodePath("probe_droid")
+        c_body = Vec4(0.08, 0.08, 0.10, 1)
+        c_arm  = Vec4(0.14, 0.14, 0.17, 1)
+        c_eye  = Vec4(0.90, 0.10, 0.05, 1)
+        c_sens = Vec4(0.12, 0.12, 0.15, 1)
+        # Corps principal (sphère approx → cube arrondi)
+        body = self._make_box(0.65, 0.65, 0.65, c_body)
+        body.reparentTo(root)
+        # 4 bras en croix (±X et ±Z)
+        for bx, bz, lx, lz in [
+            ( 0.52, 0,    0.75, 0.06),
+            (-0.52, 0,    0.75, 0.06),
+            (0,  0.52,    0.06, 0.75),
+            (0, -0.52,    0.06, 0.75),
+        ]:
+            arm = self._make_box(lx, 0.06, lz, c_arm)
+            arm.reparentTo(root)
+            arm.setPos(bx, 0, bz)
+        # Capteurs sensoriels (petites boxes aux extrémités)
+        for px, pz in [(1.0, 0), (-1.0, 0), (0, 1.0), (0, -1.0)]:
+            s = self._make_box(0.14, 0.12, 0.14, c_sens)
+            s.reparentTo(root)
+            s.setPos(px, 0, pz)
+        # Oeil frontal rouge
+        eye = self._make_box(0.22, 0.14, 0.22, c_eye)
+        eye.reparentTo(root)
+        eye.setPos(0, -0.40, 0.06)
+        # Antenne dorsale
+        ant = self._make_box(0.06, 0.06, 0.55, c_arm)
+        ant.reparentTo(root)
+        ant.setPos(0, 0, 0.62)
+        return root
+
+
+class GroundTurret(BaseEnemy):
+    """Tourelle sol — stationnaire, défile avec le monde, vise le joueur."""
+    SPEED_BASE = 0.0
+    SPEED_CHARGE = 0.0
+    CHARGE_DISTANCE = 0.0
+    HP = 6
+    HIT_RADIUS = 1.6
+    FIRE_COOLDOWN_MIN = 1.5
+    FIRE_COOLDOWN_MAX = 3.2
+    BOLTS_PER_SHOT = 1
+    SCORE_VALUE = 300
+    TARGET_SIZE = 2.0
+
+    GROUND_Z = -5.2       # Plancher de jeu
+    SCROLL_SPEED = 14.0   # Vitesse de défilement au sol (inférieure aux ennemis volants)
+
+    def __init__(self, parent_node, start_pos, game=None):
+        # Force au niveau du sol
+        fp = Point3(start_pos.getX(), start_pos.getY(), self.GROUND_Z)
+        super().__init__(parent_node, fp, game)
+        self.drift_x = 0.0
+        self.drift_z = 0.0
+        self._scroll_y = start_pos.getY()
+
+    def create_procedural(self):
+        root = NodePath("ground_turret")
+        c_base   = Vec4(0.32, 0.28, 0.24, 1)
+        c_metal  = Vec4(0.24, 0.22, 0.18, 1)
+        c_barrel = Vec4(0.18, 0.16, 0.14, 1)
+        c_detail = Vec4(0.45, 0.30, 0.10, 1)  # Voyant ambre
+        # Plaque de base
+        base = self._make_box(1.5, 1.2, 0.22, c_base)
+        base.reparentTo(root)
+        base.setPos(0, 0, -0.28)
+        # Corps rotatif
+        body = self._make_box(0.75, 0.75, 0.48, c_metal)
+        body.reparentTo(root)
+        body.setPos(0, 0, 0.08)
+        # Canon principal
+        barrel = self._make_box(0.18, 0.18, 1.15, c_barrel)
+        barrel.reparentTo(root)
+        barrel.setPos(0, -0.18, 0.70)
+        barrel.setP(-18)
+        # Supports latéraux
+        for x_s in [-1, 1]:
+            sup = self._make_box(0.10, 0.08, 0.45, c_metal)
+            sup.reparentTo(root)
+            sup.setPos(x_s * 0.38, 0, 0.18)
+        # Voyant d'activité (orange)
+        light = self._make_box(0.10, 0.10, 0.10, c_detail)
+        light.reparentTo(root)
+        light.setPos(0, -0.40, 0.30)
+        return root
+
+    def update(self, dt, player_pos=None):
+        if not self.alive:
+            return None
+        # Défilement monde (pas de drift)
+        self.node.setY(self.node.getY() - self.SCROLL_SPEED * dt)
+        # Rotation horizontale vers le joueur (visée)
+        if player_pos:
+            my_pos = self.node.getPos()
+            dx = player_pos.getX() - my_pos.getX()
+            dz = player_pos.getZ() - my_pos.getZ()
+            angle = math.degrees(math.atan2(-dx, dz + 3.0))
+            self.node.setH(angle)
+        # Flash dégât
+        if self.flash_timer > 0:
+            self.flash_timer -= dt
+            if self.flash_timer <= 0:
+                self.node.setColorScale(self.COLOR_BOOST)
+        if self.node.getY() < -10:
+            self.destroy()
+            return None
+        # Tir
+        self.fire_timer -= dt
+        if self.fire_timer <= 0 and player_pos is not None:
+            return self._turret_fire(player_pos)
+        return None
+
+    def _turret_fire(self, player_pos):
+        """Tire vers le joueur depuis le sol — pas de restriction d'angle."""
+        my_pos = self.node.getPos()
+        dist = (my_pos - player_pos).length()
+        if dist < self.FIRE_RANGE:
+            self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
+            direction = player_pos - my_pos
+            direction += Vec3(random.uniform(-0.8, 0.8), 0, random.uniform(-0.4, 0.4))
+            direction.normalize()
+            bolt_pos = Vec3(my_pos.getX(), my_pos.getY(), my_pos.getZ() + 0.90)
+            return [(bolt_pos, direction)]
+        return None
+
+
+# ============================================================
 # Formations
 # ============================================================
 
@@ -472,6 +734,54 @@ class Formation:
 
 
 # ============================================================
+# Vagues par niveau
+# ============================================================
+
+WAVE_DEFS_BY_LEVEL = {
+    # L1 — Champ d'astéroïdes : TIE classiques
+    1: [
+        {"enemies": [TIEFighter] * 5, "formation": "line"},
+        {"enemies": [TIEFighter] * 7, "formation": "v"},
+        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 2, "formation": "swarm"},
+        {"enemies": [TIEInterceptor] * 6, "formation": "pincer"},
+        {"enemies": [TIEBomber] * 1 + [TIEFighter] * 4, "formation": "v"},
+        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 3 + [TIEBomber] * 1, "formation": "swarm"},
+        {"enemies": [TIEInterceptor] * 4 + [TIEBomber] * 2 + [TIEFighter] * 4, "formation": "pincer"},
+    ],
+    # L2 — Surface lunaire : Shuttles + Tourelles sol
+    2: [
+        {"enemies": [TIEFighter] * 4 + [GroundTurret] * 2, "formation": "line"},
+        {"enemies": [ImperialShuttle] * 1 + [TIEFighter] * 4, "formation": "v"},
+        {"enemies": [GroundTurret] * 3 + [TIEInterceptor] * 3, "formation": "swarm"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEFighter] * 2 + [GroundTurret] * 2, "formation": "line"},
+        {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4 + [GroundTurret] * 2, "formation": "pincer"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEBomber] * 1 + [GroundTurret] * 3, "formation": "swarm"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEInterceptor] * 3 + [GroundTurret] * 4, "formation": "pincer"},
+    ],
+    # L3 — Tranchée : Probe Droids + Attack Bombers + Tourelles
+    3: [
+        {"enemies": [TIEFighter] * 4 + [ProbeDroid] * 2, "formation": "swarm"},
+        {"enemies": [ProbeDroid] * 5 + [TIEInterceptor] * 2, "formation": "v"},
+        {"enemies": [AttackBomber] * 1 + [TIEFighter] * 3 + [GroundTurret] * 2, "formation": "line"},
+        {"enemies": [ProbeDroid] * 5 + [GroundTurret] * 3, "formation": "pincer"},
+        {"enemies": [AttackBomber] * 2 + [TIEInterceptor] * 3 + [ProbeDroid] * 2, "formation": "swarm"},
+        {"enemies": [AttackBomber] * 1 + [ProbeDroid] * 4 + [GroundTurret] * 3, "formation": "swarm"},
+        {"enemies": [AttackBomber] * 2 + [TIEInterceptor] * 3 + [GroundTurret] * 3, "formation": "pincer"},
+    ],
+    # L4 — Nébuleuse : tout mélangé, difficulté max
+    4: [
+        {"enemies": [TIEFighter] * 4 + [ProbeDroid] * 3, "formation": "swarm"},
+        {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4, "formation": "v"},
+        {"enemies": [AttackBomber] * 1 + [GroundTurret] * 3 + [TIEFighter] * 3, "formation": "line"},
+        {"enemies": [ProbeDroid] * 4 + [ImperialShuttle] * 2, "formation": "pincer"},
+        {"enemies": [AttackBomber] * 2 + [TIEBomber] * 2 + [GroundTurret] * 3, "formation": "swarm"},
+        {"enemies": [ImperialShuttle] * 2 + [AttackBomber] * 1 + [ProbeDroid] * 3, "formation": "swarm"},
+        {"enemies": [AttackBomber] * 2 + [ImperialShuttle] * 2 + [GroundTurret] * 4, "formation": "pincer"},
+    ],
+}
+
+
+# ============================================================
 # Spawner
 # ============================================================
 
@@ -481,26 +791,11 @@ class EnemySpawner:
     SPAWN_DEPTH = 150.0
     MAX_ENEMIES = 15
 
-    # Définition des vagues
-    WAVE_DEFS = [
-        # Vague 1 : TIE simples, ligne
-        {"enemies": [TIEFighter] * 5, "formation": "line"},
-        # Vague 2 : TIE en V
-        {"enemies": [TIEFighter] * 7, "formation": "v"},
-        # Vague 3 : Mix TIE + Interceptor
-        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 2, "formation": "swarm"},
-        # Vague 4 : Interceptors rapides, pincer
-        {"enemies": [TIEInterceptor] * 6, "formation": "pincer"},
-        # Vague 5 : Premier Bomber + escorte
-        {"enemies": [TIEBomber] * 1 + [TIEFighter] * 4, "formation": "v"},
-        # Vague 6 : Gros mix
-        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 3 + [TIEBomber] * 1, "formation": "swarm"},
-        # Vague 7+ : Escalade
-        {"enemies": [TIEInterceptor] * 4 + [TIEBomber] * 2 + [TIEFighter] * 4, "formation": "pincer"},
-    ]
-
-    def __init__(self, game):
+    def __init__(self, game, level=1):
         self.game = game
+        self.level = level
+        self.wave_defs = list(WAVE_DEFS_BY_LEVEL.get(level, WAVE_DEFS_BY_LEVEL[1]))
+
         self.enemies = []
         self.enemy_bolts = []
         self.spawn_timer = 2.0
@@ -516,18 +811,25 @@ class EnemySpawner:
 
     def _prepare_wave(self):
         """Prépare la vague courante."""
-        wave_idx = min(self.wave - 1, len(self.WAVE_DEFS) - 1)
-        wave_def = self.WAVE_DEFS[wave_idx]
+        wave_idx = min(self.wave - 1, len(self.wave_defs) - 1)
+        wave_def = self.wave_defs[wave_idx]
 
-        enemy_classes = wave_def["enemies"]
+        enemy_classes = list(wave_def["enemies"])   # copie pour ne pas muter le template
         formation_type = wave_def["formation"]
 
         # Pour les vagues au-delà des définitions, on scale
-        if self.wave > len(self.WAVE_DEFS):
-            extra = self.wave - len(self.WAVE_DEFS)
-            # Ajoute des ennemis supplémentaires
+        if self.wave > len(self.wave_defs):
+            extra = self.wave - len(self.wave_defs)
+            # Ajoute des ennemis supplémentaires (adapté au niveau)
+            level_pool = {
+                1: [TIEFighter, TIEInterceptor, TIEBomber],
+                2: [TIEFighter, TIEInterceptor, ImperialShuttle, GroundTurret],
+                3: [ProbeDroid, AttackBomber, TIEInterceptor, GroundTurret],
+                4: [AttackBomber, ImperialShuttle, ProbeDroid, GroundTurret],
+            }
+            pool = level_pool.get(self.level, [TIEFighter, TIEInterceptor, TIEBomber])
             for _ in range(extra * 2):
-                enemy_classes.append(random.choice([TIEFighter, TIEInterceptor, TIEBomber]))
+                enemy_classes.append(random.choice(pool))
 
         count = len(enemy_classes)
         center_x = random.uniform(-4, 4)

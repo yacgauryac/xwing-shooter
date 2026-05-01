@@ -384,36 +384,348 @@ class Nebula:
             self.node.removeNode()
 
 
-class Environment:
-    """Gère tout le décor spatial."""
+# ============================================================
+# L2 — Surface lunaire
+# ============================================================
 
-    ASTEROID_INTERVAL = 1.8     # Moins fréquents
+class LunarTerrain:
+    """Dalle de terrain lunaire — plan horizontal défilant à Z=-7.8 (sous la zone de jeu)."""
+
+    GROUND_Z = -7.8
+
+    def __init__(self, parent, x_center, y_pos, width=32.0, depth=22.0):
+        self.alive = True
+        self.node = self._make_tile(width, depth)
+        self.node.reparentTo(parent)
+        self.node.setPos(x_center, y_pos, self.GROUND_Z)
+
+    def _make_tile(self, w, d):
+        root = NodePath("lunar_tile")
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("tile", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col = GeomVertexWriter(vdata, "color")
+
+        segs_x = max(4, int(w / 3))
+        segs_y = max(4, int(d / 3))
+
+        for i in range(segs_x + 1):
+            for j in range(segs_y + 1):
+                x = -w / 2 + i * w / segs_x
+                y = -d / 2 + j * d / segs_y
+                z = random.uniform(-0.25, 0.25)   # légère rugosité
+                vertex.addData3(x, y, z)
+                g = 0.22 + random.uniform(-0.04, 0.06)
+                # Teinte légèrement chaude (poussière lunaire orangée)
+                col.addData4(g + 0.03, g * 0.98, g * 0.90, 1.0)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(segs_x):
+            for j in range(segs_y):
+                a = i * (segs_y + 1) + j
+                b = a + segs_y + 1
+                tris.addVertices(a, b, a + 1)
+                tris.addVertices(a + 1, b, b + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        node = GeomNode("lunar_tile_mesh")
+        node.addGeom(geom)
+        NodePath(node).reparentTo(root)
+        return root
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -35:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+class LunarRock:
+    """Rocher lunaire procédural — plus plat et gris que les astéroïdes classiques."""
+
+    def __init__(self, parent, pos, size, speed):
+        self.alive = True
+        self.speed = speed
+        self.size = size
+        self.hit_radius = size * 0.45
+        self.rot_speed = Vec3(
+            random.uniform(-20, 20),
+            random.uniform(-20, 20),
+            random.uniform(-15, 15),
+        )
+        self.node = self._make_rock(size)
+        self.node.reparentTo(parent)
+        self.node.setPos(pos)
+
+    def _make_rock(self, size):
+        root = NodePath("lunar_rock")
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("rock", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col = GeomVertexWriter(vdata, "color")
+
+        rings, sectors = 6, 8
+        radius = size / 2
+        deform = random.uniform(0.25, 0.50)
+        freq = random.uniform(1.5, 2.8)
+        flat = random.uniform(0.55, 0.75)   # Aplati verticalement (style rocher)
+
+        for i in range(rings + 1):
+            phi = math.pi * i / rings
+            for j in range(sectors + 1):
+                theta = 2.0 * math.pi * j / sectors
+                nx = math.sin(phi) * math.cos(theta)
+                ny = math.sin(phi) * math.sin(theta)
+                nz = math.cos(phi)
+                noise = (
+                    math.sin(nx * freq + 1.1) * 0.4 +
+                    math.sin(ny * freq + 2.3) * 0.3 +
+                    math.cos(nz * freq + 0.8) * 0.3 +
+                    random.uniform(-0.1, 0.1)
+                )
+                r = radius * (1.0 + noise * deform)
+                vertex.addData3(nx * r, ny * r, nz * r * flat)
+                g = 0.28 + random.uniform(-0.05, 0.07)
+                # Gris lunaire légèrement bleuté
+                col.addData4(g * 0.96, g * 0.97, g, 1.0)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(rings):
+            for j in range(sectors):
+                a = i * (sectors + 1) + j
+                b = a + sectors + 1
+                tris.addVertices(a, b, a + 1)
+                tris.addVertices(a + 1, b, b + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        node = GeomNode("rock_mesh")
+        node.addGeom(geom)
+        NodePath(node).reparentTo(root)
+        return root
+
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - self.speed * dt)
+        h, p, r = self.node.getHpr()
+        self.node.setHpr(
+            h + self.rot_speed.getX() * dt,
+            p + self.rot_speed.getY() * dt,
+            r + self.rot_speed.getZ() * dt,
+        )
+        if self.node.getY() < -20:
+            self.destroy()
+
+    def get_pos(self):
+        if self.alive and not self.node.isEmpty():
+            return self.node.getPos()
+        return None
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ============================================================
+# L3 — Tranchée
+# ============================================================
+
+class TrenchWallPanel:
+    """Panneau de mur latéral de tranchée — défile en Y, fixe en X."""
+
+    WALL_X_LEFT  = -13.5
+    WALL_X_RIGHT =  13.5
+
+    def __init__(self, parent, x_side, y_pos, height=16.0, depth=20.0):
+        self.alive = True
+        self.is_right = (x_side > 0)
+        self.node = self._make_wall(height, depth)
+        self.node.reparentTo(parent)
+        self.node.setPos(x_side, y_pos, 0)
+
+    def _make_wall(self, h, d):
+        root = NodePath("trench_wall")
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("wall", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col = GeomVertexWriter(vdata, "color")
+
+        segs_z = max(3, int(h / 2))
+        segs_y = max(3, int(d / 3))
+
+        # Couleurs industrielles — acier sombre avec panneaux
+        for i in range(segs_z + 1):
+            for j in range(segs_y + 1):
+                y = -d / 2 + j * d / segs_y
+                z = -h / 2 + i * h / segs_z
+                vertex.addData3(0, y, z)
+
+                # Sombres avec rivets lumineux occasionnels
+                if random.random() < 0.018:
+                    # Lumière ambre (voyant d'état)
+                    col.addData4(0.85, 0.40, 0.08, 1.0)
+                elif random.random() < 0.01:
+                    # Lumière rouge (alerte)
+                    col.addData4(0.70, 0.12, 0.05, 1.0)
+                else:
+                    g = 0.13 + random.uniform(-0.02, 0.04)
+                    # Acier industriel (légèrement chaud)
+                    col.addData4(g * 1.05, g, g * 0.85, 1.0)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(segs_z):
+            for j in range(segs_y):
+                a = i * (segs_y + 1) + j
+                b = a + segs_y + 1
+                # Face visible depuis l'intérieur de la tranchée
+                if self.is_right:
+                    tris.addVertices(a, b, a + 1)
+                    tris.addVertices(a + 1, b, b + 1)
+                else:
+                    tris.addVertices(a, a + 1, b)
+                    tris.addVertices(a + 1, b + 1, b)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        node = GeomNode("trench_wall_mesh")
+        node.addGeom(geom)
+        NodePath(node).reparentTo(root)
+        return root
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -35:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+class TrenchFloorPanel:
+    """Dalle de sol de tranchée — défile en Y, fixe en Z."""
+
+    FLOOR_Z = -7.5
+
+    def __init__(self, parent, x_center, y_pos, width=28.0, depth=20.0):
+        self.alive = True
+        self.node = self._make_floor(width, depth)
+        self.node.reparentTo(parent)
+        self.node.setPos(x_center, y_pos, self.FLOOR_Z)
+
+    def _make_floor(self, w, d):
+        root = NodePath("trench_floor")
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("floor", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col = GeomVertexWriter(vdata, "color")
+
+        segs_x = max(4, int(w / 3))
+        segs_y = max(4, int(d / 3))
+
+        for i in range(segs_x + 1):
+            for j in range(segs_y + 1):
+                x = -w / 2 + i * w / segs_x
+                y = -d / 2 + j * d / segs_y
+                vertex.addData3(x, y, 0)
+
+                # Carrelage industriel alternant
+                ti = int(i * 2.5)
+                tj = int(j * 2.5)
+                if random.random() < 0.012:
+                    # Lumière de guidage ambre dans le sol
+                    col.addData4(0.75, 0.35, 0.05, 1.0)
+                elif (ti + tj) % 2 == 0:
+                    g = 0.10
+                    col.addData4(g * 1.08, g, g * 0.80, 1.0)
+                else:
+                    g = 0.07
+                    col.addData4(g * 1.05, g, g * 0.75, 1.0)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(segs_x):
+            for j in range(segs_y):
+                a = i * (segs_y + 1) + j
+                b = a + segs_y + 1
+                tris.addVertices(a, b, a + 1)
+                tris.addVertices(a + 1, b, b + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        node = GeomNode("trench_floor_mesh")
+        node.addGeom(geom)
+        NodePath(node).reparentTo(root)
+        return root
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -35:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ============================================================
+# Environment principal (level-aware)
+# ============================================================
+
+class Environment:
+    """Gère tout le décor spatial — adapté selon le niveau actif."""
+
+    ASTEROID_INTERVAL = 1.8
     NEBULA_INTERVAL = 35.0
-    DEBRIS_INTERVAL = 5.0       # Moins de débris aussi
+    DEBRIS_INTERVAL = 5.0
+    TERRAIN_INTERVAL = 1.5    # L2: dalles de sol
+    WALL_INTERVAL = 1.5       # L3: panneaux de mur
 
     SPAWN_DEPTH = 200.0
     FIELD_WIDTH = 25.0
     FIELD_HEIGHT = 15.0
 
-    def __init__(self, game):
+    def __init__(self, game, level=1):
         self.game = game
+        self.level = level
 
-        # Charge le cache de modèles d'astéroïdes
         AsteroidModelCache.load(game)
 
+        # Listes communes
         self.asteroids = []
         self.planets = []
         self.nebulae = []
         self.debris = []
 
-        self.asteroid_timer = 2.0
-        self.nebula_timer = 15.0
-        self.debris_timer = 4.0
+        # Listes spécifiques L2/L3
+        self.terrain_tiles = []   # L2 sol lunaire
+        self.wall_panels  = []    # L3 murs tranchée
+        self.floor_panels = []    # L3 sol tranchée
 
-        # 2 planètes fixes
-        self._spawn_fixed_planets()
+        # Timers
+        self.asteroid_timer = 2.0
+        self.nebula_timer   = 15.0
+        self.debris_timer   = 4.0
+        self.terrain_timer  = 0.5
+        self.wall_timer     = 0.5
+
         self.star_destroyer = None
 
+        # Couleurs nébuleuses (L1/L4)
         self.nebula_colors = [
             Vec4(0.6, 0.2, 0.8, 1),
             Vec4(0.2, 0.4, 0.9, 1),
@@ -422,11 +734,80 @@ class Environment:
             Vec4(0.9, 0.6, 0.1, 1),
         ]
 
+        # Init selon le niveau
+        if level == 1:
+            self._spawn_fixed_planets()
+        elif level == 2:
+            self._init_lunar()
+        elif level == 3:
+            self._init_trench()
+        elif level == 4:
+            self._spawn_nebula_planet()
+
+    # ----------------------------------------------------------
+    # Init par niveau
+    # ----------------------------------------------------------
+
+    def _init_lunar(self):
+        """L2 — Prérempli quelques dalles au départ."""
+        for n in range(5):
+            y = 30 + n * 22
+            self.terrain_tiles.append(
+                LunarTerrain(self.game.render, 0, y)
+            )
+
+    def _init_trench(self):
+        """L3 — Prérempli murs + sol initiaux."""
+        for n in range(5):
+            y = 30 + n * 20
+            self.wall_panels.append(TrenchWallPanel(
+                self.game.render, TrenchWallPanel.WALL_X_LEFT, y))
+            self.wall_panels.append(TrenchWallPanel(
+                self.game.render, TrenchWallPanel.WALL_X_RIGHT, y))
+            self.floor_panels.append(TrenchFloorPanel(
+                self.game.render, 0, y))
+
+    def _spawn_nebula_planet(self):
+        """L4 — Nébuleuse colorée en fond."""
+        p = DistantPlanet(
+            self.game.render,
+            Point3(0, 180, 0),
+            size=30,
+            color=Vec4(0.4, 0.2, 0.6, 1),
+        )
+        self.planets.append(p)
+
+    # ----------------------------------------------------------
+    # Update principal
+    # ----------------------------------------------------------
+
     def update(self, dt, scroll_speed):
-        """Met à jour tout le décor."""
+        if self.level == 1:
+            self._update_l1(dt, scroll_speed)
+        elif self.level == 2:
+            self._update_l2(dt, scroll_speed)
+        elif self.level == 3:
+            self._update_l3(dt, scroll_speed)
+        elif self.level == 4:
+            self._update_l4(dt, scroll_speed)
+
+        # Cleanup commun
+        self.asteroids     = [a for a in self.asteroids if a.alive]
+        self.nebulae       = [n for n in self.nebulae   if n.alive]
+        self.debris        = [d for d in self.debris    if d.alive]
+        self.terrain_tiles = [t for t in self.terrain_tiles if t.alive]
+        self.wall_panels   = [w for w in self.wall_panels   if w.alive]
+        self.floor_panels  = [f for f in self.floor_panels  if f.alive]
+
+        for p in self.planets:
+            p.update(dt)
+        if self.star_destroyer:
+            self.star_destroyer.update(dt)
+
+    def _update_l1(self, dt, scroll_speed):
+        """L1 — Astéroïdes + nébuleuses."""
         speed_factor = scroll_speed / 20.0
 
-        # Astéroïdes
         self.asteroid_timer -= dt
         if self.asteroid_timer <= 0:
             self._spawn_asteroid(scroll_speed)
@@ -434,38 +815,113 @@ class Environment:
 
         for a in self.asteroids:
             a.update(dt)
-        self.asteroids = [a for a in self.asteroids if a.alive]
 
-        # Planètes (fixes, grossissent lentement)
-        for p in self.planets:
-            p.update(dt)
-
-        # Star Destroyer en fond
-        if self.star_destroyer:
-            self.star_destroyer.update(dt)
-
-        # Nébuleuses
         self.nebula_timer -= dt
         if self.nebula_timer <= 0:
             self._spawn_nebula()
             self.nebula_timer = self.NEBULA_INTERVAL + random.uniform(-5, 5)
-
         for n in self.nebulae:
             n.update(dt)
-        self.nebulae = [n for n in self.nebulae if n.alive]
 
-        # Débris
         self.debris_timer -= dt
         if self.debris_timer <= 0:
             self._spawn_debris(scroll_speed)
             self.debris_timer = self.DEBRIS_INTERVAL + random.uniform(-1, 1)
-
         for d in self.debris:
             d.update(dt)
-        self.debris = [d for d in self.debris if d.alive]
+
+    def _update_l2(self, dt, scroll_speed):
+        """L2 — Surface lunaire : rochers gris + terrain."""
+        speed_factor = scroll_speed / 20.0
+
+        # Rochers lunaires (remplace astéroïdes)
+        self.asteroid_timer -= dt
+        if self.asteroid_timer <= 0:
+            self._spawn_lunar_rock(scroll_speed)
+            self.asteroid_timer = (self.ASTEROID_INTERVAL * 0.85) / speed_factor
+
+        for a in self.asteroids:
+            a.update(dt)
+
+        # Terrain sol
+        self.terrain_timer -= dt
+        if self.terrain_timer <= 0:
+            self.terrain_tiles.append(
+                LunarTerrain(self.game.render, 0, self.SPAWN_DEPTH)
+            )
+            self.terrain_timer = self.TERRAIN_INTERVAL / speed_factor
+
+        for t in self.terrain_tiles:
+            t.update(dt, scroll_speed)
+
+        # Débris rocheux légers
+        self.debris_timer -= dt
+        if self.debris_timer <= 0:
+            self._spawn_debris(scroll_speed)
+            self.debris_timer = (self.DEBRIS_INTERVAL * 1.4) + random.uniform(-1, 1)
+        for d in self.debris:
+            d.update(dt)
+
+    def _update_l3(self, dt, scroll_speed):
+        """L3 — Tranchée : murs + sol industriels."""
+        speed_factor = scroll_speed / 20.0
+
+        self.wall_timer -= dt
+        if self.wall_timer <= 0:
+            y = self.SPAWN_DEPTH
+            self.wall_panels.append(
+                TrenchWallPanel(self.game.render, TrenchWallPanel.WALL_X_LEFT, y))
+            self.wall_panels.append(
+                TrenchWallPanel(self.game.render, TrenchWallPanel.WALL_X_RIGHT, y))
+            self.floor_panels.append(
+                TrenchFloorPanel(self.game.render, 0, y))
+            self.wall_timer = self.WALL_INTERVAL / speed_factor
+
+        for w in self.wall_panels:
+            w.update(dt, scroll_speed)
+        for f in self.floor_panels:
+            f.update(dt, scroll_speed)
+
+        # Quelques débris métalliques
+        self.debris_timer -= dt
+        if self.debris_timer <= 0:
+            self._spawn_debris(scroll_speed)
+            self.debris_timer = (self.DEBRIS_INTERVAL * 2.0) + random.uniform(-1, 1)
+        for d in self.debris:
+            d.update(dt)
+
+    def _update_l4(self, dt, scroll_speed):
+        """L4 — Nébuleuse : astéroïdes + nuages denses."""
+        speed_factor = scroll_speed / 20.0
+
+        self.asteroid_timer -= dt
+        if self.asteroid_timer <= 0:
+            self._spawn_asteroid(scroll_speed * 0.9)
+            self.asteroid_timer = (self.ASTEROID_INTERVAL * 0.7) / speed_factor
+        for a in self.asteroids:
+            a.update(dt)
+
+        self.nebula_timer -= dt
+        if self.nebula_timer <= 0:
+            # Nébuleuses plus fréquentes et plus grandes en L4
+            self._spawn_nebula(scale=2.0)
+            self.nebula_timer = (self.NEBULA_INTERVAL * 0.5) + random.uniform(-3, 3)
+        for n in self.nebulae:
+            n.update(dt)
+
+        self.debris_timer -= dt
+        if self.debris_timer <= 0:
+            self._spawn_debris(scroll_speed)
+            self.debris_timer = self.DEBRIS_INTERVAL + random.uniform(-1, 1)
+        for d in self.debris:
+            d.update(dt)
+
+    # ----------------------------------------------------------
+    # Collisions
+    # ----------------------------------------------------------
 
     def check_player_collision(self, player_pos):
-        """Vérifie si le joueur percute un astéroïde. Retourne les dégâts."""
+        """Vérifie collision avec décor. Retourne les dégâts."""
         damage = 0
         for asteroid in self.asteroids:
             if not asteroid.alive:
@@ -473,25 +929,27 @@ class Environment:
             apos = asteroid.get_pos()
             if apos is None:
                 continue
-
             dist = (apos - player_pos).length()
-            if dist < asteroid.hit_radius + 1.0:  # 1.0 = rayon approximatif du joueur
-                damage += 2  # Un astéroïde fait mal !
+            if dist < asteroid.hit_radius + 1.0:
+                damage += 2
                 asteroid.destroy()
 
-        for debris in self.debris:
-            if not debris.alive:
+        for d in self.debris:
+            if not d.alive:
                 continue
-            dpos = debris.get_pos()
+            dpos = d.get_pos()
             if dpos is None:
                 continue
-
             dist = (dpos - player_pos).length()
-            if dist < debris.hit_radius + 0.8:
+            if dist < d.hit_radius + 0.8:
                 damage += 1
-                debris.destroy()
+                d.destroy()
 
         return damage
+
+    # ----------------------------------------------------------
+    # Spawners
+    # ----------------------------------------------------------
 
     def _spawn_asteroid(self, scroll_speed):
         x = random.uniform(-self.FIELD_WIDTH, self.FIELD_WIDTH)
@@ -499,37 +957,36 @@ class Environment:
         y = self.SPAWN_DEPTH + random.uniform(0, 50)
         size = random.uniform(0.8, 3.0)
         speed = scroll_speed * random.uniform(0.8, 1.2)
+        self.asteroids.append(Asteroid(self.game.render, Point3(x, y, z), size, speed))
 
-        asteroid = Asteroid(self.game.render, Point3(x, y, z), size, speed)
-        self.asteroids.append(asteroid)
+    def _spawn_lunar_rock(self, scroll_speed):
+        """Rocher lunaire — gris, moins haut que les astéroïdes."""
+        x = random.uniform(-self.FIELD_WIDTH, self.FIELD_WIDTH)
+        z = random.uniform(-7.0, 5.0)   # Plus proche du sol lunaire
+        y = self.SPAWN_DEPTH + random.uniform(0, 50)
+        size = random.uniform(0.5, 2.2)
+        speed = scroll_speed * random.uniform(0.85, 1.15)
+        self.asteroids.append(LunarRock(self.game.render, Point3(x, y, z), size, speed))
 
     def _spawn_fixed_planets(self):
-        """Crée 2 planètes procédurales fixes — visibles dès le départ."""
         p1 = DistantPlanet(
-            self.game.render,
-            Point3(-20, 150, 12),
-            size=18,
-            color=Vec4(0.6, 0.35, 0.2, 1),
+            self.game.render, Point3(-20, 150, 12),
+            size=18, color=Vec4(0.6, 0.35, 0.2, 1),
         )
         self.planets.append(p1)
-
         p2 = DistantPlanet(
-            self.game.render,
-            Point3(25, 200, -8),
-            size=12,
-            color=Vec4(0.25, 0.4, 0.65, 1),
+            self.game.render, Point3(25, 200, -8),
+            size=12, color=Vec4(0.25, 0.4, 0.65, 1),
         )
         self.planets.append(p2)
 
-    def _spawn_nebula(self):
+    def _spawn_nebula(self, scale=1.0):
         x = random.uniform(-60, 60)
         z = random.uniform(-40, 40)
         y = self.SPAWN_DEPTH + random.uniform(200, 500)
         color = random.choice(self.nebula_colors)
-        size = random.uniform(15, 30)
-
-        nebula = Nebula(self.game.render, Point3(x, y, z), color, size)
-        self.nebulae.append(nebula)
+        size = random.uniform(15, 30) * scale
+        self.nebulae.append(Nebula(self.game.render, Point3(x, y, z), color, size))
 
     def _spawn_debris(self, scroll_speed):
         x = random.uniform(-self.FIELD_WIDTH, self.FIELD_WIDTH)
@@ -537,6 +994,4 @@ class Environment:
         y = self.SPAWN_DEPTH + random.uniform(0, 30)
         size = random.uniform(0.2, 0.6)
         speed = scroll_speed * random.uniform(1.0, 1.5)
-
-        debris = Asteroid(self.game.render, Point3(x, y, z), size, speed)
-        self.debris.append(debris)
+        self.debris.append(Asteroid(self.game.render, Point3(x, y, z), size, speed))

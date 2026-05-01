@@ -7,31 +7,35 @@ from direct.gui.DirectGui import DirectFrame
 from panda3d.core import TextNode, Vec4, TransparencyAttrib, ClockObject
 import math
 
+from src.levels import LEVELS
+
 globalClock = ClockObject.getGlobalClock()
 
 
-C_BRIGHT = Vec4(1.0, 0.7, 0.2, 1.0)
-C_ORANGE = Vec4(0.9, 0.55, 0.15, 1.0)
-C_DIM = Vec4(0.5, 0.3, 0.1, 0.6)
-C_SELECTED = Vec4(1.0, 0.8, 0.3, 1.0)
+C_BRIGHT    = Vec4(1.0, 0.7, 0.2, 1.0)
+C_ORANGE    = Vec4(0.9, 0.55, 0.15, 1.0)
+C_DIM       = Vec4(0.5, 0.3, 0.1, 0.6)
+C_SELECTED  = Vec4(1.0, 0.8, 0.3, 1.0)
+C_LOCKED    = Vec4(0.35, 0.25, 0.1, 0.5)
 
 
 class MainMenu:
     """Menu principal du jeu."""
 
     ENTRIES_MAIN = [
-        ("SOLO", "solo"),
-        ("COOP LAN", "coop"),
-        ("LEADERBOARD", "leaderboard"),
-        ("OPTIONS", "options"),
-        ("QUITTER", "quit"),
+        ("SOLO",           "solo"),
+        ("CHOISIR NIVEAU", "level_select"),
+        ("COOP LAN",       "coop"),
+        ("LEADERBOARD",    "leaderboard"),
+        ("OPTIONS",        "options"),
+        ("QUITTER",        "quit"),
     ]
 
     ENTRIES_OPTIONS = [
         ("VOLUME SFX  +", "sfx_up"),
         ("VOLUME SFX  -", "sfx_down"),
-        ("PLEIN ECRAN", "fullscreen"),
-        ("RETOUR", "back"),
+        ("PLEIN ECRAN",   "fullscreen"),
+        ("RETOUR",        "back"),
     ]
 
     def __init__(self, game):
@@ -41,6 +45,7 @@ class MainMenu:
         self.current_menu = "main"
         self.elements = []
         self.timer = 0.0
+        self._level_entries = []   # entrées dynamiques du sélecteur de niveau
 
         # Titre
         self.title = None
@@ -131,10 +136,13 @@ class MainMenu:
             else:
                 t.setFg(C_ORANGE)
                 t.setScale(0.045)
+        self._update_level_subtitle()
 
     def _get_entries(self):
         if self.current_menu == "options":
             return self.ENTRIES_OPTIONS
+        if self.current_menu == "level_select":
+            return self._level_entries
         return self.ENTRIES_MAIN
 
     def _nav_up(self):
@@ -159,7 +167,13 @@ class MainMenu:
 
         if action == "solo":
             self.hide()
-            self.game.start_game()
+            self.game.start_game(start_level=1)
+        elif action == "level_select":
+            self._show_level_select()
+        elif action.startswith("play_level_"):
+            lvl = int(action.split("_")[-1])
+            self.hide()
+            self.game.start_game(start_level=lvl)
         elif action == "coop":
             # Coming soon
             if self.subtitle:
@@ -187,6 +201,40 @@ class MainMenu:
             self.current_menu = "main"
             self.selected = 0
             self._build_entries(self.ENTRIES_MAIN)
+            if self.subtitle:
+                self.subtitle.setText("A long time ago in a galaxy far, far away...")
+                self.subtitle.setFg(C_DIM)
+
+    def _show_level_select(self):
+        """Affiche le sélecteur de niveaux."""
+        self._level_entries = []
+        for lvl_id, cfg in sorted(LEVELS.items()):
+            label = f"L{lvl_id} — {cfg['name']}"
+            self._level_entries.append((label, f"play_level_{lvl_id}"))
+        self._level_entries.append(("RETOUR", "back"))
+
+        self.current_menu = "level_select"
+        self.selected = 0
+        self._build_entries(self._level_entries)
+
+        if self.subtitle:
+            self.subtitle.setText("Choisissez votre mission")
+            self.subtitle.setFg(C_ORANGE)
+
+    def _update_level_subtitle(self):
+        """Affiche la description du niveau survolé dans le sélecteur."""
+        if self.current_menu != "level_select":
+            return
+        if self.selected < len(self._level_entries) - 1:
+            lvl_id = self.selected + 1
+            cfg = LEVELS.get(lvl_id, {})
+            desc = cfg.get("description", "")
+            if self.subtitle:
+                self.subtitle.setText(desc)
+                self.subtitle.setFg(C_DIM)
+        else:
+            if self.subtitle:
+                self.subtitle.setText("")
 
     def _back(self):
         if not self.active:
@@ -195,6 +243,9 @@ class MainMenu:
             self.current_menu = "main"
             self.selected = 0
             self._build_entries(self.ENTRIES_MAIN)
+            if self.subtitle:
+                self.subtitle.setText("A long time ago in a galaxy far, far away...")
+                self.subtitle.setFg(C_DIM)
         else:
             self.game.userExit()
 
