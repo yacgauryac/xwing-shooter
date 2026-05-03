@@ -592,9 +592,9 @@ class TrenchWallPanel:
                 y = -d / 2 + j * d / segs_y
                 z = -h / 2 + i * h / segs_z
                 vertex.addData3(0, y, z)
-                # 1 répétition texture = 8u
-                uv.addData2(j / segs_y * (d / 8.0),
-                            i / segs_z * (h / 8.0))
+                # 1 répétition texture ≈ 24u → panneau ~3u en monde
+                uv.addData2(j / segs_y * (d / 24.0),
+                            i / segs_z * (h / 24.0))
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_z):
@@ -657,8 +657,8 @@ class TrenchFloorPanel:
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
                 vertex.addData3(x, y, 0)
-                uv.addData2(j / segs_y * (d / 8.0),
-                            i / segs_x * (w / 8.0))
+                uv.addData2(j / segs_y * (d / 24.0),
+                            i / segs_x * (w / 24.0))
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
@@ -724,8 +724,8 @@ class TrenchSurfacePanel:
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
                 vertex.addData3(x, y, 0)
-                uv.addData2(j / segs_y * (d / 8.0),
-                            i / segs_x * (w / 8.0))
+                uv.addData2(j / segs_y * (d / 24.0),
+                            i / segs_x * (w / 24.0))
 
         # Face visible depuis le BAS (caméra sous Z=8.2)
         # Winding CCW vu d'en bas → a, a+1, b / a+1, b+1, b
@@ -867,9 +867,57 @@ class Environment:
         tex.setMinfilter(Texture.FT_linear_mipmap_linear)
         return tex
 
+    @staticmethod
+    def _draw_panels(img, panels, cell, seam, bevel, rng, base_val, base_range):
+        """Dessine une liste de panneaux (gx, gy, pw, ph) sur un PNMImage."""
+        SIZE = img.getXSize()
+        for gx, gy, pw, ph in panels:
+            x0 = gx * cell + seam
+            x1 = (gx + pw) * cell - seam
+            y0 = gy * cell + seam
+            y1 = (gy + ph) * cell - seam
+            if x1 <= x0 or y1 <= y0:
+                continue
+            pv   = math.sin(gx * 1.73 + gy * 2.31) * base_range
+            base = max(base_val - base_range, min(base_val + base_range, base_val + pv))
+            for py in range(max(0, y0), min(SIZE, y1)):
+                for px in range(max(0, x0), min(SIZE, x1)):
+                    d_edge = min(px - x0, x1 - 1 - px, py - y0, y1 - 1 - py)
+                    if d_edge < bevel:
+                        t = d_edge / bevel
+                        # Bevel fort : 40% → 100% brightness (faux relief visible)
+                        g = base * (0.40 + 0.60 * t)
+                    else:
+                        g = base
+                    img.setXel(px, py, g * 1.005, g, g * 0.975)
+
+    @staticmethod
+    def _build_panel_layout(cells, rng, allow_tall=True):
+        """Construit un layout 2D de panneaux variés (1×1, 2×1, 1×2, 2×2)."""
+        used = [[False] * cells for _ in range(cells)]
+        panels = []
+        for gy in range(cells):
+            for gx in range(cells):
+                if used[gy][gx]:
+                    continue
+                # Options : 1×1 toujours, 2×1, 1×2, 2×2 si la place est libre
+                can_w2 = (gx + 1 < cells and not used[gy][gx + 1])
+                can_h2 = allow_tall and (gy + 1 < cells and not used[gy + 1][gx])
+                can_2x2 = (can_w2 and can_h2
+                           and not used[gy + 1][gx + 1])
+                opts = [(1, 1)] * 3
+                if can_w2:  opts += [(2, 1)] * 2
+                if can_h2:  opts += [(1, 2)] * 2
+                if can_2x2: opts += [(2, 2)]
+                pw, ph = rng.choice(opts)
+                for dy in range(ph):
+                    for dx in range(pw):
+                        used[gy + dy][gx + dx] = True
+                panels.append((gx, gy, pw, ph))
+        return panels
+
     def _gen_trench_wall_texture(self):
-        """Texture mur Death Star 256×256 — panneaux variés avec bevel."""
-        # Essaie d'abord de charger une texture externe
+        """Texture mur Death Star 256×256 — panneaux 2D variés, bevel fort."""
         path = "assets/textures/trench_wall.jpg"
         if os.path.exists(path):
             try:
@@ -879,54 +927,25 @@ class Environment:
             except Exception:
                 pass
 
-        SIZE   = 256
-        CELLS  = 8        # 8×8 grille = 32 px/cellule
-        cell   = SIZE // CELLS
-        SEAM   = 3        # px — joint sombre entre panneaux
-        BEVEL  = 4        # px — ombre intérieure (faux relief)
-
-        img = PNMImage(SIZE, SIZE)
-
-        # Fond = couleur joint
+        SIZE, CELLS = 256, 8
+        cell = SIZE // CELLS   # 32 px/cellule
+        img  = PNMImage(SIZE, SIZE)
+        # Fond joint
         for y in range(SIZE):
             for x in range(SIZE):
-                img.setXel(x, y, 0.16, 0.155, 0.15)
+                img.setXel(x, y, 0.14, 0.135, 0.13)
 
-        # Layout aléatoire déterministe
-        rng = random.Random(12345)
-        for gy in range(CELLS):
-            gx = 0
-            while gx < CELLS:
-                # Largeur 1 ou 2 cellules (2 = moins fréquent)
-                max_w = min(2, CELLS - gx)
-                w = rng.choices([1, 2], weights=[2, 1])[0] if max_w > 1 else 1
-
-                x0, x1 = gx * cell + SEAM, (gx + w) * cell - SEAM
-                y0, y1 = gy * cell + SEAM, (gy + 1) * cell - SEAM
-
-                if x1 > x0 and y1 > y0:
-                    pv  = math.sin(gx * 1.73 + gy * 2.31) * 0.07
-                    base = max(0.34, min(0.56, 0.45 + pv))
-
-                    for py in range(y0, y1):
-                        for px in range(x0, x1):
-                            # Distance au bord du panneau → bevel
-                            d_edge = min(px - x0, x1 - 1 - px,
-                                         py - y0, y1 - 1 - py)
-                            if d_edge < BEVEL:
-                                t = d_edge / BEVEL
-                                g = base * (0.52 + 0.48 * t)
-                            else:
-                                g = base
-                            img.setXel(px, py, g * 1.005, g, g * 0.975)
-                gx += w
+        rng    = random.Random(12345)
+        layout = self._build_panel_layout(CELLS, rng, allow_tall=True)
+        self._draw_panels(img, layout, cell, seam=4, bevel=6,
+                          rng=rng, base_val=0.48, base_range=0.08)
 
         tex = Texture("trench_wall")
         tex.load(img)
         return self._trench_tex_setup(tex)
 
     def _gen_trench_floor_texture(self):
-        """Texture sol Death Star 256×256 — grandes dalles paysage avec bevel."""
+        """Texture sol Death Star 256×256 — dalles larges, bevel fort."""
         path = "assets/textures/trench_floor.jpg"
         if os.path.exists(path):
             try:
@@ -936,36 +955,17 @@ class Environment:
             except Exception:
                 pass
 
-        SIZE   = 256
-        CX, CY = 5, 8     # 5 colonnes (larges), 8 rangées (courtes)
-        cw     = SIZE // CX   # 51 px
-        ch     = SIZE // CY   # 32 px
-        SEAM   = 4
-        BEVEL  = 5
-
-        img = PNMImage(SIZE, SIZE)
+        SIZE, CELLS = 256, 6    # 6×6 → dalles plus larges que les murs
+        cell = SIZE // CELLS    # 42 px/cellule
+        img  = PNMImage(SIZE, SIZE)
         for y in range(SIZE):
             for x in range(SIZE):
-                img.setXel(x, y, 0.13, 0.125, 0.12)
+                img.setXel(x, y, 0.11, 0.105, 0.10)
 
-        rng = random.Random(54321)
-        for gy in range(CY):
-            for gx in range(CX):
-                x0, x1 = gx * cw + SEAM, (gx + 1) * cw - SEAM
-                y0, y1 = gy * ch + SEAM, (gy + 1) * ch - SEAM
-                if x1 > x0 and y1 > y0:
-                    pv   = math.sin(gx * 2.0 + gy * 1.7) * 0.05
-                    base = max(0.27, min(0.42, 0.33 + pv))
-                    for py in range(y0, y1):
-                        for px in range(x0, x1):
-                            d_edge = min(px - x0, x1 - 1 - px,
-                                         py - y0, y1 - 1 - py)
-                            if d_edge < BEVEL:
-                                t = d_edge / BEVEL
-                                g = base * (0.50 + 0.50 * t)
-                            else:
-                                g = base
-                            img.setXel(px, py, g * 1.01, g, g * 0.97)
+        rng    = random.Random(54321)
+        layout = self._build_panel_layout(CELLS, rng, allow_tall=False)
+        self._draw_panels(img, layout, cell, seam=5, bevel=7,
+                          rng=rng, base_val=0.34, base_range=0.06)
 
         tex = Texture("trench_floor")
         tex.load(img)
