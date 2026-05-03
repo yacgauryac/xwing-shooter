@@ -491,14 +491,17 @@ class Game(ShowBase):
             w.destroy()
         for f in self.environment.floor_panels:
             f.destroy()
+        for s in self.environment.surface_panels:
+            s.destroy()
 
-        self.environment.asteroids     = []
-        self.environment.planets       = []
-        self.environment.nebulae       = []
-        self.environment.debris        = []
-        self.environment.terrain_tiles = []
-        self.environment.wall_panels   = []
-        self.environment.floor_panels  = []
+        self.environment.asteroids      = []
+        self.environment.planets        = []
+        self.environment.nebulae        = []
+        self.environment.debris         = []
+        self.environment.terrain_tiles  = []
+        self.environment.wall_panels    = []
+        self.environment.floor_panels   = []
+        self.environment.surface_panels = []
         self.environment.asteroid_timer = 2.0
         self.environment.nebula_timer   = 15.0
         self.environment.debris_timer   = 4.0

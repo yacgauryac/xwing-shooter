@@ -33,7 +33,7 @@ LEVELS = {
         "name": "DEATH STAR TRENCH",
         "waves": 7,
         "intro_text": "Stay on target... USE THE FORCE!",
-        "bg_color": (0.01, 0.01, 0.015),
+        "bg_color": (0.06, 0.06, 0.065),   # Gris Death Star (pas l'espace)
         "description": "Probe Droids + Attack Bombers + Turrets",
     },
     4: {

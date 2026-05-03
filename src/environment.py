@@ -705,6 +705,89 @@ class TrenchFloorPanel:
             self.node.removeNode()
 
 
+class TrenchSurfacePanel:
+    """Surface de la Death Star de part et d'autre de la tranchée.
+    Panneau horizontal au sommet des murs pour boucher le ciel 'espace'.
+    """
+
+    SURFACE_Z  = 8.2      # sommet des murs de tranchée (h=16, centre Z=0 → top = +8)
+    WALL_HALF  = 13.5     # bord intérieur = bord du mur
+    SURFACE_W  = 110.0    # largeur depuis le mur vers l'extérieur (couvre le FOV 60° à Y=200)
+
+    def __init__(self, parent, side, y_pos, depth=22.0):
+        """side: -1 gauche, +1 droite."""
+        self.alive = True
+        self.node = self._make_surface(depth)
+        self.node.reparentTo(parent)
+        x_center = side * (self.WALL_HALF + self.SURFACE_W / 2.0)
+        self.node.setPos(x_center, y_pos, self.SURFACE_Z)
+        self.node.setLightOff()
+
+    def _make_surface(self, d):
+        root = NodePath("trench_surface")
+        w = self.SURFACE_W
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("surface", fmt, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col    = GeomVertexWriter(vdata, "color")
+
+        segs_x = max(8, int(w / 8))
+        segs_y = max(4, int(d / 4))
+
+        for i in range(segs_x + 1):
+            for j in range(segs_y + 1):
+                x = -w / 2 + i * w / segs_x
+                y = -d / 2 + j * d / segs_y
+                vertex.addData3(x, y, 0)
+
+                # Surface Death Star — acier gris foncé avec joints de panneaux
+                px = int(i * 2.5)
+                py = int(j * 2.5)
+                on_seam = (px % 3 == 0) or (py % 3 == 0)
+
+                if random.random() < 0.005:
+                    # Voyant (ambre ou rouge)
+                    if random.random() < 0.55:
+                        col.addData4(0.60, 0.32, 0.05, 1.0)
+                    else:
+                        col.addData4(0.50, 0.07, 0.04, 1.0)
+                elif on_seam:
+                    g = 0.20 + random.uniform(-0.01, 0.03)
+                    col.addData4(g * 1.04, g, g * 0.88, 1.0)
+                else:
+                    g = 0.11 + random.uniform(-0.02, 0.04)
+                    col.addData4(g * 1.03, g, g * 0.87, 1.0)
+
+        # Face visible depuis le BAS (caméra sous Z=8.2)
+        # Winding CCW vu d'en bas → a, a+1, b / a+1, b+1, b
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(segs_x):
+            for j in range(segs_y):
+                a = i * (segs_y + 1) + j
+                b = a + segs_y + 1
+                tris.addVertices(a, a + 1, b)
+                tris.addVertices(a + 1, b + 1, b)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        node = GeomNode("trench_surface_mesh")
+        node.addGeom(geom)
+        NodePath(node).reparentTo(root)
+        return root
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -35:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
 # ============================================================
 # Environment principal (level-aware)
 # ============================================================
@@ -735,9 +818,10 @@ class Environment:
         self.debris = []
 
         # Listes spécifiques L2/L3
-        self.terrain_tiles = []   # L2 sol lunaire
-        self.wall_panels  = []    # L3 murs tranchée
-        self.floor_panels = []    # L3 sol tranchée
+        self.terrain_tiles  = []   # L2 sol lunaire
+        self.wall_panels    = []   # L3 murs tranchée
+        self.floor_panels   = []   # L3 sol tranchée
+        self.surface_panels = []   # L3 surface Death Star (au-dessus des murs)
 
         # Timers
         self.asteroid_timer = 2.0
@@ -793,6 +877,11 @@ class Environment:
             self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
         self.floor_panels.append(TrenchFloorPanel(
             self.game.render, 0, y, depth=d))
+        # Surface Death Star des deux côtés — comble le "ciel espace"
+        self.surface_panels.append(TrenchSurfacePanel(
+            self.game.render, -1, y, depth=d))
+        self.surface_panels.append(TrenchSurfacePanel(
+            self.game.render, +1, y, depth=d))
 
     def _spawn_nebula_planet(self):
         """L4 — Nébuleuse colorée en fond."""
@@ -822,9 +911,10 @@ class Environment:
         self.asteroids     = [a for a in self.asteroids if a.alive]
         self.nebulae       = [n for n in self.nebulae   if n.alive]
         self.debris        = [d for d in self.debris    if d.alive]
-        self.terrain_tiles = [t for t in self.terrain_tiles if t.alive]
-        self.wall_panels   = [w for w in self.wall_panels   if w.alive]
-        self.floor_panels  = [f for f in self.floor_panels  if f.alive]
+        self.terrain_tiles  = [t for t in self.terrain_tiles  if t.alive]
+        self.wall_panels    = [w for w in self.wall_panels    if w.alive]
+        self.floor_panels   = [f for f in self.floor_panels   if f.alive]
+        self.surface_panels = [s for s in self.surface_panels if s.alive]
 
         for p in self.planets:
             p.update(dt)
@@ -891,12 +981,14 @@ class Environment:
             d.update(dt)
 
     def _update_l3(self, dt, scroll_speed):
-        """L3 — Tranchée : murs + sol continus (spawn basé sur position Y)."""
+        """L3 — Tranchée : murs + sol + surface Death Star continus."""
         # Update
         for w in self.wall_panels:
             w.update(dt, scroll_speed)
         for f in self.floor_panels:
             f.update(dt, scroll_speed)
+        for s in self.surface_panels:
+            s.update(dt, scroll_speed)
 
         # Spawn : ajoute une rangée quand le dernier panneau se rapproche trop
         alive_walls = [w for w in self.wall_panels if w.alive and not w.node.isEmpty()]

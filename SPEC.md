@@ -322,6 +322,7 @@ main.py
 - **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
 - **TrenchWallPanel** : mur YZ (h=16, d=22) avec voyants ambre (1.8%) et rouge (1%) aléatoires, `setLightOff()`
 - **TrenchFloorPanel** : dalle XY à Z=-7.5, carrelage alternant + lueurs ambre (1.2%), `setLightOff()`
+- **TrenchSurfacePanel** : surface Death Star horizontale à Z=8.2, 110u de large de chaque côté (±13.5 → ±123.5), gris acier avec joints de panneaux + voyants, face visible depuis le bas, `setLightOff()`
 - `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
 - Tuilage init : `step = TILE_DEPTH` (exact, zéro overlap) de Y=15 à SPAWN_DEPTH+d
 - Spawn runtime : nouvelle dalle/rangée à `max_y + TILE_DEPTH` quand `max_y < SPAWN_DEPTH - TILE_DEPTH/2`
