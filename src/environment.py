@@ -581,27 +581,32 @@ class TrenchWallPanel:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        segs_z = max(3, int(h / 2))
-        segs_y = max(3, int(d / 3))
+        # Haute densité de segments pour des panneaux bien définis
+        segs_z = max(12, int(h / 1.0))   # ~16 pour h=16
+        segs_y = max(16, int(d / 1.0))   # ~22 pour d=22
 
-        # Couleurs industrielles — acier sombre avec panneaux
         for i in range(segs_z + 1):
             for j in range(segs_y + 1):
                 y = -d / 2 + j * d / segs_y
                 z = -h / 2 + i * h / segs_z
                 vertex.addData3(0, y, z)
 
-                # Sombres avec rivets lumineux occasionnels
-                if random.random() < 0.018:
-                    # Lumière ambre (voyant d'état)
-                    col.addData4(0.85, 0.40, 0.08, 1.0)
-                elif random.random() < 0.01:
-                    # Lumière rouge (alerte)
-                    col.addData4(0.70, 0.12, 0.05, 1.0)
+                # ── Panneaux Death Star ──────────────────────────────────
+                # Grille de panneaux : 1 joint sombre tous les 3 segments
+                # Résultat : panneaux gris clair séparés par des joints sombres
+                is_seam = (i % 3 == 0) or (j % 3 == 0)
+                panel_z = i // 3
+                panel_y = j // 3
+
+                if is_seam:
+                    # Joint inter-panneau — gris foncé
+                    g = 0.18 + random.uniform(0, 0.03)
+                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
                 else:
-                    g = 0.13 + random.uniform(-0.02, 0.04)
-                    # Acier industriel (légèrement chaud)
-                    col.addData4(g * 1.05, g, g * 0.85, 1.0)
+                    # Face du panneau — gris clair avec légère variation par panneau
+                    pv = math.sin(panel_z * 1.73 + panel_y * 2.31) * 0.05
+                    g = max(0.30, min(0.62, 0.47 + pv + random.uniform(-0.02, 0.03)))
+                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_z):
@@ -655,8 +660,8 @@ class TrenchFloorPanel:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        segs_x = max(4, int(w / 3))
-        segs_y = max(4, int(d / 3))
+        segs_x = max(8, int(w / 1.5))
+        segs_y = max(12, int(d / 1.5))
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
@@ -664,18 +669,17 @@ class TrenchFloorPanel:
                 y = -d / 2 + j * d / segs_y
                 vertex.addData3(x, y, 0)
 
-                # Carrelage industriel alternant
-                ti = int(i * 2.5)
-                tj = int(j * 2.5)
-                if random.random() < 0.012:
-                    # Lumière de guidage ambre dans le sol
-                    col.addData4(0.75, 0.35, 0.05, 1.0)
-                elif (ti + tj) % 2 == 0:
-                    g = 0.10
-                    col.addData4(g * 1.08, g, g * 0.80, 1.0)
+                # ── Sol Death Star — dalles grises avec joints ───────────
+                is_seam = (i % 4 == 0) or (j % 4 == 0)
+                panel_x = i // 4
+                panel_y = j // 4
+                if is_seam:
+                    g = 0.14 + random.uniform(0, 0.02)
+                    col.addData4(g, g, g * 0.96, 1.0)
                 else:
-                    g = 0.07
-                    col.addData4(g * 1.05, g, g * 0.75, 1.0)
+                    pv = math.sin(panel_x * 1.61 + panel_y * 2.71) * 0.04
+                    g = max(0.24, min(0.40, 0.31 + pv + random.uniform(-0.02, 0.02)))
+                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
@@ -740,23 +744,17 @@ class TrenchSurfacePanel:
                 y = -d / 2 + j * d / segs_y
                 vertex.addData3(x, y, 0)
 
-                # Surface Death Star — acier gris foncé avec joints de panneaux
-                px = int(i * 2.5)
-                py = int(j * 2.5)
-                on_seam = (px % 3 == 0) or (py % 3 == 0)
-
-                if random.random() < 0.005:
-                    # Voyant (ambre ou rouge)
-                    if random.random() < 0.55:
-                        col.addData4(0.60, 0.32, 0.05, 1.0)
-                    else:
-                        col.addData4(0.50, 0.07, 0.04, 1.0)
-                elif on_seam:
-                    g = 0.20 + random.uniform(-0.01, 0.03)
-                    col.addData4(g * 1.04, g, g * 0.88, 1.0)
+                # ── Surface Death Star — panneaux gris clair (pas de lumières) ──
+                is_seam = (i % 3 == 0) or (j % 3 == 0)
+                panel_x = i // 3
+                panel_y = j // 3
+                if is_seam:
+                    g = 0.17 + random.uniform(0, 0.02)
+                    col.addData4(g * 1.01, g, g * 0.96, 1.0)
                 else:
-                    g = 0.11 + random.uniform(-0.02, 0.04)
-                    col.addData4(g * 1.03, g, g * 0.87, 1.0)
+                    pv = math.sin(panel_x * 1.61 + panel_y * 2.44) * 0.05
+                    g = max(0.28, min(0.55, 0.42 + pv + random.uniform(-0.02, 0.03)))
+                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
 
         # Face visible depuis le BAS (caméra sous Z=8.2)
         # Winding CCW vu d'en bas → a, a+1, b / a+1, b+1, b

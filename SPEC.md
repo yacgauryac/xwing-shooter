@@ -320,9 +320,10 @@ main.py
 #### Nouvelles classes décor (`src/environment.py`)
 - **LunarTerrain** : dalle 240×22u à Z=-7.8, courbure parabolique sphérique (R=420), palette gris-bleutée, `setLightOff()`
 - **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
-- **TrenchWallPanel** : mur YZ (h=16, d=22) avec voyants ambre (1.8%) et rouge (1%) aléatoires, `setLightOff()`
-- **TrenchFloorPanel** : dalle XY à Z=-7.5, carrelage alternant + lueurs ambre (1.2%), `setLightOff()`
-- **TrenchSurfacePanel** : surface Death Star horizontale à Z=8.2, 110u de large de chaque côté (±13.5 → ±123.5), gris acier avec joints de panneaux + voyants, face visible depuis le bas, `setLightOff()`
+- **TrenchWallPanel** : mur YZ (h=16, d=22), panneaux Death Star gris clair (0.30-0.62) + joints sombres (0.18), grille 3×3 segs, **aucune lumière colorée**, `setLightOff()`
+- **TrenchFloorPanel** : dalle XY à Z=-7.5, dalles grises (0.24-0.40) + joints sombres (0.14), grille 4×4 segs, `setLightOff()`
+- **TrenchSurfacePanel** : surface Death Star horizontale à Z=8.2, 110u de large, panneaux gris (0.28-0.55) + joints (0.17), `setLightOff()`
+- L3 bg_color : `(0.22, 0.05, 0.03)` — lueur rouge exhaust port visible au fond de la tranchée
 - `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
 - Tuilage init : `step = TILE_DEPTH` (exact, zéro overlap) de Y=15 à SPAWN_DEPTH+d
 - Spawn runtime : nouvelle dalle/rangée à `max_y + TILE_DEPTH` quand `max_y < SPAWN_DEPTH - TILE_DEPTH/2`
