@@ -242,9 +242,9 @@ class LaserSystem:
             c_back = Vec4(1.0, 0.25, 0.0, 1)
             c_front = Vec4(1.0, 0.7, 0.4, 1)
 
-        # Force → auto-aim boosté, range étendu
-        aim_strength = 0.85 if force_active else self.AUTO_AIM_STRENGTH
-        aim_range = 200.0 if force_active else self.AUTO_AIM_RANGE
+        # Force → pas d'auto-aim (tir manuel pur)
+        aim_strength = 0.0 if force_active else self.AUTO_AIM_STRENGTH
+        aim_range = 0.0 if force_active else self.AUTO_AIM_RANGE
 
         for offset in pair:
             world_pos = self.game.render.getRelativePoint(player_node, offset)
