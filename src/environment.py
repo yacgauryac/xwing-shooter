@@ -7,7 +7,8 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomNode,
-    NodePath, TransparencyAttrib
+    NodePath, TransparencyAttrib,
+    PNMImage, Texture,
 )
 import random
 import math
@@ -566,54 +567,40 @@ class TrenchWallPanel:
     WALL_X_LEFT  = -13.5
     WALL_X_RIGHT =  13.5
 
-    def __init__(self, parent, x_side, y_pos, height=16.0, depth=20.0):
+    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, texture=None):
         self.alive = True
         self.is_right = (x_side > 0)
         self.node = self._make_wall(height, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_side, y_pos, 0)
-        self.node.setLightOff()   # Couleurs vertex brutes
+        self.node.setLightOff()
+        if texture:
+            self.node.setTexture(texture)
 
     def _make_wall(self, h, d):
         root = NodePath("trench_wall")
-        fmt = GeomVertexFormat.getV3c4()
+        fmt = GeomVertexFormat.getV3t2()   # vertex + UV
         vdata = GeomVertexData("wall", fmt, Geom.UHStatic)
         vertex = GeomVertexWriter(vdata, "vertex")
-        col = GeomVertexWriter(vdata, "color")
+        uv     = GeomVertexWriter(vdata, "texcoord")
 
-        # Haute densité de segments pour des panneaux bien définis
-        segs_z = max(12, int(h / 1.0))   # ~16 pour h=16
-        segs_y = max(16, int(d / 1.0))   # ~22 pour d=22
+        segs_z = max(4, int(h))    # 1u/seg
+        segs_y = max(4, int(d))    # 1u/seg
 
         for i in range(segs_z + 1):
             for j in range(segs_y + 1):
                 y = -d / 2 + j * d / segs_y
                 z = -h / 2 + i * h / segs_z
                 vertex.addData3(0, y, z)
-
-                # ── Panneaux Death Star ──────────────────────────────────
-                # Grille de panneaux : 1 joint sombre tous les 3 segments
-                # Résultat : panneaux gris clair séparés par des joints sombres
-                is_seam = (i % 3 == 0) or (j % 3 == 0)
-                panel_z = i // 3
-                panel_y = j // 3
-
-                if is_seam:
-                    # Joint inter-panneau — gris foncé
-                    g = 0.18 + random.uniform(0, 0.03)
-                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
-                else:
-                    # Face du panneau — gris clair avec légère variation par panneau
-                    pv = math.sin(panel_z * 1.73 + panel_y * 2.31) * 0.05
-                    g = max(0.30, min(0.62, 0.47 + pv + random.uniform(-0.02, 0.03)))
-                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
+                # 1 répétition texture = 8u
+                uv.addData2(j / segs_y * (d / 8.0),
+                            i / segs_z * (h / 8.0))
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_z):
             for j in range(segs_y):
                 a = i * (segs_y + 1) + j
                 b = a + segs_y + 1
-                # Face visible depuis l'intérieur de la tranchée
                 if self.is_right:
                     tris.addVertices(a, b, a + 1)
                     tris.addVertices(a + 1, b, b + 1)
@@ -646,40 +633,32 @@ class TrenchFloorPanel:
 
     FLOOR_Z = -7.5
 
-    def __init__(self, parent, x_center, y_pos, width=28.0, depth=20.0):
+    def __init__(self, parent, x_center, y_pos, width=28.0, depth=22.0, texture=None):
         self.alive = True
         self.node = self._make_floor(width, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_center, y_pos, self.FLOOR_Z)
-        self.node.setLightOff()   # Couleurs vertex brutes
+        self.node.setLightOff()
+        if texture:
+            self.node.setTexture(texture)
 
     def _make_floor(self, w, d):
         root = NodePath("trench_floor")
-        fmt = GeomVertexFormat.getV3c4()
+        fmt = GeomVertexFormat.getV3t2()
         vdata = GeomVertexData("floor", fmt, Geom.UHStatic)
         vertex = GeomVertexWriter(vdata, "vertex")
-        col = GeomVertexWriter(vdata, "color")
+        uv     = GeomVertexWriter(vdata, "texcoord")
 
-        segs_x = max(8, int(w / 1.5))
-        segs_y = max(12, int(d / 1.5))
+        segs_x = max(4, int(w / 2))
+        segs_y = max(4, int(d / 2))
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
                 vertex.addData3(x, y, 0)
-
-                # ── Sol Death Star — dalles grises avec joints ───────────
-                is_seam = (i % 4 == 0) or (j % 4 == 0)
-                panel_x = i // 4
-                panel_y = j // 4
-                if is_seam:
-                    g = 0.14 + random.uniform(0, 0.02)
-                    col.addData4(g, g, g * 0.96, 1.0)
-                else:
-                    pv = math.sin(panel_x * 1.61 + panel_y * 2.71) * 0.04
-                    g = max(0.24, min(0.40, 0.31 + pv + random.uniform(-0.02, 0.02)))
-                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
+                uv.addData2(j / segs_y * (d / 8.0),
+                            i / segs_x * (w / 8.0))
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
@@ -718,7 +697,7 @@ class TrenchSurfacePanel:
     WALL_HALF  = 13.5     # bord intérieur = bord du mur
     SURFACE_W  = 110.0    # largeur depuis le mur vers l'extérieur (couvre le FOV 60° à Y=200)
 
-    def __init__(self, parent, side, y_pos, depth=22.0):
+    def __init__(self, parent, side, y_pos, depth=22.0, texture=None):
         """side: -1 gauche, +1 droite."""
         self.alive = True
         self.node = self._make_surface(depth)
@@ -726,14 +705,16 @@ class TrenchSurfacePanel:
         x_center = side * (self.WALL_HALF + self.SURFACE_W / 2.0)
         self.node.setPos(x_center, y_pos, self.SURFACE_Z)
         self.node.setLightOff()
+        if texture:
+            self.node.setTexture(texture)
 
     def _make_surface(self, d):
         root = NodePath("trench_surface")
         w = self.SURFACE_W
-        fmt = GeomVertexFormat.getV3c4()
+        fmt = GeomVertexFormat.getV3t2()
         vdata = GeomVertexData("surface", fmt, Geom.UHStatic)
         vertex = GeomVertexWriter(vdata, "vertex")
-        col    = GeomVertexWriter(vdata, "color")
+        uv     = GeomVertexWriter(vdata, "texcoord")
 
         segs_x = max(8, int(w / 8))
         segs_y = max(4, int(d / 4))
@@ -743,18 +724,8 @@ class TrenchSurfacePanel:
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
                 vertex.addData3(x, y, 0)
-
-                # ── Surface Death Star — panneaux gris clair (pas de lumières) ──
-                is_seam = (i % 3 == 0) or (j % 3 == 0)
-                panel_x = i // 3
-                panel_y = j // 3
-                if is_seam:
-                    g = 0.17 + random.uniform(0, 0.02)
-                    col.addData4(g * 1.01, g, g * 0.96, 1.0)
-                else:
-                    pv = math.sin(panel_x * 1.61 + panel_y * 2.44) * 0.05
-                    g = max(0.28, min(0.55, 0.42 + pv + random.uniform(-0.02, 0.03)))
-                    col.addData4(g * 1.01, g, g * 0.97, 1.0)
+                uv.addData2(j / segs_y * (d / 8.0),
+                            i / segs_x * (w / 8.0))
 
         # Face visible depuis le BAS (caméra sous Z=8.2)
         # Winding CCW vu d'en bas → a, a+1, b / a+1, b+1, b
@@ -861,6 +832,8 @@ class Environment:
 
     def _init_trench(self):
         """L3 — Tranchée continue, step exact = pas de Z-fighting."""
+        self._trench_wall_tex  = self._gen_trench_wall_texture()
+        self._trench_floor_tex = self._gen_trench_floor_texture()
         d = self.TILE_DEPTH
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
@@ -868,18 +841,135 @@ class Environment:
             y += d
 
     def _spawn_trench_row(self, y):
-        d = self.TILE_DEPTH
+        d  = self.TILE_DEPTH
+        wt = getattr(self, '_trench_wall_tex',  None)
+        ft = getattr(self, '_trench_floor_tex', None)
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_LEFT, y, depth=d))
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, texture=wt))
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, texture=wt))
         self.floor_panels.append(TrenchFloorPanel(
-            self.game.render, 0, y, depth=d))
-        # Surface Death Star des deux côtés — comble le "ciel espace"
+            self.game.render, 0, y, depth=d, texture=ft))
         self.surface_panels.append(TrenchSurfacePanel(
-            self.game.render, -1, y, depth=d))
+            self.game.render, -1, y, depth=d, texture=wt))
         self.surface_panels.append(TrenchSurfacePanel(
-            self.game.render, +1, y, depth=d))
+            self.game.render, +1, y, depth=d, texture=wt))
+
+    # ----------------------------------------------------------
+    # Génération de textures procédurales — panneaux Death Star
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def _trench_tex_setup(tex):
+        tex.setWrapU(Texture.WM_repeat)
+        tex.setWrapV(Texture.WM_repeat)
+        tex.setMagfilter(Texture.FT_linear)
+        tex.setMinfilter(Texture.FT_linear_mipmap_linear)
+        return tex
+
+    def _gen_trench_wall_texture(self):
+        """Texture mur Death Star 256×256 — panneaux variés avec bevel."""
+        # Essaie d'abord de charger une texture externe
+        path = "assets/textures/trench_wall.jpg"
+        if os.path.exists(path):
+            try:
+                tex = self.game.loader.loadTexture(path)
+                if tex:
+                    return self._trench_tex_setup(tex)
+            except Exception:
+                pass
+
+        SIZE   = 256
+        CELLS  = 8        # 8×8 grille = 32 px/cellule
+        cell   = SIZE // CELLS
+        SEAM   = 3        # px — joint sombre entre panneaux
+        BEVEL  = 4        # px — ombre intérieure (faux relief)
+
+        img = PNMImage(SIZE, SIZE)
+
+        # Fond = couleur joint
+        for y in range(SIZE):
+            for x in range(SIZE):
+                img.setXel(x, y, 0.16, 0.155, 0.15)
+
+        # Layout aléatoire déterministe
+        rng = random.Random(12345)
+        for gy in range(CELLS):
+            gx = 0
+            while gx < CELLS:
+                # Largeur 1 ou 2 cellules (2 = moins fréquent)
+                max_w = min(2, CELLS - gx)
+                w = rng.choices([1, 2], weights=[2, 1])[0] if max_w > 1 else 1
+
+                x0, x1 = gx * cell + SEAM, (gx + w) * cell - SEAM
+                y0, y1 = gy * cell + SEAM, (gy + 1) * cell - SEAM
+
+                if x1 > x0 and y1 > y0:
+                    pv  = math.sin(gx * 1.73 + gy * 2.31) * 0.07
+                    base = max(0.34, min(0.56, 0.45 + pv))
+
+                    for py in range(y0, y1):
+                        for px in range(x0, x1):
+                            # Distance au bord du panneau → bevel
+                            d_edge = min(px - x0, x1 - 1 - px,
+                                         py - y0, y1 - 1 - py)
+                            if d_edge < BEVEL:
+                                t = d_edge / BEVEL
+                                g = base * (0.52 + 0.48 * t)
+                            else:
+                                g = base
+                            img.setXel(px, py, g * 1.005, g, g * 0.975)
+                gx += w
+
+        tex = Texture("trench_wall")
+        tex.load(img)
+        return self._trench_tex_setup(tex)
+
+    def _gen_trench_floor_texture(self):
+        """Texture sol Death Star 256×256 — grandes dalles paysage avec bevel."""
+        path = "assets/textures/trench_floor.jpg"
+        if os.path.exists(path):
+            try:
+                tex = self.game.loader.loadTexture(path)
+                if tex:
+                    return self._trench_tex_setup(tex)
+            except Exception:
+                pass
+
+        SIZE   = 256
+        CX, CY = 5, 8     # 5 colonnes (larges), 8 rangées (courtes)
+        cw     = SIZE // CX   # 51 px
+        ch     = SIZE // CY   # 32 px
+        SEAM   = 4
+        BEVEL  = 5
+
+        img = PNMImage(SIZE, SIZE)
+        for y in range(SIZE):
+            for x in range(SIZE):
+                img.setXel(x, y, 0.13, 0.125, 0.12)
+
+        rng = random.Random(54321)
+        for gy in range(CY):
+            for gx in range(CX):
+                x0, x1 = gx * cw + SEAM, (gx + 1) * cw - SEAM
+                y0, y1 = gy * ch + SEAM, (gy + 1) * ch - SEAM
+                if x1 > x0 and y1 > y0:
+                    pv   = math.sin(gx * 2.0 + gy * 1.7) * 0.05
+                    base = max(0.27, min(0.42, 0.33 + pv))
+                    for py in range(y0, y1):
+                        for px in range(x0, x1):
+                            d_edge = min(px - x0, x1 - 1 - px,
+                                         py - y0, y1 - 1 - py)
+                            if d_edge < BEVEL:
+                                t = d_edge / BEVEL
+                                g = base * (0.50 + 0.50 * t)
+                            else:
+                                g = base
+                            img.setXel(px, py, g * 1.01, g, g * 0.97)
+
+        tex = Texture("trench_floor")
+        tex.load(img)
+        return self._trench_tex_setup(tex)
 
     def _spawn_nebula_planet(self):
         """L4 — Nébuleuse colorée en fond."""

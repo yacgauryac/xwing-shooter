@@ -320,9 +320,13 @@ main.py
 #### Nouvelles classes décor (`src/environment.py`)
 - **LunarTerrain** : dalle 240×22u à Z=-7.8, courbure parabolique sphérique (R=420), palette gris-bleutée, `setLightOff()`
 - **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
-- **TrenchWallPanel** : mur YZ (h=16, d=22), panneaux Death Star gris clair (0.30-0.62) + joints sombres (0.18), grille 3×3 segs, **aucune lumière colorée**, `setLightOff()`
-- **TrenchFloorPanel** : dalle XY à Z=-7.5, dalles grises (0.24-0.40) + joints sombres (0.14), grille 4×4 segs, `setLightOff()`
-- **TrenchSurfacePanel** : surface Death Star horizontale à Z=8.2, 110u de large, panneaux gris (0.28-0.55) + joints (0.17), `setLightOff()`
+- **TrenchWallPanel / TrenchFloorPanel / TrenchSurfacePanel** : géométrie UV (`getV3t2()`), texture appliquée via `setTexture()`
+- **Texture procédurale** (`_gen_trench_wall_texture`, `_gen_trench_floor_texture`) :
+  - PNMImage 256×256 générée au lancement (seed déterministe)
+  - Layout aléatoire de panneaux 1×cell ou 2×cell (variété de formes)
+  - Effet **bevel** : ombre dégradée sur 4px en bordure → faux relief sans éclairage
+  - Wrap repeat + filtrage bilinéaire / mipmap
+  - Fallback : charge `assets/textures/trench_wall.jpg` / `trench_floor.jpg` si présents
 - L3 bg_color : `(0.22, 0.05, 0.03)` — lueur rouge exhaust port visible au fond de la tranchée
 - `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
 - Tuilage init : `step = TILE_DEPTH` (exact, zéro overlap) de Y=15 à SPAWN_DEPTH+d
