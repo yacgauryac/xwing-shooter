@@ -571,20 +571,23 @@ class TrenchWallPanel:
     PANEL_SIZE = 3.0   # taille d'un panneau en unités monde
     SEAM_W     = 0.06  # épaisseur du joint (fraction de l'unité)
 
-    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0):
+    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, lit=True):
         self.alive = True
         self.is_right = (x_side > 0)
+        self.lit = lit
         self.node = self._make_wall(height, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_side, y_pos, 0)
         self.node.setLightOff()
 
-    @staticmethod
-    def _wall_color(z, h, y, ps, sw):
-        """Couleur vertex : gradient Z + joints de panneaux."""
-        # Gradient vertical : bas sombre (0.22) → haut clair (0.72)
+    def _wall_color(self, z, h, y, ps, sw):
+        """Couleur vertex : gradient Z + joints de panneaux + contraste côté éclairé/ombré."""
         t = (z + h / 2) / h
-        z_grad = 0.22 + 0.50 * t
+        # Côté éclairé (lune à droite) : 0.38→0.90 | Côté ombre (gauche) : 0.09→0.31
+        if self.lit:
+            z_grad = 0.38 + 0.52 * t
+        else:
+            z_grad = 0.09 + 0.22 * t
 
         # Détection joint : distance au bord de panneau le plus proche
         pz = z % ps;  py = y % ps
@@ -596,7 +599,7 @@ class TrenchWallPanel:
         pv = math.sin(pi * 1.73 + pj * 2.31) * 0.04
 
         base = (0.44 + pv) * (0.15 + 0.85 * bevel) * z_grad
-        g = max(0.03, min(0.80, base))
+        g = max(0.03, min(0.90, base))
         return Vec4(g * 1.03, g, g * 0.95, 1.0)  # Légèrement chaud
 
     def _make_wall(self, h, d):
@@ -803,8 +806,9 @@ class TrenchDecorGroup:
     WALL_Z_LO = -7.5    # Z sol tranchée
     WALL_Z_HI =  8.0    # Z sommet murs
 
-    def __init__(self, parent, x_wall, y_pos, depth=22.0):
+    def __init__(self, parent, x_wall, y_pos, depth=22.0, lit=True):
         self.alive = True
+        self.lit = lit
         # Direction de protrusion depuis le mur vers l'intérieur de la tranchée
         self.inward = 1.0 if x_wall < 0 else -1.0
 
@@ -823,10 +827,15 @@ class TrenchDecorGroup:
     # ----------------------------------------------------------
 
     def _shade(self, z_world):
-        """Gris Death Star, gradient vertical : ombre en bas, lumière en haut."""
+        """Gris Death Star, gradient vertical : ombre en bas, lumière en haut.
+        Côté éclairé (lit=True) : 0.22→0.78 | Côté ombre (lit=False) : 0.08→0.30
+        """
         t = (z_world - self.WALL_Z_LO) / (self.WALL_Z_HI - self.WALL_Z_LO)
         t = max(0.0, min(1.0, t))
-        g = 0.18 + t * 0.52   # 0.18 (ombre) → 0.70 (lumière)
+        if self.lit:
+            g = 0.22 + t * 0.56   # 0.22 (ombre) → 0.78 (lumière)
+        else:
+            g = 0.08 + t * 0.22   # 0.08 → 0.30 (côté nuit)
         return Vec4(g * 1.03, g * 1.00, g * 0.96, 1.0)  # Légèrement chaud
 
     # ----------------------------------------------------------
@@ -1009,6 +1018,21 @@ class TrenchDecorGroup:
             box.setPos(0, 0, z_off)
         return root
 
+    def _make_conduit_group(self, rng, z_center, length):
+        """Groupe de 2-4 tuyaux parallèles horizontaux (axe Y) de diamètres variés.
+        Inspiré des gaines/conduits de la tranchée Death Star."""
+        root = NodePath("dconduit")
+        n_pipes = rng.randint(2, 4)
+        z_off = 0.0
+        for i in range(n_pipes):
+            r = rng.uniform(0.06, 0.22)
+            gap = rng.uniform(0.04, 0.12)
+            pipe = self._make_cylinder_h(r, length * rng.uniform(0.7, 1.0), z_center + z_off, segs=6)
+            pipe.reparentTo(root)
+            pipe.setPos(self.inward * (r + 0.04), 0, z_off)
+            z_off += r * 2 + gap
+        return root
+
     # ----------------------------------------------------------
     # Construction du groupe
     # ----------------------------------------------------------
@@ -1017,67 +1041,74 @@ class TrenchDecorGroup:
         """Génère et place aléatoirement les décorations sur ce segment."""
         half_d = depth / 2.0
 
-        # ── Rails horizontaux (présents ~60% du temps) ─────────
-        if rng.random() < 0.60:
-            z_rail = rng.choice([-3.5, -1.0, 1.5, 4.0])
-            r_rail = rng.uniform(0.07, 0.14)
-            rail   = self._make_cylinder_h(r_rail, depth * 0.92, z_rail)
+        # ── Rails horizontaux (toujours présents, 1-3 rails) ───
+        n_rails = rng.randint(1, 3)
+        z_rail_candidates = [-4.5, -3.0, -1.5, 0.5, 2.0, 3.5, 5.5]
+        rng.shuffle(z_rail_candidates)
+        for ri in range(n_rails):
+            z_rail = z_rail_candidates[ri]
+            r_rail = rng.uniform(0.06, 0.16)
+            rail = self._make_cylinder_h(r_rail, depth * rng.uniform(0.85, 0.98), z_rail)
             rail.reparentTo(self.node)
-            rail.setPos(self.inward * (r_rail + 0.05), 0, z_rail)
+            rail.setPos(self.inward * (r_rail + 0.04), 0, z_rail)
 
-            # Deuxième rail parallèle (moins fréquent)
-            if rng.random() < 0.35:
-                z2 = z_rail + rng.uniform(1.2, 2.5)
-                r2 = rng.uniform(0.05, 0.10)
-                rail2 = self._make_cylinder_h(r2, depth * 0.88, z2)
-                rail2.reparentTo(self.node)
-                rail2.setPos(self.inward * (r2 + 0.05), 0, z2)
+        # ── Groupe de conduits (présent ~70% du temps) ─────────
+        if rng.random() < 0.70:
+            z_c = rng.uniform(self.WALL_Z_LO + 1.5, self.WALL_Z_HI - 1.5)
+            cg = self._make_conduit_group(rng, z_c, depth * rng.uniform(0.5, 0.9))
+            cg.reparentTo(self.node)
+            cg.setPos(0, rng.uniform(-half_d * 0.4, half_d * 0.4), z_c)
 
         # ── Éléments individuels ────────────────────────────────
         shape_pool = [
-            'box', 'box', 'box', 'box',
-            'cylinder_v', 'cylinder_v',
+            'box', 'box', 'box', 'box', 'box',
+            'cylinder_v', 'cylinder_v', 'cylinder_v',
             'disc', 'disc',
-            'steps',
+            'steps', 'steps',
+            'conduit',
         ]
-        n_items   = rng.randint(2, 5)
-        placed_y  = []
+        n_items  = rng.randint(5, 10)
+        placed_y = []
 
-        for _ in range(n_items * 5):
+        for _ in range(n_items * 8):
             if len(placed_y) >= n_items:
                 break
 
-            y = rng.uniform(-half_d + 1.2, half_d - 1.2)
-            min_sep = rng.uniform(2.0, 3.5)
+            y = rng.uniform(-half_d + 0.8, half_d - 0.8)
+            min_sep = rng.uniform(0.8, 1.8)
             if any(abs(y - yp) < min_sep for yp in placed_y):
                 continue
 
-            z_ctr = rng.uniform(self.WALL_Z_LO + 1.2, self.WALL_Z_HI - 1.2)
+            z_ctr = rng.uniform(self.WALL_Z_LO + 0.8, self.WALL_Z_HI - 0.8)
             shape = rng.choice(shape_pool)
 
             if shape == 'box':
-                bw = rng.uniform(0.4, 2.0)
-                bh = rng.uniform(0.35, 1.8)
-                bd = rng.uniform(0.3, 1.4)
+                bw = rng.uniform(0.3, 2.5)
+                bh = rng.uniform(0.25, 2.2)
+                bd = rng.uniform(0.25, 1.6)
                 sn = self._make_box(bw, bh, bd, z_ctr)
                 protrude = bw / 2
 
             elif shape == 'cylinder_v':
-                r = rng.uniform(0.20, 0.60)
-                h = rng.uniform(0.7, 2.5)
+                r = rng.uniform(0.15, 0.65)
+                h = rng.uniform(0.5, 3.0)
                 sn = self._make_cylinder_v(r, h, z_ctr)
                 protrude = r
 
             elif shape == 'disc':
-                r   = rng.uniform(0.45, 1.1)
-                th  = rng.uniform(0.18, 0.35)
+                r   = rng.uniform(0.35, 1.2)
+                th  = rng.uniform(0.15, 0.40)
                 sn  = self._make_disc(r, th, z_ctr)
                 protrude = th / 2
 
+            elif shape == 'conduit':
+                sn = self._make_conduit_group(rng, z_ctr, rng.uniform(0.8, 2.5))
+                protrude = 0.3
+
             else:  # steps
-                sz     = rng.uniform(0.9, 2.0)
-                n_st   = rng.randint(2, 3)
-                sn     = self._make_steps(sz, n_st, z_ctr)
+                sz    = rng.uniform(0.7, 2.4)
+                n_st  = rng.randint(2, 4)
+                sn    = self._make_steps(sz, n_st, z_ctr)
                 protrude = sz * 0.35
 
             sn.reparentTo(self.node)
@@ -1186,6 +1217,16 @@ class Environment:
         self.game.render.setFog(fog)
         self._trench_fog = fog
 
+        # Lune côté droit (source de lumière) — haute, lointaine, fixe
+        moon = DistantPlanet(
+            self.game.render,
+            Point3(18, 140, 28),          # droite (+X), loin, très haut
+            size=4.5,
+            color=Vec4(0.88, 0.88, 0.78, 1),   # blanc-chaud lunaire
+        )
+        moon.grow_rate = 0.0   # ne grossit pas — planète fixe
+        self.planets.append(moon)
+
         d = self.TILE_DEPTH
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
@@ -1194,10 +1235,11 @@ class Environment:
 
     def _spawn_trench_row(self, y):
         d = self.TILE_DEPTH
+        # Côté gauche : dans l'ombre (lit=False) | Côté droit : éclairé par la lune (lit=True)
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d))
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False))
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True))
         self.floor_panels.append(TrenchFloorPanel(
             self.game.render, 0, y, depth=d))
         self.surface_panels.append(TrenchSurfacePanel(
@@ -1205,9 +1247,9 @@ class Environment:
         self.surface_panels.append(TrenchSurfacePanel(
             self.game.render, +1, y, depth=d))
         self.decor_groups.append(TrenchDecorGroup(
-            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d))
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False))
         self.decor_groups.append(TrenchDecorGroup(
-            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True))
 
     def _spawn_nebula_planet(self):
         """L4 — Nébuleuse colorée en fond."""

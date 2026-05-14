@@ -371,20 +371,22 @@ main.py
 - **`_make_ring()`** : 3 cercles concentriques (0.55/0.80/1.00), alpha 0→1→0, billboard additif
 - Débris plus visibles : couleur 0.08-0.18 → **0.20-0.45** (teinte chaude), vitesse 6-18 → **10-28**, durée 0.4-0.8 → **0.7-1.3s**, compte : 7/10/16
 
-### v0.20 — Viseur centre + décorations 3D tranchée
+### v0.20 — Viseur centre + décorations 3D tranchée + contraste directionnel L3
 
 #### `src/hud.py` — Viseur central
 - `_make_crosshair(game)` : croix 4 branches via `GeomLines`, gap central 0.018u, bras 0.040u, blanc légèrement chaud semi-transparent (alpha 0.75)
 - Rendu sur `aspect2d`, bin "fixed" sort 60, `setDepthTest(False)` → toujours visible devant le décor
 - Initialisé dans `HUD.__init__` → toujours affiché, ne bouge pas
 
-#### `src/environment.py` — `TrenchDecorGroup`
+#### `src/environment.py` — `TrenchDecorGroup` + contraste directionnel
 - Nouvelle classe : décorations 3D procédurales fixées sur un segment de mur de tranchée
-- **Primitives** : `_make_box`, `_make_cylinder_v` (colonne/tuyau), `_make_cylinder_h` (rail/barre), `_make_disc` (hublot circulaire dans le plan YZ), `_make_steps` (marches empilées)
-- **Éclairage simulé** : gradient vertex Z — `g = 0.18 + t * 0.52` (bas = ombre, haut = lumière), style éclairage zénithal sans vraie lumière scène
-- **Layout** : seed déterministe par (x_wall, y_pos), 2–5 éléments placés aléatoirement, espacement minimum pour éviter les chevauchements, rails horizontaux 60% du temps
-- Spawné dans `_spawn_trench_row()` — 1 groupe par mur par segment
-- Intégré dans `_update_l3()`, cleanup dans `update()` et `reset_game()`
+- **Primitives** : `_make_box`, `_make_cylinder_v`, `_make_cylinder_h`, `_make_disc`, `_make_steps`, `_make_conduit_group` (2-4 tuyaux parallèles horizontaux de diamètres variés)
+- **Éclairage directionnel** : paramètre `lit=True/False` sur `TrenchWallPanel` et `TrenchDecorGroup`
+  - Côté droit (`lit=True`, source = lune) : gradient Z `0.38→0.90` (mur), `0.22→0.78` (décors)
+  - Côté gauche (`lit=False`, ombre) : gradient Z `0.09→0.31` (mur), `0.08→0.30` (décors)
+- **Lune** : `DistantPlanet` à `Point3(18, 140, 28)`, rayon 4.5u, blanc-chaud `(0.88, 0.88, 0.78)`, `grow_rate=0`
+- **Layout dense** : 5–10 éléments (était 2-5), min_sep 0.8-1.8u, 1-3 rails toujours présents, conduits 70% du temps
+- Spawné dans `_spawn_trench_row()` — 1 groupe par mur, `lit` selon le côté
 
 ### v0.19 — Fix tuilage L2/L3 : zéro overlap, zéro Z-fighting, courbure planétaire
 
