@@ -384,6 +384,17 @@ class HUD:
         self._torp_count_shown = -1
         self._build_torp_pips(9)  # max 9 torpilles
 
+        # ===== BARRE CHALEUR LASER (suit le vaisseau) =====
+        self.heat_bar_root = game.render.attachNewNode("heat_bar_3d")
+        self.heat_bar_root.setLightOff()
+        self.heat_bar_root.setBin("fixed", 46)
+        self.heat_bar_root.setDepthWrite(False)
+        self.heat_bar_root.setDepthTest(False)
+        self.heat_bar_root.setTransparency(TransparencyAttrib.MAlpha)
+        self._heat_bar_fill = None
+        self._heat_bar_bg   = None
+        self._build_heat_bar_3d()
+
         # ===== PYRAMIDE ALTITUDE =====
         self.altitude_root = game.aspect2d.attachNewNode("altitude_pyramid")
         self.altitude_root.setTransparency(TransparencyAttrib.MAlpha)
@@ -502,6 +513,7 @@ class HUD:
         self.torpedo_count_text.setText(f"{torpedo_count}")
         if player_node:
             self._update_torp_pips(player_node, torpedo_count)
+            self._update_heat_bar_3d(player_node, heat_pct, overheated, self.blink_timer)
 
         # Force gauge — drain continu en usage, recharge aux kills
         if force_active:
@@ -653,6 +665,84 @@ class HUD:
         radius = abs(p2d_r.getY() - p2d_c.getY())
         if radius > 1e-4:
             self._crosshair_geom.setScale(radius)
+
+    def _build_heat_bar_3d(self):
+        """Barre de chaleur laser 3D — fine ligne horizontale au-dessus du vaisseau."""
+        from panda3d.core import GeomLines
+        BAR_W = 2.2   # largeur totale
+        BAR_H = 0.10  # épaisseur
+
+        # Fond (toujours visible, très sombre)
+        fmt = GeomVertexFormat.getV3c4()
+        vd = GeomVertexData("hbg", fmt, Geom.UHStatic)
+        v = GeomVertexWriter(vd, "vertex"); c = GeomVertexWriter(vd, "color")
+        col_bg = Vec4(0.15, 0.06, 0.02, 0.5)
+        v.addData3(-BAR_W/2, 0, 0);       c.addData4(col_bg)
+        v.addData3( BAR_W/2, 0, 0);       c.addData4(col_bg)
+        v.addData3( BAR_W/2, 0, BAR_H);   c.addData4(col_bg)
+        v.addData3(-BAR_W/2, 0, BAR_H);   c.addData4(col_bg)
+        tris = GeomTriangles(Geom.UHStatic)
+        tris.addVertices(0,1,2); tris.addVertices(0,2,3)
+        g = Geom(vd); g.addPrimitive(tris)
+        gn = GeomNode("hbg"); gn.addGeom(g)
+        bg = NodePath(gn)
+        bg.reparentTo(self.heat_bar_root)
+        bg.setTransparency(TransparencyAttrib.MAlpha)
+        self._heat_bar_bg = bg
+
+        # Remplissage (largeur dynamique)
+        vd2 = GeomVertexData("hbf", fmt, Geom.UHDynamic)
+        v2 = GeomVertexWriter(vd2, "vertex"); c2 = GeomVertexWriter(vd2, "color")
+        col_fill = Vec4(0.9, 0.55, 0.1, 0.85)
+        for _ in range(4): v2.addData3(0,0,0); c2.addData4(col_fill)
+        tris2 = GeomTriangles(Geom.UHDynamic)
+        tris2.addVertices(0,1,2); tris2.addVertices(0,2,3)
+        g2 = Geom(vd2); g2.addPrimitive(tris2)
+        gn2 = GeomNode("hbf"); gn2.addGeom(g2)
+        fill = NodePath(gn2)
+        fill.reparentTo(self.heat_bar_root)
+        fill.setTransparency(TransparencyAttrib.MAlpha)
+        self._heat_bar_fill = fill
+        self._heat_bar_vdata = vd2
+        self._heat_bar_w = BAR_W
+        self._heat_bar_h = BAR_H
+
+    def _update_heat_bar_3d(self, player_node, heat_pct, overheated, blink_timer):
+        """Met à jour la barre de chaleur près du vaisseau."""
+        if not player_node or player_node.isEmpty():
+            return
+        pos = player_node.getPos()
+        bx = pos.getX() - self._heat_bar_w / 2
+        bz = pos.getZ() + 1.5   # au-dessus du vaisseau
+        by = pos.getY()
+
+        self._heat_bar_root_pos = Vec3(bx, by, bz)
+        self.heat_bar_root.setPos(bx, by, bz)
+        self.heat_bar_root.lookAt(self.game.camera)
+
+        # Couleur selon chaleur
+        if overheated:
+            pulse = abs(math.sin(blink_timer * 10))
+            col = Vec4(1.0, 0.1 + 0.1*pulse, 0.0, 0.9)
+        elif heat_pct > 0.75:
+            col = Vec4(1.0, 0.25, 0.0, 0.85)
+        elif heat_pct > 0.45:
+            col = Vec4(1.0, 0.55, 0.05, 0.8)
+        else:
+            col = Vec4(0.4, 0.9, 0.2, 0.75)
+
+        # Redessine le fill
+        BAR_W = self._heat_bar_w
+        BAR_H = self._heat_bar_h
+        fill_w = BAR_W * (heat_pct if not overheated else 1.0)
+        vd = self._heat_bar_vdata
+        vd.modifyArray(0).modifyHandle().copyDataFrom(b'')  # reset
+        v = GeomVertexWriter(vd, "vertex")
+        c = GeomVertexWriter(vd, "color")
+        v.addData3(0,        0, 0);       c.addData4(col)
+        v.addData3(fill_w,   0, 0);       c.addData4(col)
+        v.addData3(fill_w,   0, BAR_H);   c.addData4(col)
+        v.addData3(0,        0, BAR_H);   c.addData4(col)
 
     def _build_torp_pips(self, max_count):
         """Crée les pips torpilles (petits losanges 3D sous le vaisseau)."""
