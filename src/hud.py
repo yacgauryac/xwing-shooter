@@ -276,25 +276,37 @@ class HUD:
             fg=C_DANGER, align=TextNode.ACenter, mayChange=True, sort=50,
         )
 
-        # Torpedo counter — losanges en bas centre (1 losange = 10 torpilles)
+        # Torpedo counter — losange + chiffre en bas
         self.torpedo_label = OnscreenText(
-            text="TORP", pos=(0, -0.84), scale=0.022,
-            fg=Vec4(0.9, 0.55, 0.15, 0.6), align=TextNode.ACenter,
+            text="TORP", pos=(0, -0.83), scale=0.020,
+            fg=Vec4(0.9, 0.55, 0.15, 0.5), align=TextNode.ACenter,
             mayChange=False, sort=50,
         )
-        self.torpedo_count_text = OnscreenText(   # gardé pour compat, caché
-            text="", pos=(0, -0.99), scale=0.001,
-            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=50,
+        self.torpedo_count_text = OnscreenText(
+            text="20", pos=(0, -0.935), scale=0.045,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=52,
+            shadow=(0, 0, 0, 0.9),
         )
-        # Losanges aspect2d — max 3 (30 torpilles)
-        self._torp_diamond_root = game.aspect2d.attachNewNode("torp_diamonds")
+        # Grand losange contour bas-centre
+        self._torp_diamond_root = game.aspect2d.attachNewNode("torp_diamond")
         self._torp_diamond_root.setBin("fixed", 50)
         self._torp_diamond_root.setDepthTest(False)
         self._torp_diamond_root.setDepthWrite(False)
         self._torp_diamond_root.setTransparency(TransparencyAttrib.MAlpha)
-        self._torp_diamonds = []   # liste de (outline_np, fill_np, fill_vdata)
-        self._torp_diamond_count_shown = -1
-        self._build_torp_diamonds(3)
+        self._build_single_diamond(self._torp_diamond_root, 0, -0.93, 0.07)
+        # Losange mini near-ship (aspect2d, mis à jour via projection)
+        self._torp_ship_root = game.aspect2d.attachNewNode("torp_ship")
+        self._torp_ship_root.setBin("fixed", 51)
+        self._torp_ship_root.setDepthTest(False)
+        self._torp_ship_root.setDepthWrite(False)
+        self._torp_ship_root.setTransparency(TransparencyAttrib.MAlpha)
+        self._build_single_diamond(self._torp_ship_root, 0, 0, 0.035)
+        self._torp_ship_text = OnscreenText(
+            text="20", pos=(0, 0), scale=0.028,
+            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=53,
+            shadow=(0, 0, 0, 0.8),
+        )
+        self._torp_diamonds = []  # vide — ancien système supprimé
 
         # ===== ANNONCE / FLASH / GAME OVER =====
         self.wave_announce = OnscreenText(
@@ -381,16 +393,7 @@ class HUD:
         )
         self.combo_timer = 0.0
 
-        # ===== INDICATEUR TORPILLES (suit le vaisseau en 3D) =====
-        self.torp_indicator_root = game.render.attachNewNode("torp_indicators")
-        self.torp_indicator_root.setLightOff()
-        self.torp_indicator_root.setBin("fixed", 46)
-        self.torp_indicator_root.setDepthWrite(False)
-        self.torp_indicator_root.setDepthTest(False)
-        self.torp_indicator_root.setTransparency(TransparencyAttrib.MAlpha)
-        self._torp_pips = []      # liste de NodePath, un par torpille max
-        self._torp_count_shown = -1
-        self._build_torp_pips(9)  # max 9 torpilles
+        # (pips 3D torpilles supprimés — remplacés par losange aspect2d near-ship)
 
         # ===== BARRE CHALEUR LASER (suit le vaisseau) =====
         self.heat_bar_root = game.render.attachNewNode("heat_bar_3d")
@@ -517,11 +520,9 @@ class HUD:
         # Score
         self.score_text.setText(f"{score:,}".replace(",", " "))
 
-        # Torpilles — losanges en bas + pips 3D près du vaisseau
-        self.torpedo_count_text.setText("")
-        self._update_torp_diamonds(torpedo_count)
+        # Torpilles — losange+chiffre en bas + near-ship
+        self._update_torp_display(torpedo_count, player_node, self.blink_timer)
         if player_node:
-            self._update_torp_pips(player_node, torpedo_count)
             self._update_heat_bar_3d(player_node, heat_pct, overheated, self.blink_timer)
 
         # Force gauge — drain continu en usage, recharge aux kills
@@ -675,105 +676,64 @@ class HUD:
         if radius > 1e-4:
             self._crosshair_geom.setScale(radius)
 
-    def _build_torp_diamonds(self, count):
-        """Crée les losanges aspect2d (1 par groupe de 10 torpilles).
-        Chaque losange a un contour fixe + un fill dynamique (remplissage du bas)."""
-        from panda3d.core import GeomLines, GeomVertexRewriter
-        for outline, fill, _ in self._torp_diamonds:
-            outline.removeNode(); fill.removeNode()
-        self._torp_diamonds = []
-
-        s       = 0.045    # demi-taille en coords aspect2d
-        spacing = 0.13
-        cx      = -(count - 1) * spacing / 2.0
-        cz      = -0.91
-
-        col_outline = Vec4(0.9, 0.6, 0.1, 0.5)
-        col_fill    = Vec4(0.95, 0.65, 0.1, 0.95)
+    def _build_single_diamond(self, parent, cx, cz, s):
+        """Dessine un contour de losange dans parent (aspect2d)."""
+        from panda3d.core import GeomLines
         fmt = GeomVertexFormat.getV3c4()
+        vd  = GeomVertexData("dout", fmt, Geom.UHStatic)
+        v   = GeomVertexWriter(vd, "vertex")
+        c   = GeomVertexWriter(vd, "color")
+        col = Vec4(0.9, 0.6, 0.1, 0.7)
+        v.addData3(cx,   0, cz+s); c.addData4(col)   # top
+        v.addData3(cx+s, 0, cz);   c.addData4(col)   # right
+        v.addData3(cx,   0, cz-s); c.addData4(col)   # bottom
+        v.addData3(cx-s, 0, cz);   c.addData4(col)   # left
+        lines = GeomLines(Geom.UHStatic)
+        lines.addVertices(0,1); lines.addVertices(1,2)
+        lines.addVertices(2,3); lines.addVertices(3,0)
+        g  = Geom(vd); g.addPrimitive(lines)
+        gn = GeomNode("dout"); gn.addGeom(g)
+        np = NodePath(gn)
+        np.reparentTo(parent)
+        np.setRenderModeThickness(1.8)
+        np.setTransparency(TransparencyAttrib.MAlpha)
 
-        for i in range(count):
-            ox = cx + i * spacing
+    def _update_torp_display(self, torpedo_count, player_node, blink_timer):
+        """Met à jour le chiffre dans les losanges torpilles (bas + near-ship)."""
+        # Couleur selon stock
+        if torpedo_count <= 3:
+            pulse = abs(math.sin(blink_timer * 8))
+            col = (1.0, 0.15 + 0.1*pulse, 0.0, 1.0)
+        elif torpedo_count <= 8:
+            col = (1.0, 0.65, 0.1, 1.0)
+        else:
+            col = (0.85, 0.95, 1.0, 1.0)
 
-            # — Contour (4 lignes, statique) —
-            vdo = GeomVertexData("do", fmt, Geom.UHStatic)
-            vo = GeomVertexWriter(vdo, "vertex"); co = GeomVertexWriter(vdo, "color")
-            vo.addData3(ox,    0, cz+s); co.addData4(col_outline)  # top
-            vo.addData3(ox+s,  0, cz);   co.addData4(col_outline)  # right
-            vo.addData3(ox,    0, cz-s); co.addData4(col_outline)  # bottom
-            vo.addData3(ox-s,  0, cz);   co.addData4(col_outline)  # left
-            lo = GeomLines(Geom.UHStatic)
-            lo.addVertices(0,1); lo.addVertices(1,2)
-            lo.addVertices(2,3); lo.addVertices(3,0)
-            go = Geom(vdo); go.addPrimitive(lo)
-            gno = GeomNode(f"td_out_{i}"); gno.addGeom(go)
-            out_np = NodePath(gno)
-            out_np.reparentTo(self._torp_diamond_root)
-            out_np.setRenderModeThickness(1.5)
-            out_np.setTransparency(TransparencyAttrib.MAlpha)
+        fg = Vec4(*col)
+        # Losange bas
+        self.torpedo_count_text.setText(str(torpedo_count))
+        self.torpedo_count_text['fg'] = fg
 
-            # — Fill dynamique (5 sommets, UHDynamic) —
-            vdf = GeomVertexData("df", fmt, Geom.UHDynamic)
-            vf = GeomVertexWriter(vdf, "vertex"); cf = GeomVertexWriter(vdf, "color")
-            for _ in range(5):   # max 5 sommets pour le polygone de remplissage
-                vf.addData3(ox, 0, cz); cf.addData4(col_fill)
-            tf = GeomTriangles(Geom.UHDynamic)
-            tf.addVertices(0,1,2); tf.addVertices(0,2,3); tf.addVertices(0,3,4)
-            gf = Geom(vdf); gf.addPrimitive(tf)
-            gnf = GeomNode(f"td_fill_{i}"); gnf.addGeom(gf)
-            fill_np = NodePath(gnf)
-            fill_np.reparentTo(self._torp_diamond_root)
-            fill_np.setTransparency(TransparencyAttrib.MAlpha)
-
-            self._torp_diamonds.append((out_np, fill_np, vdf, ox, cz, s))
-
-    def _update_torp_diamonds(self, torpedo_count):
-        """Met à jour le remplissage des losanges selon le stock."""
-        from panda3d.core import GeomVertexRewriter
-        PER = 10   # torpilles par losange
-        for i, (outline, fill_np, vdf, ox, cz, s) in enumerate(self._torp_diamonds):
-            base  = i * PER
-            if base >= torpedo_count and torpedo_count == 0 and i > 0:
-                fill_np.hide(); continue
-
-            count_in = max(0, min(PER, torpedo_count - base))
-            f = count_in / PER   # 0.0 → 1.0
-
-            # Recalcule les sommets du polygone de remplissage (du bas vers le haut)
-            # Bords du losange:  bas=(ox, cz-s)  gauche=(ox-s, cz)  droite=(ox+s, cz)  haut=(ox, cz+s)
-            # x_left(z)  = ox - (z-(cz-s))  pour z ∈ [cz-s, cz]
-            #             = ox - (z - cz + s - 2s*(1-t))... simplifié:
-            # Dans la moitié basse (cz-s .. cz) : x_left = -(z-cz+s) + ox, x_right = (z-cz+s) + ox
-            # Dans la moitié haute (cz .. cz+s) : x_left = (z-cz-s) + ox, x_right = -(z-cz-s) + ox
-
-            fill_z = cz - s + 2*s*f   # hauteur du remplissage
-
-            rw = GeomVertexRewriter(vdf, "vertex")
-
-            if f <= 0.0:
-                # Tout collapse au point bas — invisible
-                for _ in range(5): rw.setData3(ox, 0, cz-s)
-                fill_np.hide()
-                continue
-
-            fill_np.show()
-
-            if f <= 0.5:
-                # Triangle : bottom + deux intersections sur les bords bas
-                hw = fill_z - (cz - s)   # demi-largeur à fill_z (= fill_z - bottom_z)
-                rw.setData3(ox,       0, cz-s)    # 0 bottom
-                rw.setData3(ox+hw,    0, fill_z)  # 1 droite
-                rw.setData3(ox-hw,    0, fill_z)  # 2 gauche
-                rw.setData3(ox,       0, cz-s)    # 3 (dégénéré)
-                rw.setData3(ox,       0, cz-s)    # 4 (dégénéré)
+        # Losange near-ship : projet position 3D → aspect2d
+        if player_node and not player_node.isEmpty():
+            from panda3d.core import Point3, Point2
+            wp = player_node.getPos()
+            # Projette en coords lens
+            p3 = self.game.cam.getRelativePoint(self.game.render, wp)
+            p2 = Point2()
+            if self.game.camLens.project(p3, p2):
+                ar = self.game.getAspectRatio()
+                sx = p2.getX() * ar
+                sz = p2.getY() - 0.13   # légèrement sous le vaisseau
+                self._torp_ship_root.setPos(sx, 0, sz)
+                self._torp_ship_text.setPos(sx, sz)
+                self._torp_ship_text.setText(str(torpedo_count))
+                self._torp_ship_text['fg'] = fg
+                self._torp_ship_root.show()
+                self._torp_ship_text.show()
             else:
-                # Trapèze/pentagone : bottom + coins milieu + deux intersections haut
-                hw_top = s - (fill_z - cz)        # demi-largeur dans la moitié haute
-                rw.setData3(ox,       0, cz-s)    # 0 bottom
-                rw.setData3(ox+s,     0, cz)      # 1 droite milieu
-                rw.setData3(ox+hw_top,0, fill_z)  # 2 droite haut
-                rw.setData3(ox-hw_top,0, fill_z)  # 3 gauche haut
-                rw.setData3(ox-s,     0, cz)      # 4 gauche milieu
+                self._torp_ship_root.hide()
+                self._torp_ship_text.hide()
 
     def _build_heat_bar_3d(self):
         """Barre de chaleur laser — fine barre centrée au-dessus du vaisseau.
