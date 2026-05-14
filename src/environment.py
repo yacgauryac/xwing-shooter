@@ -5,10 +5,11 @@ Tout défile vers le joueur pour l'effet de vitesse.
 
 from panda3d.core import (
     Vec3, Vec4, Point3,
-    GeomVertexFormat, GeomVertexData, GeomVertexWriter,
+    GeomVertexFormat, GeomVertexArrayFormat, GeomEnums,
+    GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomNode,
     NodePath, TransparencyAttrib,
-    Fog,
+    Fog, Texture, TextureStage, PNMImage,
 )
 import random
 import math
@@ -561,6 +562,118 @@ class LunarRock:
 # L3 — Tranchée
 # ============================================================
 
+# ── Format vertex custom : position + color + UV ──────────────────────────────
+def _make_v3c4t2():
+    """Crée (une fois) un GeomVertexFormat avec position, couleur RGBA et UV."""
+    arr = GeomVertexArrayFormat()
+    arr.addColumn("vertex",   3, GeomEnums.NT_float32, GeomEnums.C_point)
+    arr.addColumn("color",    4, GeomEnums.NT_float32, GeomEnums.C_color)
+    arr.addColumn("texcoord", 2, GeomEnums.NT_float32, GeomEnums.C_texcoord)
+    fmt = GeomVertexFormat()
+    fmt.addArray(arr)
+    return GeomVertexFormat.registerFormat(fmt)
+
+_V3C4T2 = _make_v3c4t2()
+
+
+def _gen_trench_wall_tex(size=512):
+    """Génère une texture procédurale béton/métal Death Star (une seule fois).
+
+    Structure : carreaux 3u × 3u — joints fins foncés + variation par cellule
+    + léger bruit pixel. Renvoie une Texture Panda3D prête à l'emploi.
+    """
+    img = PNMImage(size, size)
+    img.makeRgb()
+    tile = 64          # pixels par panneau-monde (3u mappé sur tile px)
+    seam = 3           # largeur joint en pixels
+    rng  = random.Random(42)
+
+    for py in range(size):
+        for px in range(size):
+            # Position dans le carreau
+            cx = px % tile;  cy = py % tile
+            dx = min(cx, tile - cx);  dy = min(cy, tile - cy)
+            on_seam = (dx < seam or dy < seam)
+
+            # Variation de cellule (déterministe)
+            ci = px // tile;  cj = py // tile
+            cell_v = math.sin(ci * 1.73 + cj * 2.31) * 0.06
+
+            # Bruit pixel fin
+            noise = rng.uniform(-0.025, 0.025)
+
+            if on_seam:
+                g = 0.28 + noise * 0.5
+            else:
+                g = 0.62 + cell_v + noise
+
+            g = max(0.0, min(1.0, g))
+            img.setXelA(px, py, g, g, g * 0.96, 1.0)
+
+    tex = Texture("trench_wall")
+    tex.load(img)
+    tex.setWrapU(Texture.WM_repeat)
+    tex.setWrapV(Texture.WM_repeat)
+    tex.setMagfilter(Texture.FT_linear)
+    tex.setMinfilter(Texture.FT_linear_mipmap_linear)
+    tex.generateRamMipmaps()
+    return tex
+
+
+def _gen_trench_floor_tex(size=512):
+    """Texture béton sombre pour le sol de la tranchée."""
+    img = PNMImage(size, size)
+    img.makeRgb()
+    tile = 80
+    seam = 4
+    rng  = random.Random(99)
+
+    for py in range(size):
+        for px in range(size):
+            cx = px % tile;  cy = py % tile
+            dx = min(cx, tile - cx);  dy = min(cy, tile - cy)
+            on_seam = (dx < seam or dy < seam)
+            ci = px // tile;  cj = py // tile
+            cell_v = math.sin(ci * 2.11 + cj * 1.57) * 0.05
+            noise  = rng.uniform(-0.02, 0.02)
+            g = (0.22 + noise) if on_seam else (0.50 + cell_v + noise)
+            g = max(0.0, min(1.0, g))
+            img.setXelA(px, py, g * 1.01, g, g * 0.93, 1.0)
+
+    tex = Texture("trench_floor")
+    tex.load(img)
+    tex.setWrapU(Texture.WM_repeat)
+    tex.setWrapV(Texture.WM_repeat)
+    tex.setMagfilter(Texture.FT_linear)
+    tex.setMinfilter(Texture.FT_linear_mipmap_linear)
+    tex.generateRamMipmaps()
+    return tex
+
+
+# Cache module-level — générés une fois, réutilisés par toutes les dalles
+_TRENCH_WALL_TEX  = None
+_TRENCH_FLOOR_TEX = None
+
+
+def _get_wall_tex():
+    global _TRENCH_WALL_TEX
+    if _TRENCH_WALL_TEX is None:
+        _TRENCH_WALL_TEX = _gen_trench_wall_tex()
+    return _TRENCH_WALL_TEX
+
+
+def _get_floor_tex():
+    global _TRENCH_FLOOR_TEX
+    if _TRENCH_FLOOR_TEX is None:
+        _TRENCH_FLOOR_TEX = _gen_trench_floor_tex()
+    return _TRENCH_FLOOR_TEX
+
+
+# TextureStage partagé (mode Modulate — multiplie texture × vertex color)
+_TS_MODULATE = TextureStage("modulate")
+_TS_MODULATE.setMode(TextureStage.M_modulate)
+
+
 class TrenchWallPanel:
     """Panneau de mur latéral de tranchée — défile en Y, fixe en X."""
 
@@ -580,45 +693,38 @@ class TrenchWallPanel:
         self.node.setPos(x_side, y_pos, 0)
         self.node.setLightOff()
 
-    def _wall_color(self, z, h, y, ps, sw):
-        """Couleur vertex : gradient Z + joints de panneaux + contraste côté éclairé/ombré."""
+    def _wall_color(self, z, h):
+        """Couleur vertex = gradient Z × contraste directionnel.
+        Utilisée en mode M_modulate : multipliée par la texture au rendu.
+        Lit  : 0.55 (bas) → 1.00 (haut)   — côté lune
+        Dark : 0.18 (bas) → 0.42 (haut)   — côté ombre
+        """
         t = (z + h / 2) / h
-        # Côté éclairé (lune à droite) : 0.38→0.90 | Côté ombre (gauche) : 0.09→0.31
         if self.lit:
-            z_grad = 0.38 + 0.52 * t
+            g = 0.55 + 0.45 * t
         else:
-            z_grad = 0.09 + 0.22 * t
-
-        # Détection joint : distance au bord de panneau le plus proche
-        pz = z % ps;  py = y % ps
-        dz = min(pz, ps - pz);  dy = min(py, ps - py)
-        bevel = min(1.0, min(dz, dy) / sw)  # 0 = joint, 1 = centre
-
-        # Variation par cellule (pseudo-aléatoire déterministe)
-        pi = int((z + 100) / ps);  pj = int((y + 100) / ps)
-        pv = math.sin(pi * 1.73 + pj * 2.31) * 0.04
-
-        base = (0.44 + pv) * (0.15 + 0.85 * bevel) * z_grad
-        g = max(0.03, min(0.90, base))
-        return Vec4(g * 1.03, g, g * 0.95, 1.0)  # Légèrement chaud
+            g = 0.18 + 0.24 * t
+        return Vec4(g * 1.02, g, g * 0.96, 1.0)
 
     def _make_wall(self, h, d):
         root = NodePath("trench_wall")
-        fmt  = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("wall", fmt, Geom.UHStatic)
+        vdata = GeomVertexData("wall", _V3C4T2, Geom.UHStatic)
         vw = GeomVertexWriter(vdata, "vertex")
         cw = GeomVertexWriter(vdata, "color")
+        tw = GeomVertexWriter(vdata, "texcoord")
 
         segs_z = max(4, int(h))
         segs_y = max(4, int(d))
-        ps, sw = self.PANEL_SIZE, self.SEAM_W
+        # UV : 1 unité monde = 1/3 de tuile texture (panneau = 3u → 1 répétition)
+        uv_scale = 1.0 / 3.0
 
         for i in range(segs_z + 1):
             for j in range(segs_y + 1):
                 y = -d / 2 + j * d / segs_y
                 z = -h / 2 + i * h / segs_z
                 vw.addData3(0, y, z)
-                cw.addData4(self._wall_color(z, h, y, ps, sw))
+                cw.addData4(self._wall_color(z, h))
+                tw.addData2(y * uv_scale, z * uv_scale)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_z):
@@ -636,7 +742,9 @@ class TrenchWallPanel:
         geom.addPrimitive(tris)
         node = GeomNode("trench_wall_mesh")
         node.addGeom(geom)
-        NodePath(node).reparentTo(root)
+        np = NodePath(node)
+        np.setTexture(_TS_MODULATE, _get_wall_tex())
+        np.reparentTo(root)
         return root
 
     def update(self, dt, scroll_speed):
@@ -665,30 +773,25 @@ class TrenchFloorPanel:
         self.node.setLightOff()
 
     def _make_floor(self, w, d):
-        root = NodePath("trench_floor")
-        fmt  = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("floor", fmt, Geom.UHStatic)
+        root  = NodePath("trench_floor")
+        vdata = GeomVertexData("floor", _V3C4T2, Geom.UHStatic)
         vw = GeomVertexWriter(vdata, "vertex")
         cw = GeomVertexWriter(vdata, "color")
+        tw = GeomVertexWriter(vdata, "texcoord")
 
         segs_x = max(4, int(w / 2))
         segs_y = max(4, int(d / 2))
-        ps, sw = 4.0, 0.08   # panneaux larges sur le sol
+        uv_scale = 1.0 / 4.0   # panneaux sol 4u → 1 répétition
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
                 vw.addData3(x, y, 0)
-                # Joints + légère variation
-                px = x % ps;  py = y % ps
-                dx = min(px, ps - px);  dy_v = min(py, ps - py)
-                bevel = min(1.0, min(dx, dy_v) / sw)
-                pi = int((x + 100) / ps);  pj = int((y + 100) / ps)
-                pv = math.sin(pi * 1.73 + pj * 2.31) * 0.03
-                base = (0.28 + pv) * (0.12 + 0.88 * bevel)
-                g = max(0.02, min(0.45, base))
-                cw.addData4(g * 1.02, g, g * 0.94, 1.0)
+                # Vertex color : gris sombre uniforme (texture porte le détail)
+                g = 0.55
+                cw.addData4(g * 1.01, g, g * 0.92, 1.0)
+                tw.addData2(x * uv_scale, y * uv_scale)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
@@ -702,7 +805,9 @@ class TrenchFloorPanel:
         geom.addPrimitive(tris)
         node = GeomNode("trench_floor_mesh")
         node.addGeom(geom)
-        NodePath(node).reparentTo(root)
+        np = NodePath(node)
+        np.setTexture(_TS_MODULATE, _get_floor_tex())
+        np.reparentTo(root)
         return root
 
     def update(self, dt, scroll_speed):
@@ -833,9 +938,9 @@ class TrenchDecorGroup:
         t = (z_world - self.WALL_Z_LO) / (self.WALL_Z_HI - self.WALL_Z_LO)
         t = max(0.0, min(1.0, t))
         if self.lit:
-            g = 0.22 + t * 0.56   # 0.22 (ombre) → 0.78 (lumière)
+            g = 0.20 + t * 0.42   # 0.20 (ombre) → 0.62 (lumière)
         else:
-            g = 0.08 + t * 0.22   # 0.08 → 0.30 (côté nuit)
+            g = 0.07 + t * 0.18   # 0.07 → 0.25 (côté nuit)
         return Vec4(g * 1.03, g * 1.00, g * 0.96, 1.0)  # Légèrement chaud
 
     # ----------------------------------------------------------
@@ -1220,7 +1325,7 @@ class Environment:
         # Lune côté droit (source de lumière) — haute, lointaine, fixe
         moon = DistantPlanet(
             self.game.render,
-            Point3(18, 140, 28),          # droite (+X), loin, très haut
+            Point3(-18, 140, 28),         # gauche (-X), loin, très haut
             size=4.5,
             color=Vec4(0.88, 0.88, 0.78, 1),   # blanc-chaud lunaire
         )
