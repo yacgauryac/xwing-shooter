@@ -225,7 +225,7 @@ main.py
 
 ### Priorité 2 — Gameplay
 - [ ] **Lock torpille Vader** : ✅ passer boss comme cible torpille en phase boss
-- [x] **Contrôles** : mouse1=lock/torpille, mouse2=Force molette, F=Force clavier
+- [x] **Contrôles** : mouse1=lasers (inchangé), mouse3=lock/torpille, mouse2=Force molette, F=Force clavier
 - [ ] **Hitbox pendant changement palier** : ennemis difficiles à toucher en transition — élargir hitbox ou ajouter auto-aim léger sur Z pendant transition
 - [ ] **Mode Free Ride** : voler librement sans ennemis, exploration des niveaux
 - [ ] **Mode Multijoueur** : coop ou versus local/réseau (à spécifier)
