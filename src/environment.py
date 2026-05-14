@@ -751,21 +751,6 @@ def _draw_circuit_tex(img, size, rng, base_g, trace_g, panel_g):
                 buf[py2][jx] = base_g * 0.55
         x += pw
 
-    # Sous-panneaux (subdivision interne, joints fins 2px)
-    sub_size = 48
-    for sx in range(0, size, sub_size):
-        for sy in range(0, size, sub_size):
-            if rng.random() < 0.5:   # seulement certains
-                for j in range(2):
-                    jx = min(sx + sub_size + j, size - 1)
-                    jy = min(sy + sub_size + j, size - 1)
-                    for py2 in range(sy, min(sy + sub_size, size)):
-                        if 0 <= jx < size:
-                            buf[py2][jx] = max(base_g * 0.7, buf[py2][jx] * 0.85)
-                    for px2 in range(sx, min(sx + sub_size, size)):
-                        if 0 <= jy < size:
-                            buf[jy][px2] = max(base_g * 0.7, buf[jy][px2] * 0.85)
-
     # Identifier les zones propres pour éviter les traces dessus
     clean_mask = [[buf[py][px] < panel_g * 0.85 + 0.01 for px in range(size)]
                   for py in range(size)]
@@ -857,7 +842,7 @@ def _gen_trench_floor_tex(size=512):
 
 
 # Cache module-level — générés une fois, réutilisés par toutes les dalles
-_TRENCH_WALL_TEX  = None
+_TRENCH_WALL_TEX  = None   # régénéré au prochain démarrage
 _TRENCH_FLOOR_TEX = None
 
 
