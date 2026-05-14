@@ -130,9 +130,9 @@ class Game(ShowBase):
         self.accept("escape", self._game_escape)
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
-        self.accept("mouse2",    self.start_lock)         # Molette — lock torpille
-        self.accept("mouse2-up", self.fire_torpedo)      # Relâche molette — fire
-        self.accept("mouse3",    self.toggle_force)      # Clic droit — Force toggle
+        self.accept("mouse2",    self.toggle_force)       # Molette — Force toggle
+        self.accept("mouse3",    self.start_lock)         # Clic droit — lock torpille
+        self.accept("mouse3-up", self.fire_torpedo)      # Relâche clic droit — fire
         self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
@@ -561,7 +561,7 @@ class Game(ShowBase):
         was_active = self.force.active
         self.force.set_held(True)
         if self.force.active and not was_active:
-            self.sounds.play("explosion")  # Son temporaire
+            self.sounds.play("force_activate")
             # Reset overheat au moment de l'activation
             if self.lasers.overheated:
                 self.lasers.heat = 0
@@ -659,7 +659,7 @@ class Game(ShowBase):
         self.taskMgr.remove("game_update")
 
         # Unbind game controls
-        for key in ["m", "r", "mouse2", "mouse2-up", "mouse3", "escape", "enter"]:
+        for key in ["m", "r", "mouse2", "mouse3", "mouse3-up", "escape", "enter"]:
             self.ignore(key)
         self._lb_unbind_keys()
 
