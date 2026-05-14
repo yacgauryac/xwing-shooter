@@ -577,99 +577,113 @@ _V3C4T2 = _make_v3c4t2()
 
 
 def _draw_circuit_tex(img, size, rng, base_g, trace_g, panel_g):
-    """Remplit img avec un motif circuit imprimé Death Star.
+    """Texture circuit Death Star lisible en mouvement.
 
-    - Fond sombre (base_g)
-    - Grandes plaques de panneaux (panel_g) avec légère variation
-    - Traces PCB fines (trace_g) : horizontales + verticales + diagonales courtes
-    - Pads circulaires (spots) aux intersections
+    Principes anti-moiré :
+    - Grandes zones propres (panneaux sans traces) — ~40% de la surface
+    - Peu de traces (8-12 H, 6-9 V) mais épaisses (3-6px)
+    - UV scale élevée → chaque tuile couvre ~6u monde (grand = moins de répétition)
+    - Pads larges (r 5-10px) bien visibles
     """
     buf = [[base_g] * size for _ in range(size)]
 
-    # ── Plaques de fond (panneaux irréguliers) ─────────────────
-    panel_sizes = [40, 56, 72, 96]
+    # ── Grandes plaques irrégulières ───────────────────────────
+    # Deux niveaux : grandes zones (~25% propres) puis subdivisions
+    zone_sizes = [96, 128, 160]
     x = 0
     while x < size:
-        pw = rng.choice(panel_sizes)
-        y = 0
+        pw = rng.choice(zone_sizes)
+        y  = 0
         while y < size:
-            ph = rng.choice(panel_sizes)
-            pv = rng.uniform(-0.04, 0.06)
+            ph  = rng.choice(zone_sizes)
+            pv  = rng.uniform(-0.05, 0.07)
+            # ~35% des grandes zones sont "propres" (pas de traces dessus)
+            clean = rng.random() < 0.35
             for py in range(y, min(y + ph, size)):
                 for px in range(x, min(x + pw, size)):
-                    buf[py][px] = panel_g + pv
-            # Ligne de joint bas
-            jy = min(y + ph, size - 1)
-            for px in range(x, min(x + pw, size)):
-                buf[jy][px] = base_g * 0.6
+                    buf[py][px] = (panel_g + pv, 'clean' if clean else panel_g + pv)[0]
+                    if clean:
+                        # Marquer propre avec valeur légèrement différente
+                        buf[py][px] = panel_g * 0.82 + pv * 0.5
+            # Joint épais (4px) entre grandes plaques
+            for j in range(4):
+                jy = min(y + ph + j, size - 1)
+                for px2 in range(x, min(x + pw, size)):
+                    buf[jy][px2] = base_g * 0.55
             y += ph
-        # Ligne de joint droite
-        jx = min(x + pw, size - 1)
-        for py in range(size):
-            buf[py][jx] = base_g * 0.6
+        for j in range(4):
+            jx = min(x + pw + j, size - 1)
+            for py2 in range(size):
+                buf[py2][jx] = base_g * 0.55
         x += pw
 
-    # ── Traces horizontales ────────────────────────────────────
-    n_h = rng.randint(18, 30)
+    # Sous-panneaux (subdivision interne, joints fins 2px)
+    sub_size = 48
+    for sx in range(0, size, sub_size):
+        for sy in range(0, size, sub_size):
+            if rng.random() < 0.5:   # seulement certains
+                for j in range(2):
+                    jx = min(sx + sub_size + j, size - 1)
+                    jy = min(sy + sub_size + j, size - 1)
+                    for py2 in range(sy, min(sy + sub_size, size)):
+                        if 0 <= jx < size:
+                            buf[py2][jx] = max(base_g * 0.7, buf[py2][jx] * 0.85)
+                    for px2 in range(sx, min(sx + sub_size, size)):
+                        if 0 <= jy < size:
+                            buf[jy][px2] = max(base_g * 0.7, buf[jy][px2] * 0.85)
+
+    # Identifier les zones propres pour éviter les traces dessus
+    clean_mask = [[buf[py][px] < panel_g * 0.85 + 0.01 for px in range(size)]
+                  for py in range(size)]
+
+    # ── Traces horizontales (peu, épaisses) ────────────────────
+    n_h = rng.randint(8, 12)
     for _ in range(n_h):
-        ty   = rng.randint(4, size - 4)
-        tx0  = rng.randint(0, size // 3)
-        tx1  = rng.randint(2 * size // 3, size - 1)
-        tw   = rng.randint(1, 3)
-        brightness = trace_g * rng.uniform(0.85, 1.15)
+        ty  = rng.randint(10, size - 10)
+        tx0 = rng.randint(0, size // 4)
+        tx1 = rng.randint(3 * size // 4, size - 1)
+        tw  = rng.randint(3, 6)
+        brightness = trace_g * rng.uniform(0.90, 1.10)
         for px in range(tx0, tx1):
             for dy in range(-tw // 2, tw // 2 + 1):
                 py = ty + dy
-                if 0 <= py < size:
+                if 0 <= py < size and not clean_mask[py][px]:
                     buf[py][px] = max(buf[py][px], brightness)
 
-    # ── Traces verticales ─────────────────────────────────────
-    n_v = rng.randint(14, 24)
+    # ── Traces verticales (peu, épaisses) ─────────────────────
+    n_v = rng.randint(6, 9)
     for _ in range(n_v):
-        tx   = rng.randint(4, size - 4)
-        ty0  = rng.randint(0, size // 3)
-        ty1  = rng.randint(2 * size // 3, size - 1)
-        tw   = rng.randint(1, 2)
-        brightness = trace_g * rng.uniform(0.80, 1.10)
+        tx  = rng.randint(10, size - 10)
+        ty0 = rng.randint(0, size // 4)
+        ty1 = rng.randint(3 * size // 4, size - 1)
+        tw  = rng.randint(3, 5)
+        brightness = trace_g * rng.uniform(0.85, 1.05)
         for py in range(ty0, ty1):
             for dx in range(-tw // 2, tw // 2 + 1):
                 px = tx + dx
-                if 0 <= px < size:
+                if 0 <= px < size and not clean_mask[py][px]:
                     buf[py][px] = max(buf[py][px], brightness)
 
-    # ── Courtes jonctions obliques ─────────────────────────────
-    n_diag = rng.randint(8, 16)
-    for _ in range(n_diag):
-        sx = rng.randint(8, size - 8)
-        sy = rng.randint(8, size - 8)
-        length = rng.randint(6, 20)
-        dx_d = rng.choice([-1, 1])
-        dy_d = rng.choice([-1, 1])
-        brightness = trace_g * 0.75
-        for i in range(length):
-            px = sx + i * dx_d
-            py = sy + i * dy_d
-            if 0 <= px < size and 0 <= py < size:
-                buf[py][px] = max(buf[py][px], brightness)
-
-    # ── Pads (cercles aux nœuds) ───────────────────────────────
-    n_pads = rng.randint(20, 40)
+    # ── Pads larges aux intersections ─────────────────────────
+    n_pads = rng.randint(8, 16)
     for _ in range(n_pads):
-        cx = rng.randint(8, size - 8)
-        cy = rng.randint(8, size - 8)
-        r  = rng.randint(2, 5)
-        brightness = trace_g * rng.uniform(1.0, 1.3)
+        cx = rng.randint(15, size - 15)
+        cy = rng.randint(15, size - 15)
+        if clean_mask[cy][cx]:
+            continue
+        r  = rng.randint(5, 10)
+        brightness = min(1.0, trace_g * rng.uniform(1.05, 1.25))
         for py in range(cy - r, cy + r + 1):
             for px in range(cx - r, cx + r + 1):
                 if 0 <= px < size and 0 <= py < size:
                     if (px - cx) ** 2 + (py - cy) ** 2 <= r * r:
-                        buf[py][px] = min(1.0, brightness)
+                        buf[py][px] = brightness
 
     # ── Écriture dans PNMImage ─────────────────────────────────
     noise_rng = random.Random(rng.randint(0, 99999))
     for py in range(size):
         for px in range(size):
-            g = buf[py][px] + noise_rng.uniform(-0.015, 0.015)
+            g = buf[py][px] + noise_rng.uniform(-0.010, 0.010)
             g = max(0.0, min(1.0, g))
             img.setXelA(px, py, g * 1.02, g, g * 0.94, 1.0)
 
@@ -746,10 +760,12 @@ class TrenchWallPanel:
     PANEL_SIZE = 3.0   # taille d'un panneau en unités monde
     SEAM_W     = 0.06  # épaisseur du joint (fraction de l'unité)
 
-    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, lit=True):
+    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, lit=True,
+                 textured=True):
         self.alive = True
         self.is_right = (x_side > 0)
         self.lit = lit
+        self.textured = textured
         self.node = self._make_wall(height, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_side, y_pos, 0)
@@ -777,8 +793,8 @@ class TrenchWallPanel:
 
         segs_z = max(4, int(h))
         segs_y = max(4, int(d))
-        # UV : 1 unité monde = 1/3 de tuile texture (panneau = 3u → 1 répétition)
-        uv_scale = 1.0 / 3.0
+        # UV : 1 unité monde = 1/6 de tuile → panneau = 6u → texture grande, peu de répétition
+        uv_scale = 1.0 / 6.0
 
         for i in range(segs_z + 1):
             for j in range(segs_y + 1):
@@ -805,7 +821,8 @@ class TrenchWallPanel:
         node = GeomNode("trench_wall_mesh")
         node.addGeom(geom)
         np = NodePath(node)
-        np.setTexture(_TS_MODULATE, _get_wall_tex())
+        if self.textured:
+            np.setTexture(_TS_MODULATE, _get_wall_tex())
         np.reparentTo(root)
         return root
 
@@ -843,7 +860,7 @@ class TrenchFloorPanel:
 
         segs_x = max(4, int(w / 2))
         segs_y = max(4, int(d / 2))
-        uv_scale = 1.0 / 4.0   # panneaux sol 4u → 1 répétition
+        uv_scale = 1.0 / 7.0   # grands panneaux sol, peu de répétition
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
@@ -1526,11 +1543,17 @@ class Environment:
 
     def _spawn_trench_row(self, y):
         d = self.TILE_DEPTH
+        # Varier la texture par segment : ~30% des rangées sont sans texture (zones propres)
+        rng_row = random.Random(int(round(y * 17.3)) & 0xFFFF)
+        tex_l = rng_row.random() > 0.28
+        tex_r = rng_row.random() > 0.28
         # Côté gauche : dans l'ombre (lit=False) | Côté droit : éclairé par la lune (lit=True)
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False))
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False,
+            textured=tex_l))
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True))
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True,
+            textured=tex_r))
         self.floor_panels.append(TrenchFloorPanel(
             self.game.render, 0, y, depth=d))
         self.surface_panels.append(TrenchSurfacePanel(
