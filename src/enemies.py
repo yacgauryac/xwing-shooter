@@ -168,9 +168,6 @@ class BaseEnemy:
         self.node.reparentTo(parent_node)
         self.node.setPos(start_pos)
 
-        # Drop-line : repère vertical vers Z=0
-        self._drop_line = _make_drop_line(parent_node)
-
     def load_model(self):
         """Charge le modèle .glb/.gltf (caché) ou fallback procédural."""
         class_name = type(self).__name__
@@ -285,15 +282,6 @@ class BaseEnemy:
             self.destroy()
             return None
 
-        # Drop-line : repère vertical ennemi → Z=0
-        epos = self.node.getPos()
-        if epos.getZ() > 0.15:
-            self._drop_line.setPos(epos.getX(), epos.getY(), epos.getZ())
-            self._drop_line.setScale(1, 1, epos.getZ())
-            self._drop_line.show()
-        else:
-            self._drop_line.hide()
-
         # Tir
         self.fire_timer -= dt
         if self.fire_timer <= 0 and player_pos is not None:
@@ -344,8 +332,6 @@ class BaseEnemy:
         self.alive = False
         if not self.node.isEmpty():
             self.node.removeNode()
-        if hasattr(self, '_drop_line') and not self._drop_line.isEmpty():
-            self._drop_line.removeNode()
 
     def get_pos(self):
         if self.alive and not self.node.isEmpty():
