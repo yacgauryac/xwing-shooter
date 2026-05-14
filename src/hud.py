@@ -283,30 +283,31 @@ class HUD:
             mayChange=False, sort=50,
         )
         self.torpedo_count_text = OnscreenText(
-            text="20", pos=(0, -0.935), scale=0.045,
+            text="20", pos=(0, -0.935), scale=0.038,
             fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=52,
             shadow=(0, 0, 0, 0.9),
         )
-        # Grand losange contour bas-centre
+        # Losange bas-centre (20% plus petit : 0.07 → 0.056)
         self._torp_diamond_root = game.aspect2d.attachNewNode("torp_diamond")
         self._torp_diamond_root.setBin("fixed", 50)
         self._torp_diamond_root.setDepthTest(False)
         self._torp_diamond_root.setDepthWrite(False)
         self._torp_diamond_root.setTransparency(TransparencyAttrib.MAlpha)
-        self._build_single_diamond(self._torp_diamond_root, 0, -0.93, 0.07)
-        # Losange mini near-ship (aspect2d, mis à jour via projection)
-        self._torp_ship_root = game.aspect2d.attachNewNode("torp_ship")
-        self._torp_ship_root.setBin("fixed", 51)
-        self._torp_ship_root.setDepthTest(False)
-        self._torp_ship_root.setDepthWrite(False)
-        self._torp_ship_root.setTransparency(TransparencyAttrib.MAlpha)
-        self._build_single_diamond(self._torp_ship_root, 0, 0, 0.035)
-        self._torp_ship_text = OnscreenText(
-            text="20", pos=(0, 0), scale=0.028,
-            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=53,
-            shadow=(0, 0, 0, 0.8),
+        self._build_single_diamond(self._torp_diamond_root, 0, -0.93, 0.056)
+        self._torp_diamonds = []
+
+        # ===== WARNINGS near-ship (overheat + torp low) =====
+        self._warn_overheat = OnscreenText(
+            text="", pos=(0, 0.12), scale=0.032,
+            fg=Vec4(1.0, 0.15, 0.0, 1.0), align=TextNode.ACenter,
+            mayChange=True, sort=55, shadow=(0,0,0,0.8),
         )
-        self._torp_diamonds = []  # vide — ancien système supprimé
+        self._warn_torp = OnscreenText(
+            text="", pos=(0, 0.07), scale=0.028,
+            fg=Vec4(1.0, 0.65, 0.1, 1.0), align=TextNode.ACenter,
+            mayChange=True, sort=55, shadow=(0,0,0,0.8),
+        )
+        self._warn_torp_shown = False
 
         # ===== ANNONCE / FLASH / GAME OVER =====
         self.wave_announce = OnscreenText(
@@ -520,8 +521,8 @@ class HUD:
         # Score
         self.score_text.setText(f"{score:,}".replace(",", " "))
 
-        # Torpilles — losange+chiffre en bas + near-ship
-        self._update_torp_display(torpedo_count, player_node, self.blink_timer)
+        # Torpilles + warnings
+        self._update_torp_display(torpedo_count, 20, self.blink_timer)
         if player_node:
             self._update_heat_bar_3d(player_node, heat_pct, overheated, self.blink_timer)
 
@@ -698,162 +699,105 @@ class HUD:
         np.setRenderModeThickness(1.8)
         np.setTransparency(TransparencyAttrib.MAlpha)
 
-    def _update_torp_display(self, torpedo_count, player_node, blink_timer):
-        """Met à jour le chiffre dans les losanges torpilles (bas + near-ship)."""
-        # Couleur selon stock
+    def _update_torp_display(self, torpedo_count, max_torp, blink_timer):
+        """Met à jour le chiffre torpilles bas + warnings near-ship."""
         if torpedo_count <= 3:
             pulse = abs(math.sin(blink_timer * 8))
-            col = (1.0, 0.15 + 0.1*pulse, 0.0, 1.0)
-        elif torpedo_count <= 8:
-            col = (1.0, 0.65, 0.1, 1.0)
+            fg = Vec4(1.0, 0.1 + 0.1*pulse, 0.0, 1.0)
+        elif torpedo_count <= max_torp // 3:
+            fg = Vec4(1.0, 0.65, 0.1, 1.0)
         else:
-            col = (0.85, 0.95, 1.0, 1.0)
-
-        fg = Vec4(*col)
-        # Losange bas
+            fg = Vec4(0.85, 0.95, 1.0, 1.0)
         self.torpedo_count_text.setText(str(torpedo_count))
         self.torpedo_count_text['fg'] = fg
 
-        # Losange near-ship : projet position 3D → aspect2d
-        if player_node and not player_node.isEmpty():
-            from panda3d.core import Point3, Point2
-            wp = player_node.getPos()
-            # Projette en coords lens
-            p3 = self.game.cam.getRelativePoint(self.game.render, wp)
-            p2 = Point2()
-            if self.game.camLens.project(p3, p2):
-                ar = self.game.getAspectRatio()
-                sx = p2.getX() * ar
-                sz = p2.getY() - 0.13   # légèrement sous le vaisseau
-                self._torp_ship_root.setPos(sx, 0, sz)
-                self._torp_ship_text.setPos(sx, sz)
-                self._torp_ship_text.setText(str(torpedo_count))
-                self._torp_ship_text['fg'] = fg
-                self._torp_ship_root.show()
-                self._torp_ship_text.show()
+        # Warning torpilles basses (≤ 1/3 du max)
+        if torpedo_count <= max_torp // 3 and torpedo_count > 0:
+            if torpedo_count <= 3:
+                pulse = abs(math.sin(blink_timer * 7))
+                self._warn_torp['fg'] = Vec4(1.0, 0.1+0.1*pulse, 0.0, 1.0)
+                self._warn_torp.setText("◆ TORP CRITIQUE ◆")
             else:
-                self._torp_ship_root.hide()
-                self._torp_ship_text.hide()
+                self._warn_torp['fg'] = Vec4(1.0, 0.65, 0.1, 0.9)
+                self._warn_torp.setText("◆ TORP FAIBLES")
+        else:
+            self._warn_torp.setText("")
 
     def _build_heat_bar_3d(self):
-        """Barre de chaleur laser — fine barre centrée au-dessus du vaisseau.
-        Géométrie dans le plan XZ (Y=0) → face naturellement à la caméra, pas de lookAt."""
+        """Barre chaleur 3D — géométrie de 0 à BAR_W dans plan XZ.
+        Root positionné au bord gauche → setScale(pct) = remplissage gauche→droite."""
         BAR_W = 1.6
         BAR_H = 0.10
         fmt = GeomVertexFormat.getV3c4()
 
-        # Fond sombre — centré en X (−W/2 … +W/2)
+        # Fond sombre (0 → BAR_W)
         vd = GeomVertexData("hbg", fmt, Geom.UHStatic)
         v = GeomVertexWriter(vd, "vertex"); c = GeomVertexWriter(vd, "color")
         col_bg = Vec4(0.08, 0.04, 0.01, 0.65)
-        hw = BAR_W / 2
-        v.addData3(-hw, 0,      0); c.addData4(col_bg)
-        v.addData3( hw, 0,      0); c.addData4(col_bg)
-        v.addData3( hw, 0, BAR_H); c.addData4(col_bg)
-        v.addData3(-hw, 0, BAR_H); c.addData4(col_bg)
+        v.addData3(0,     0,      0); c.addData4(col_bg)
+        v.addData3(BAR_W, 0,      0); c.addData4(col_bg)
+        v.addData3(BAR_W, 0, BAR_H); c.addData4(col_bg)
+        v.addData3(0,     0, BAR_H); c.addData4(col_bg)
         tris = GeomTriangles(Geom.UHStatic)
         tris.addVertices(0,1,2); tris.addVertices(0,2,3)
         g = Geom(vd); g.addPrimitive(tris)
         gn = GeomNode("hbg"); gn.addGeom(g)
-        bg = NodePath(gn); bg.reparentTo(self.heat_bar_root)
-        bg.setTransparency(TransparencyAttrib.MAlpha)
+        bg2 = NodePath(gn); bg2.reparentTo(self.heat_bar_root); bg2.setTransparency(TransparencyAttrib.MAlpha)
 
-        # Fill — part du bord gauche, setScaleX = fraction
+        # Fill (0 → BAR_W) — setScale(pct,1,1) depuis l'origine = gauche→droite ✓
         vd2 = GeomVertexData("hbf", fmt, Geom.UHStatic)
         v2 = GeomVertexWriter(vd2, "vertex"); c2 = GeomVertexWriter(vd2, "color")
         col_f = Vec4(0.4, 0.9, 0.2, 0.95)
-        v2.addData3(-hw, 0,      0); c2.addData4(col_f)
-        v2.addData3( hw, 0,      0); c2.addData4(col_f)
-        v2.addData3( hw, 0, BAR_H); c2.addData4(col_f)
-        v2.addData3(-hw, 0, BAR_H); c2.addData4(col_f)
+        v2.addData3(0,     0,      0); c2.addData4(col_f)
+        v2.addData3(BAR_W, 0,      0); c2.addData4(col_f)
+        v2.addData3(BAR_W, 0, BAR_H); c2.addData4(col_f)
+        v2.addData3(0,     0, BAR_H); c2.addData4(col_f)
         tris2 = GeomTriangles(Geom.UHStatic)
         tris2.addVertices(0,1,2); tris2.addVertices(0,2,3)
         g2 = Geom(vd2); g2.addPrimitive(tris2)
         gn2 = GeomNode("hbf"); gn2.addGeom(g2)
-        fill = NodePath(gn2); fill.reparentTo(self.heat_bar_root)
+        fill = NodePath(gn2)
+        fill.reparentTo(self.heat_bar_root)
         fill.setTransparency(TransparencyAttrib.MAlpha)
-        # Pivot du scale à gauche — déplacer le fill d'un pivot à −hw
-        fill.setPos(-hw, 0, 0)   # on va scaler depuis le bord gauche via un sous-nœud
-        # Nœud pivot pour le scale à gauche
-        pivot = self.heat_bar_root.attachNewNode("fill_pivot")
-        pivot.setPos(-hw, 0, 0)
-        fill.reparentTo(pivot)
-        fill.setPos(hw, 0, 0)   # remet au centre depuis pivot
-        self._heat_bar_pivot = pivot
-        self._heat_bar_fill  = fill
-        self._heat_bar_w     = BAR_W
-        self._heat_bar_h     = BAR_H
+        self._heat_bar_fill = fill
+        self._heat_bar_w    = BAR_W
 
     def _update_heat_bar_3d(self, player_node, heat_pct, overheated, blink_timer):
-        """Met à jour la barre de chaleur — positionnée au-dessus du vaisseau."""
+        """Barre chaleur + warning overheat near-ship."""
         if not player_node or player_node.isEmpty():
             return
         pos = player_node.getPos()
-        # Centré sur le vaisseau, légèrement au-dessus
-        self.heat_bar_root.setPos(pos.getX(), pos.getY(), pos.getZ() + 0.9)
-        # Pas de lookAt — la géométrie XZ fait naturellement face à la caméra
-
+        # Root au bord GAUCHE de la barre, centré sur le vaisseau
+        self.heat_bar_root.setPos(
+            pos.getX() - self._heat_bar_w / 2,
+            pos.getY(),
+            pos.getZ() + 0.85
+        )
+        # setScale sur le fill depuis son origine (0) → gauche→droite comme la barre du bas
         pct = 1.0 if overheated else max(0.0, heat_pct)
-        self._heat_bar_pivot.setScale(pct, 1, 1)
+        self._heat_bar_fill.setScale(pct, 1, 1)
 
         if overheated:
             pulse = abs(math.sin(blink_timer * 10))
             self._heat_bar_fill.setColorScale(1.0, 0.05 + 0.1*pulse, 0.0, 1.0)
-        elif heat_pct > 0.75:
-            self._heat_bar_fill.setColorScale(1.0, 0.25, 0.0, 1.0)
-        elif heat_pct > 0.45:
-            self._heat_bar_fill.setColorScale(1.0, 0.6, 0.05, 1.0)
+            self._warn_overheat['fg'] = Vec4(1.0, 0.1 + 0.15*pulse, 0.0, 1.0)
+            self._warn_overheat.setText("◆ LASER OVERHEAT ◆")
         else:
-            self._heat_bar_fill.setColorScale(0.4, 1.0, 0.2, 1.0)
+            self._warn_overheat.setText("")
+            if heat_pct > 0.75:
+                self._heat_bar_fill.setColorScale(1.0, 0.25, 0.0, 1.0)
+            elif heat_pct > 0.45:
+                self._heat_bar_fill.setColorScale(1.0, 0.6, 0.05, 1.0)
+            else:
+                self._heat_bar_fill.setColorScale(0.4, 1.0, 0.2, 1.0)
 
     def _build_torp_pips(self, max_count):
-        """Pips torpilles — petits losanges dans le plan XZ, pas de lookAt."""
-        from panda3d.core import GeomLines
-        for p in self._torp_pips:
-            p.removeNode()
-        self._torp_pips = []
+        """Obsolète."""
+        pass
 
-        s   = 0.10
-        col = Vec4(0.9, 0.6, 0.1, 1.0)
-
-        for i in range(max_count):
-            fmt = GeomVertexFormat.getV3c4()
-            vd  = GeomVertexData("pip", fmt, Geom.UHStatic)
-            v   = GeomVertexWriter(vd, "vertex")
-            c   = GeomVertexWriter(vd, "color")
-            # Dans le plan XZ (Y=0) — face caméra naturellement
-            v.addData3( 0, 0,  s); c.addData4(col)
-            v.addData3( s, 0,  0); c.addData4(col)
-            v.addData3( 0, 0, -s); c.addData4(col)
-            v.addData3(-s, 0,  0); c.addData4(col)
-            lines = GeomLines(Geom.UHStatic)
-            lines.addVertices(0,1); lines.addVertices(1,2)
-            lines.addVertices(2,3); lines.addVertices(3,0)
-            geom = Geom(vd); geom.addPrimitive(lines)
-            gn  = GeomNode(f"pip_{i}"); gn.addGeom(geom)
-            pip = NodePath(gn)
-            pip.reparentTo(self.torp_indicator_root)
-            pip.setRenderModeThickness(2.0)
-            pip.setTransparency(TransparencyAttrib.MAlpha)
-            pip.hide()
-            self._torp_pips.append(pip)
-
-    def _update_torp_pips(self, player_node, torpedo_count, max_count=9):
-        """Positionne les pips juste sous le vaisseau."""
-        if not player_node or player_node.isEmpty():
-            return
-        pos     = player_node.getPos()
-        spacing = 0.28
-        total_w = (max_count - 1) * spacing
-        base_x  = pos.getX() - total_w / 2.0
-        base_z  = pos.getZ() - 0.55   # collé sous le vaisseau
-
-        for i, pip in enumerate(self._torp_pips):
-            if i < torpedo_count:
-                pip.setPos(base_x + i * spacing, pos.getY(), base_z)
-                pip.show()
-            else:
-                pip.hide()
+    def _update_torp_pips(self, *args, **kwargs):
+        """Obsolète."""
+        pass
 
     def _update_altitude_pyramid(self, player_z, bounds_z=8.0):
         """3 barres horizontales en pyramide indiquant l'altitude.
