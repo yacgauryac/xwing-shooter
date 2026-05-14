@@ -952,8 +952,7 @@ class TrenchWallPanel:
         node = GeomNode("trench_wall_mesh")
         node.addGeom(geom)
         np = NodePath(node)
-        if self.textured:
-            np.setTexture(_TS_MODULATE, _get_wall_tex())
+        np.setTexture(_TS_MODULATE, _get_wall_tex())
         np.reparentTo(root)
         return root
 
