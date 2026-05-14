@@ -27,14 +27,14 @@ BOSS_BOLT_SPEED   = 58.0
 
 # ── Mouvement — orbite selon HP ───────────────────────────────────────────────
 # yo = décalage Y devant le joueur (boss reste proche pour rester visible et hittable)
-ORBIT_HIGH   = dict(rx=9.0,  rz=4.0, spd=0.65, yo=15)   # HP > 65 %
-ORBIT_MID    = dict(rx=7.0,  rz=3.2, spd=0.95, yo=13)   # HP 32-65 %
-ORBIT_LOW    = dict(rx=5.5,  rz=2.5, spd=1.35, yo=11)   # HP < 32 % (erratique)
+ORBIT_HIGH   = dict(rx=14.0, rz=7.0, spd=0.65, yo=40)   # HP > 65 %
+ORBIT_MID    = dict(rx=11.0, rz=6.0, spd=0.95, yo=30)   # HP 32-65 %
+ORBIT_LOW    = dict(rx=9.0,  rz=5.0, spd=1.35, yo=22)   # HP < 32 % (erratique)
 
 CHARGE_SPEED    = 38.0
-CHARGE_DURATION = 0.85
+CHARGE_DURATION = 1.2
 STRAFE_RADIUS   = 11.0
-RETREAT_Y       = 25.0   # Retraite modérée — boss reste à portée
+RETREAT_Y       = 55.0   # Retraite longue — boss prend de la distance
 LERP_NORMAL     = 2.5    # Lerp mouvement normal
 LERP_CHARGE     = 8.0    # Lerp pendant la charge
 

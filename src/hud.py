@@ -634,6 +634,7 @@ class HUD:
         """3 barres horizontales en pyramide indiquant l'altitude.
         Pointe vers le haut si Z>0, vers le bas si Z<0.
         Couleur : vert → orange → rouge selon distance au 0.
+        Suit la position écran du vaisseau.
         """
         if self.altitude_lines:
             self.altitude_lines.removeNode()
@@ -653,20 +654,27 @@ class HUD:
         else:
             t = (norm - 0.5) * 2.0
             r, g = 0.9 + t * 0.1, 0.4 - t * 0.35
-        alpha = 0.15 + norm * 0.35  # très transparent près du 0, plus visible loin
-        color = Vec4(r, g, 0.05, alpha)
+        alpha = 0.35 + norm * 0.45  # plus opaque qu'avant
+
+        # Position écran du vaisseau (même logique que le crosshair)
+        base_x, base_z = 0.0, -0.12  # fallback
+        game = self.game
+        if hasattr(game, 'player') and game.player is not None:
+            sp = game.player.node.getPos()
+            p_cam = game.camera.getRelativePoint(game.render, sp)
+            p2d = Point2()
+            if game.camLens.project(p_cam, p2d):
+                ar = game.getAspectRatio()
+                base_x = p2d.getX() * ar
+                base_z = p2d.getY() - 0.08  # légèrement sous le vaisseau
 
         # Longueurs des 3 barres : grande / moyenne / petite
-        lengths = [0.13, 0.08, 0.04]
-        spacing = 0.045
+        lengths = [0.10, 0.065, 0.032]
+        spacing = 0.022  # serré
 
-        # Z>0 → pyramide pointe vers le haut (petite barre en haut)
-        # Z<0 → pyramide pointe vers le bas (petite barre en bas)
+        # Z>0 → pointe vers le haut (petite barre en haut)
+        # Z<0 → pointe vers le bas (petite barre en bas)
         pointing_up = player_z > 0
-
-        # Position de base : légèrement en-dessous du centre
-        base_x = 0.0
-        base_z = -0.12
 
         fmt = GeomVertexFormat.getV3c4()
         vd = GeomVertexData("alt", fmt, Geom.UHDynamic)
@@ -676,14 +684,11 @@ class HUD:
 
         for i, half_len in enumerate([l / 2.0 for l in lengths]):
             if pointing_up:
-                # grande barre en bas (i=0), petite en haut (i=2)
-                bz = base_z + i * spacing
+                bz = base_z + i * spacing       # grande en bas, petite en haut
             else:
-                # grande barre en haut (i=0), petite en bas (i=2) → inverser
-                bz = base_z + (2 - i) * spacing
+                bz = base_z + (2 - i) * spacing  # grande en haut, petite en bas
 
-            # Couleur dégradée : la barre la plus éloignée du centre est plus transparente
-            fade = 1.0 - i * 0.2
+            fade = 1.0 - i * 0.15
             bar_col = Vec4(r, g, 0.05, alpha * fade)
 
             idx_base = i * 2
@@ -697,7 +702,7 @@ class HUD:
         gn.addGeom(geom)
         np = NodePath(gn)
         np.reparentTo(self.altitude_root)
-        np.setRenderModeThickness(2.0)
+        np.setRenderModeThickness(2.5)
         self.altitude_lines = np
 
     def _update_attitude(self, roll, pitch):
