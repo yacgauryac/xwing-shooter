@@ -27,9 +27,9 @@ BOSS_BOLT_SPEED   = 58.0
 
 # ── Mouvement — orbite selon HP ───────────────────────────────────────────────
 # yo = décalage Y devant le joueur (boss reste proche pour rester visible et hittable)
-ORBIT_HIGH   = dict(rx=14.0, rz=7.0, spd=0.65, yo=40)   # HP > 65 %
-ORBIT_MID    = dict(rx=11.0, rz=6.0, spd=0.95, yo=30)   # HP 32-65 %
-ORBIT_LOW    = dict(rx=9.0,  rz=5.0, spd=1.35, yo=22)   # HP < 32 % (erratique)
+ORBIT_HIGH   = dict(rx=18.0, rz=8.0, spd=0.55, yo=60)   # HP > 65 %
+ORBIT_MID    = dict(rx=15.0, rz=7.0, spd=0.80, yo=45)   # HP 32-65 %
+ORBIT_LOW    = dict(rx=12.0, rz=6.0, spd=1.15, yo=32)   # HP < 32 % (erratique)
 
 CHARGE_SPEED    = 38.0
 CHARGE_DURATION = 1.2
