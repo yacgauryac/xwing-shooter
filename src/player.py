@@ -506,28 +506,17 @@ class Player:
                 a = a_start + t * (a_end - a_start)
                 verts.append((math.cos(a) * radius, 0, math.sin(a) * radius))
 
-        # Croix centrale (petite)
-        cross = 0.06
-        verts += [
-            (-cross, 0, 0), (cross, 0, 0),
-            (0, 0, -cross), (0, 0, cross),
-        ]
-
         for v in verts:
             vertex.addData3(*v)
             color.addData4(c)
 
         lines = GeomLines(Geom.UHStatic)
-        # Arcs : segments connectés
+        # Arcs uniquement — pas de point/croix central
         idx = 0
         for _ in range(4):
             for i in range(segments_per_arc):
                 lines.addVertices(idx + i, idx + i + 1)
             idx += segments_per_arc + 1
-
-        # Croix centrale
-        lines.addVertices(idx, idx + 1)
-        lines.addVertices(idx + 2, idx + 3)
 
         geom = Geom(vdata)
         geom.addPrimitive(lines)

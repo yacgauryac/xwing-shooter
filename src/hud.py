@@ -435,19 +435,20 @@ class HUD:
         root.setTransparency(TransparencyAttrib.MAlpha)
 
         # Géométrie à échelle 1.0 — scale mis à jour dans update()
-        # gap=0.25 (espace au centre), bras de 0.25 à 1.0 → pas de ligne au centre
+        # 4 petits traits (ticks) aux positions cardinales, qui croisent le cercle
         fmt   = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("xhair_s", fmt, Geom.UHStatic)
         vw = GeomVertexWriter(vdata, "vertex")
         cw = GeomVertexWriter(vdata, "color")
 
-        gap = 0.30   # début des bras (en fraction du radius)
-        #  4 branches : droite / gauche / haut / bas
+        # Chaque tick va de r_in à r_out en traversant le bord du cercle (r=1.0)
+        r_in  = 0.65   # début côté centre
+        r_out = 1.25   # fin côté extérieur
         segs = [
-            ( gap, 0,  1.0,  0),
-            (-gap, 0, -1.0,  0),
-            (0,  gap,   0,  1.0),
-            (0, -gap,   0, -1.0),
+            (0,  r_in,  0,  r_out),   # haut
+            (0, -r_in,  0, -r_out),   # bas
+            ( r_in, 0,  r_out, 0),    # droite
+            (-r_in, 0, -r_out, 0),    # gauche
         ]
         for x0, z0, x1, z1 in segs:
             vw.addData3(x0, 0, z0);  cw.addData4(c)
