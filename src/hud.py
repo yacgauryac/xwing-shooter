@@ -11,7 +11,7 @@ from panda3d.core import (
     ColorBlendAttrib,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomLines, GeomNode,
-    NodePath
+    NodePath, Point2, Point3
 )
 import math
 import os
@@ -424,44 +424,69 @@ class HUD:
         self.crosshair = self._make_crosshair(game)
 
     def _make_crosshair(self, game):
-        """Croix fine au centre de l'écran — ne bouge pas."""
-        root = game.aspect2d.attachNewNode("crosshair")
+        """Viseur statique : même géométrie 4 arcs + croix que le réticule 3D du joueur.
+        Position et taille mises à jour chaque frame par update() via camLens.project().
+        """
+        # Couleur identique au réticule 3D (player.py)
+        c = Vec4(0.2, 1.0, 0.3, 0.6)
+
+        # Mêmes paramètres que _create_crosshair() dans player.py
+        gap_angle       = 0.15
+        segments_per_arc = 8
+        arc_angles = [
+            (math.pi / 2 + gap_angle, math.pi - gap_angle),
+            (0 + gap_angle,           math.pi / 2 - gap_angle),
+            (-math.pi / 2 + gap_angle, 0 - gap_angle),
+            (math.pi + gap_angle,     math.pi * 1.5 - gap_angle),
+        ]
+
+        # Nœud racine : sa position (X, 0, Z) est mise à jour chaque frame
+        root = game.aspect2d.attachNewNode("crosshair_static")
         root.setBin("fixed", 60)
         root.setDepthTest(False)
         root.setDepthWrite(False)
         root.setTransparency(TransparencyAttrib.MAlpha)
 
-        gap  = 0.018   # Espace vide au centre
-        arm  = 0.040   # Longueur de chaque branche
-        r, g, b, a = 0.9, 0.85, 0.75, 0.75  # Blanc légèrement chaud, semi-transparent
-
-        fmt  = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("xhair", fmt, Geom.UHStatic)
+        # Géométrie dessinée à radius=1.0 — mise à l'échelle via setScale()
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("xhair_s", fmt, Geom.UHStatic)
         vw = GeomVertexWriter(vdata, "vertex")
         cw = GeomVertexWriter(vdata, "color")
 
-        # 4 branches — 2 points par branche
-        segments = [
-            ( gap,        0,     gap + arm,  0     ),  # droite
-            (-(gap + arm), 0,   -gap,         0     ),  # gauche
-            ( 0,          gap,   0,           gap + arm),  # haut
-            ( 0,        -(gap + arm), 0,      -gap  ),  # bas
-        ]
-        for x0, z0, x1, z1 in segments:
-            vw.addData3(x0, 0, z0);  cw.addData4(r, g, b, a)
-            vw.addData3(x1, 0, z1);  cw.addData4(r, g, b, a)
+        # 4 arcs (radius = 1.0, même proportion que le 3D)
+        verts = []
+        for a_start, a_end in arc_angles:
+            for i in range(segments_per_arc + 1):
+                t = i / segments_per_arc
+                a = a_start + t * (a_end - a_start)
+                verts.append((math.cos(a), 0, math.sin(a)))
+
+        # Petite croix centrale (proportion 0.06/0.6 = 0.1 × radius)
+        cross = 0.1
+        verts += [(-cross, 0, 0), (cross, 0, 0), (0, 0, -cross), (0, 0, cross)]
+
+        for v in verts:
+            vw.addData3(*v)
+            cw.addData4(c)
 
         lines = GeomLines(Geom.UHStatic)
-        for i in range(0, len(segments) * 2, 2):
-            lines.addVertices(i, i + 1)
+        idx = 0
+        for _ in range(4):
+            for i in range(segments_per_arc):
+                lines.addVertices(idx + i, idx + i + 1)
+            idx += segments_per_arc + 1
+        lines.addVertices(idx, idx + 1)       # croix H
+        lines.addVertices(idx + 2, idx + 3)   # croix V
 
         geom = Geom(vdata)
         geom.addPrimitive(lines)
-        gn = GeomNode("crosshair_mesh")
+        gn = GeomNode("xhair_s_mesh")
         gn.addGeom(geom)
         np = NodePath(gn)
         np.reparentTo(root)
-        np.setRenderModeThickness(1.5)
+        np.setRenderModeThickness(2)
+        np.setScale(0.022)  # valeur initiale, recalculée dans update()
+        self._crosshair_geom = np
 
         return root
 
@@ -576,6 +601,43 @@ class HUD:
             self.combo_text.setScale(0.09 + (1.0 - progress) * 0.02)
             if self.combo_timer <= 0:
                 self.combo_text.setText("")
+
+        # Viseur statique — projection du point de repos du réticule 3D
+        self._update_crosshair_static()
+
+    def _update_crosshair_static(self):
+        """Met à jour position + taille du viseur fixe en projetant le point de repos
+        du réticule 3D (position joueur + CH_DISTANCE=60 devant) via camLens."""
+        if not hasattr(self, 'crosshair') or not hasattr(self, '_crosshair_geom'):
+            return
+        game = self.game
+        if not hasattr(game, 'player') or not game.player.alive:
+            return
+
+        sp   = game.player.node.getPos()
+        ch_y = sp.getY() + 60.0   # CH_DISTANCE
+
+        # Transforme deux points monde → espace caméra
+        p_ctr_cam = game.camera.getRelativePoint(
+            game.render, Point3(sp.getX(), ch_y, sp.getZ()))
+        p_rim_cam = game.camera.getRelativePoint(
+            game.render, Point3(sp.getX(), ch_y, sp.getZ() + 0.6))  # +radius
+
+        p2d_c = Point2()
+        p2d_r = Point2()
+        ok_c = game.camLens.project(p_ctr_cam, p2d_c)
+        ok_r = game.camLens.project(p_rim_cam, p2d_r)
+
+        if not (ok_c and ok_r):
+            return
+
+        ar = game.getAspectRatio()
+        # NDC [-1,1] → aspect2d : X *= aspect_ratio, Z = NDC_y
+        self.crosshair.setPos(p2d_c.getX() * ar, 0, p2d_c.getY())
+
+        radius = abs(p2d_r.getY() - p2d_c.getY())
+        if radius > 1e-4:
+            self._crosshair_geom.setScale(radius)
 
     def _update_attitude(self, roll, pitch):
         if self.attitude_lines:
