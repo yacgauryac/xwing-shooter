@@ -616,7 +616,7 @@ def _gen_trench_wall_tex(size=512):
     tex.setWrapV(Texture.WM_repeat)
     tex.setMagfilter(Texture.FT_linear)
     tex.setMinfilter(Texture.FT_linear_mipmap_linear)
-    tex.generateRamMipmaps()
+    tex.generateRamMipmapImages()
     return tex
 
 
@@ -646,7 +646,7 @@ def _gen_trench_floor_tex(size=512):
     tex.setWrapV(Texture.WM_repeat)
     tex.setMagfilter(Texture.FT_linear)
     tex.setMinfilter(Texture.FT_linear_mipmap_linear)
-    tex.generateRamMipmaps()
+    tex.generateRamMipmapImages()
     return tex
 
 
