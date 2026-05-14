@@ -227,8 +227,14 @@ main.py
 - [ ] **IA ennemis** : comportements plus variés, flanking, esquive
 - [ ] **Difficulté progressive** : paramètres dynamiques selon le niveau + kills
 
-### Priorité 3 — Polish
-- [ ] **Son réacteurs** : bruit moteur ambiant, variation selon vitesse
+### Priorité 3 — Audio
+- [ ] **Musique** : soundtrack Star Wars ambient / battle — généré procéduralement ou fichiers ogg, transition calme→combat
+- [ ] **Refonte sons** : collisions moins agressives, sons tirs differenciés joueur/ennemi, sons UI
+- [ ] **Son réacteurs** : bruit moteur ambiant X-Wing, variation selon vitesse
+
+### Priorité 4 — Difficulté & Altitude
+- [ ] **Altitude joueur vs ennemis** : les ennemis B1 Mirror convergent trop facilement, ajouter un offset ou un délai supplémentaire pour ne pas rendre le jeu trop facile
+- [ ] **Indicateur altitude joueur** : repère visuel Z=0 (plan semi-transparent HUD ou ligne horizon) — à affiner quand le système de paliers sera plus challengeant
 - [ ] **Écran de fin** : récap score + kills par vague
 - [ ] **Sauvegardes** : config (volume, difficulté) persistante
 
