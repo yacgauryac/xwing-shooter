@@ -378,15 +378,20 @@ main.py
 - Rendu sur `aspect2d`, bin "fixed" sort 60, `setDepthTest(False)` → toujours visible devant le décor
 - Initialisé dans `HUD.__init__` → toujours affiché, ne bouge pas
 
-#### `src/environment.py` — `TrenchDecorGroup` + contraste directionnel
-- Nouvelle classe : décorations 3D procédurales fixées sur un segment de mur de tranchée
-- **Primitives** : `_make_box`, `_make_cylinder_v`, `_make_cylinder_h`, `_make_disc`, `_make_steps`, `_make_conduit_group` (2-4 tuyaux parallèles horizontaux de diamètres variés)
-- **Éclairage directionnel** : paramètre `lit=True/False` sur `TrenchWallPanel` et `TrenchDecorGroup`
-  - Côté droit (`lit=True`, source = lune) : gradient Z `0.38→0.90` (mur), `0.22→0.78` (décors)
-  - Côté gauche (`lit=False`, ombre) : gradient Z `0.09→0.31` (mur), `0.08→0.30` (décors)
-- **Lune** : `DistantPlanet` à `Point3(18, 140, 28)`, rayon 4.5u, blanc-chaud `(0.88, 0.88, 0.78)`, `grow_rate=0`
-- **Layout dense** : 5–10 éléments (était 2-5), min_sep 0.8-1.8u, 1-3 rails toujours présents, conduits 70% du temps
-- Spawné dans `_spawn_trench_row()` — 1 groupe par mur, `lit` selon le côté
+#### `src/environment.py` — `TrenchDecorGroup` + textures circuit + contraste directionnel
+- **Éclairage directionnel** : paramètre `lit=True/False` — mur gauche ombre `0.18→0.42`, mur droit lumière `0.55→1.00` (vertex color × texture)
+- **Lune** : `DistantPlanet` à `Point3(-18, 140, 28)` (gauche), rayon 4.5u, blanc-chaud, `grow_rate=0`
+- **Textures circuit imprimé** (`_draw_circuit_tex`) : fond sombre + plaques irrégulières + traces PCB horizontales/verticales + courtes jonctions obliques + pads circulaires aux nœuds. Appliquées via `TextureStage M_modulate` (texture × vertex_color) sur murs et sol. Format custom `_V3C4T2` (position + color + UV).
+- **Nouvelles primitives** :
+  - `_make_antenna` : colonne fine + disque tête + anneau intermédiaire optionnel
+  - `_make_l_bracket` : bras horizontal + bras vertical connectés en L
+  - `_make_tower` : récursif depth 2-3 — boîte de base + éléments décroissants au sommet
+  - `_make_connected_cluster` : 2 boîtes reliées par un rail + nœud vertical optionnel
+- **Placement fractal/puzzle** (hiérarchie en 4 niveaux) :
+  1. Rails de fond (1-3, traversent tout le segment)
+  2. Conduits groupés (50% des segments)
+  3. Clusters connectés (1-3 par segment, min_sep 2.5-4.5u)
+  4. Éléments terminaux (3-7 : tours, antennes, L-brackets, boîtes, disques, marches)
 
 ### v0.19 — Fix tuilage L2/L3 : zéro overlap, zéro Z-fighting, courbure planétaire
 

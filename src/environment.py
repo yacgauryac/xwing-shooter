@@ -576,40 +576,113 @@ def _make_v3c4t2():
 _V3C4T2 = _make_v3c4t2()
 
 
-def _gen_trench_wall_tex(size=512):
-    """Génère une texture procédurale béton/métal Death Star (une seule fois).
+def _draw_circuit_tex(img, size, rng, base_g, trace_g, panel_g):
+    """Remplit img avec un motif circuit imprimé Death Star.
 
-    Structure : carreaux 3u × 3u — joints fins foncés + variation par cellule
-    + léger bruit pixel. Renvoie une Texture Panda3D prête à l'emploi.
+    - Fond sombre (base_g)
+    - Grandes plaques de panneaux (panel_g) avec légère variation
+    - Traces PCB fines (trace_g) : horizontales + verticales + diagonales courtes
+    - Pads circulaires (spots) aux intersections
     """
-    img = PNMImage(size, size)
-    img.makeRgb()
-    tile = 64          # pixels par panneau-monde (3u mappé sur tile px)
-    seam = 3           # largeur joint en pixels
-    rng  = random.Random(42)
+    buf = [[base_g] * size for _ in range(size)]
 
+    # ── Plaques de fond (panneaux irréguliers) ─────────────────
+    panel_sizes = [40, 56, 72, 96]
+    x = 0
+    while x < size:
+        pw = rng.choice(panel_sizes)
+        y = 0
+        while y < size:
+            ph = rng.choice(panel_sizes)
+            pv = rng.uniform(-0.04, 0.06)
+            for py in range(y, min(y + ph, size)):
+                for px in range(x, min(x + pw, size)):
+                    buf[py][px] = panel_g + pv
+            # Ligne de joint bas
+            jy = min(y + ph, size - 1)
+            for px in range(x, min(x + pw, size)):
+                buf[jy][px] = base_g * 0.6
+            y += ph
+        # Ligne de joint droite
+        jx = min(x + pw, size - 1)
+        for py in range(size):
+            buf[py][jx] = base_g * 0.6
+        x += pw
+
+    # ── Traces horizontales ────────────────────────────────────
+    n_h = rng.randint(18, 30)
+    for _ in range(n_h):
+        ty   = rng.randint(4, size - 4)
+        tx0  = rng.randint(0, size // 3)
+        tx1  = rng.randint(2 * size // 3, size - 1)
+        tw   = rng.randint(1, 3)
+        brightness = trace_g * rng.uniform(0.85, 1.15)
+        for px in range(tx0, tx1):
+            for dy in range(-tw // 2, tw // 2 + 1):
+                py = ty + dy
+                if 0 <= py < size:
+                    buf[py][px] = max(buf[py][px], brightness)
+
+    # ── Traces verticales ─────────────────────────────────────
+    n_v = rng.randint(14, 24)
+    for _ in range(n_v):
+        tx   = rng.randint(4, size - 4)
+        ty0  = rng.randint(0, size // 3)
+        ty1  = rng.randint(2 * size // 3, size - 1)
+        tw   = rng.randint(1, 2)
+        brightness = trace_g * rng.uniform(0.80, 1.10)
+        for py in range(ty0, ty1):
+            for dx in range(-tw // 2, tw // 2 + 1):
+                px = tx + dx
+                if 0 <= px < size:
+                    buf[py][px] = max(buf[py][px], brightness)
+
+    # ── Courtes jonctions obliques ─────────────────────────────
+    n_diag = rng.randint(8, 16)
+    for _ in range(n_diag):
+        sx = rng.randint(8, size - 8)
+        sy = rng.randint(8, size - 8)
+        length = rng.randint(6, 20)
+        dx_d = rng.choice([-1, 1])
+        dy_d = rng.choice([-1, 1])
+        brightness = trace_g * 0.75
+        for i in range(length):
+            px = sx + i * dx_d
+            py = sy + i * dy_d
+            if 0 <= px < size and 0 <= py < size:
+                buf[py][px] = max(buf[py][px], brightness)
+
+    # ── Pads (cercles aux nœuds) ───────────────────────────────
+    n_pads = rng.randint(20, 40)
+    for _ in range(n_pads):
+        cx = rng.randint(8, size - 8)
+        cy = rng.randint(8, size - 8)
+        r  = rng.randint(2, 5)
+        brightness = trace_g * rng.uniform(1.0, 1.3)
+        for py in range(cy - r, cy + r + 1):
+            for px in range(cx - r, cx + r + 1):
+                if 0 <= px < size and 0 <= py < size:
+                    if (px - cx) ** 2 + (py - cy) ** 2 <= r * r:
+                        buf[py][px] = min(1.0, brightness)
+
+    # ── Écriture dans PNMImage ─────────────────────────────────
+    noise_rng = random.Random(rng.randint(0, 99999))
     for py in range(size):
         for px in range(size):
-            # Position dans le carreau
-            cx = px % tile;  cy = py % tile
-            dx = min(cx, tile - cx);  dy = min(cy, tile - cy)
-            on_seam = (dx < seam or dy < seam)
-
-            # Variation de cellule (déterministe)
-            ci = px // tile;  cj = py // tile
-            cell_v = math.sin(ci * 1.73 + cj * 2.31) * 0.06
-
-            # Bruit pixel fin
-            noise = rng.uniform(-0.025, 0.025)
-
-            if on_seam:
-                g = 0.28 + noise * 0.5
-            else:
-                g = 0.62 + cell_v + noise
-
+            g = buf[py][px] + noise_rng.uniform(-0.015, 0.015)
             g = max(0.0, min(1.0, g))
-            img.setXelA(px, py, g, g, g * 0.96, 1.0)
+            img.setXelA(px, py, g * 1.02, g, g * 0.94, 1.0)
 
+
+def _gen_trench_wall_tex(size=512):
+    """Texture circuit imprimé Death Star pour les murs de la tranchée."""
+    img = PNMImage(size, size)
+    img.makeRgb()
+    rng = random.Random(42)
+    _draw_circuit_tex(img, size, rng,
+                      base_g=0.13,    # fond très sombre
+                      trace_g=0.72,   # traces lumineuses
+                      panel_g=0.28)   # plaques de fond
     tex = Texture("trench_wall")
     tex.load(img)
     tex.setWrapU(Texture.WM_repeat)
@@ -621,25 +694,14 @@ def _gen_trench_wall_tex(size=512):
 
 
 def _gen_trench_floor_tex(size=512):
-    """Texture béton sombre pour le sol de la tranchée."""
+    """Texture circuit imprimé plus sombre pour le sol."""
     img = PNMImage(size, size)
     img.makeRgb()
-    tile = 80
-    seam = 4
-    rng  = random.Random(99)
-
-    for py in range(size):
-        for px in range(size):
-            cx = px % tile;  cy = py % tile
-            dx = min(cx, tile - cx);  dy = min(cy, tile - cy)
-            on_seam = (dx < seam or dy < seam)
-            ci = px // tile;  cj = py // tile
-            cell_v = math.sin(ci * 2.11 + cj * 1.57) * 0.05
-            noise  = rng.uniform(-0.02, 0.02)
-            g = (0.22 + noise) if on_seam else (0.50 + cell_v + noise)
-            g = max(0.0, min(1.0, g))
-            img.setXelA(px, py, g * 1.01, g, g * 0.93, 1.0)
-
+    rng = random.Random(99)
+    _draw_circuit_tex(img, size, rng,
+                      base_g=0.10,
+                      trace_g=0.55,
+                      panel_g=0.22)
     tex = Texture("trench_floor")
     tex.load(img)
     tex.setWrapU(Texture.WM_repeat)
@@ -1109,14 +1171,14 @@ class TrenchDecorGroup:
         return root
 
     def _make_steps(self, size, n_steps, z_center):
-        """Structure en marches : n boîtes empilées, plus large et profonde en bas."""
+        """Marches empilées décroissantes — escalier / piédestal."""
         root = NodePath("dsteps")
         total_h = size * 0.40 * n_steps
         for i in range(n_steps):
-            t = (n_steps - 1 - i) / max(n_steps - 1, 1)   # 1.0 bas → 0.0 haut
-            sw = size * (0.35 + 0.65 * t)   # protrusion
-            sh = size * 0.38                 # hauteur de la marche
-            sd = size * (0.4 + 0.6 * t)     # épaisseur le long du mur
+            t = (n_steps - 1 - i) / max(n_steps - 1, 1)
+            sw = size * (0.35 + 0.65 * t)
+            sh = size * 0.38
+            sd = size * (0.4 + 0.6 * t)
             z_off = -total_h / 2 + i * sh + sh / 2
             box = self._make_box(sw, sh * 0.92, sd, z_center + z_off)
             box.reparentTo(root)
@@ -1124,96 +1186,220 @@ class TrenchDecorGroup:
         return root
 
     def _make_conduit_group(self, rng, z_center, length):
-        """Groupe de 2-4 tuyaux parallèles horizontaux (axe Y) de diamètres variés.
-        Inspiré des gaines/conduits de la tranchée Death Star."""
-        root = NodePath("dconduit")
+        """2-4 tuyaux horizontaux parallèles de diamètres variés."""
+        root  = NodePath("dconduit")
         n_pipes = rng.randint(2, 4)
         z_off = 0.0
-        for i in range(n_pipes):
-            r = rng.uniform(0.06, 0.22)
+        for _ in range(n_pipes):
+            r   = rng.uniform(0.06, 0.22)
             gap = rng.uniform(0.04, 0.12)
-            pipe = self._make_cylinder_h(r, length * rng.uniform(0.7, 1.0), z_center + z_off, segs=6)
+            pipe = self._make_cylinder_h(r, length * rng.uniform(0.7, 1.0),
+                                         z_center + z_off, segs=6)
             pipe.reparentTo(root)
             pipe.setPos(self.inward * (r + 0.04), 0, z_off)
             z_off += r * 2 + gap
         return root
 
+    def _make_antenna(self, rng, z_center):
+        """Antenne : colonne mince + disque en tête + optionnellement un anneau."""
+        root   = NodePath("dantenna")
+        h_col  = rng.uniform(1.2, 3.5)
+        r_col  = rng.uniform(0.04, 0.10)
+        col    = self._make_cylinder_v(r_col, h_col, z_center)
+        col.reparentTo(root)
+        col.setPos(0, 0, 0)
+        # Disque au sommet
+        r_cap = rng.uniform(0.18, 0.45)
+        cap   = self._make_disc(r_cap, r_cap * 0.3, z_center + h_col / 2)
+        cap.reparentTo(root)
+        cap.setPos(0, 0, h_col / 2)
+        # Anneau intermédiaire optionnel
+        if rng.random() < 0.5:
+            r_ring = rng.uniform(0.12, 0.28)
+            ring   = self._make_disc(r_ring, r_ring * 0.25,
+                                     z_center + h_col * rng.uniform(0.3, 0.6))
+            ring.reparentTo(root)
+            ring.setPos(0, 0, h_col * rng.uniform(0.3, 0.6))
+        return root
+
+    def _make_l_bracket(self, rng, z_center):
+        """L-bracket : une boîte horizontale + une boîte verticale connectées en L."""
+        root = NodePath("dlbracket")
+        # Bras horizontal (le long du mur, axe Y)
+        bh_w = rng.uniform(0.25, 0.55)   # épaisseur (X, protrusion)
+        bh_h = rng.uniform(0.20, 0.40)   # hauteur (Z)
+        bh_d = rng.uniform(1.0,  2.5)    # longueur (Y)
+        arm_h = self._make_box(bh_w, bh_h, bh_d, z_center)
+        arm_h.reparentTo(root)
+        arm_h.setPos(0, 0, 0)
+        # Bras vertical (axe Z) connecté à une extrémité
+        bv_w = rng.uniform(0.20, 0.45)
+        bv_h = rng.uniform(0.8,  2.0)
+        bv_d = rng.uniform(0.20, 0.40)
+        y_end = bh_d / 2 * rng.choice([-1, 1])
+        arm_v = self._make_box(bv_w, bv_h, bv_d, z_center + bv_h / 2)
+        arm_v.reparentTo(root)
+        arm_v.setPos(0, y_end, bv_h / 2)
+        return root
+
+    def _make_tower(self, rng, z_center, depth=4):
+        """Tour fractale récursive : boîte de base + éléments plus petits au sommet.
+        depth contrôle la profondeur de récursion (1-3 niveaux pratiques).
+        """
+        root = NodePath("dtower")
+        if depth <= 0:
+            return root
+        size = rng.uniform(0.5, 1.6) * (0.55 ** (3 - depth))
+        bw = size * rng.uniform(0.8, 1.4)
+        bh = size * rng.uniform(0.7, 1.2)
+        bd = size * rng.uniform(0.7, 1.2)
+        box = self._make_box(bw, bh, bd, z_center)
+        box.reparentTo(root)
+        box.setPos(0, 0, 0)
+        if depth > 1 and rng.random() < 0.75:
+            child = self._make_tower(rng, z_center + bh / 2, depth - 1)
+            child.reparentTo(root)
+            child.setPos(rng.uniform(-bw * 0.2, bw * 0.2),
+                         rng.uniform(-bd * 0.2, bd * 0.2),
+                         bh / 2)
+        return root
+
+    def _make_connected_cluster(self, rng, z_center, length):
+        """Groupe connecté : 2 boîtes reliées par un rail + optionnellement une antenne.
+        Principe puzzle — les pièces s'assemblent autour d'un axe commun.
+        """
+        root = NodePath("dcluster")
+        # Rail central
+        r_rail = rng.uniform(0.05, 0.12)
+        rail   = self._make_cylinder_h(r_rail, length, z_center)
+        rail.reparentTo(root)
+
+        # Boîte A à une extrémité
+        bw_a = rng.uniform(0.3, 0.9);  bh_a = rng.uniform(0.4, 1.2);  bd_a = rng.uniform(0.3, 0.7)
+        box_a = self._make_box(bw_a, bh_a, bd_a, z_center)
+        box_a.reparentTo(root)
+        box_a.setPos(0, -length / 2, 0)
+
+        # Boîte B à l'autre extrémité (taille différente)
+        bw_b = rng.uniform(0.25, 0.7);  bh_b = rng.uniform(0.3, 1.0);  bd_b = rng.uniform(0.25, 0.6)
+        box_b = self._make_box(bw_b, bh_b, bd_b, z_center)
+        box_b.reparentTo(root)
+        box_b.setPos(0, length / 2, 0)
+
+        # Nœud intermédiaire optionnel (cylindre vertical)
+        if rng.random() < 0.55:
+            r_node = rng.uniform(0.12, 0.25)
+            h_node = rng.uniform(0.4, 0.9)
+            y_node = rng.uniform(-length * 0.3, length * 0.3)
+            node_v = self._make_cylinder_v(r_node, h_node,
+                                           z_center + rng.uniform(-0.3, 0.3))
+            node_v.reparentTo(root)
+            node_v.setPos(0, y_node, 0)
+
+        return root
+
     # ----------------------------------------------------------
-    # Construction du groupe
+    # Construction du groupe — placement fractal/puzzle
     # ----------------------------------------------------------
 
     def _build(self, rng, depth):
-        """Génère et place aléatoirement les décorations sur ce segment."""
+        """Génère les décorations selon un placement fractal contextuel.
+
+        Hiérarchie :
+          1. Rails de fond (traversent tout le segment — structure globale)
+          2. Conduits groupés (structure secondaire)
+          3. Clusters connectés (pièces qui s'assemblent autour d'un axe)
+          4. Éléments terminaux (boîtes, tours, antennes, disques)
+        """
         half_d = depth / 2.0
 
-        # ── Rails horizontaux (toujours présents, 1-3 rails) ───
+        # ── 1. Rails de fond (1-3, traversent tout le segment) ─
         n_rails = rng.randint(1, 3)
-        z_rail_candidates = [-4.5, -3.0, -1.5, 0.5, 2.0, 3.5, 5.5]
+        z_rail_candidates = [-5.0, -3.5, -2.0, -0.5, 1.0, 2.5, 4.0, 5.5]
         rng.shuffle(z_rail_candidates)
         for ri in range(n_rails):
-            z_rail = z_rail_candidates[ri]
-            r_rail = rng.uniform(0.06, 0.16)
-            rail = self._make_cylinder_h(r_rail, depth * rng.uniform(0.85, 0.98), z_rail)
+            z_r  = z_rail_candidates[ri]
+            r_r  = rng.uniform(0.05, 0.15)
+            rail = self._make_cylinder_h(r_r, depth * rng.uniform(0.88, 1.0), z_r)
             rail.reparentTo(self.node)
-            rail.setPos(self.inward * (r_rail + 0.04), 0, z_rail)
+            rail.setPos(self.inward * (r_r + 0.03), 0, z_r)
 
-        # ── Groupe de conduits (présent ~70% du temps) ─────────
-        if rng.random() < 0.70:
-            z_c = rng.uniform(self.WALL_Z_LO + 1.5, self.WALL_Z_HI - 1.5)
-            cg = self._make_conduit_group(rng, z_c, depth * rng.uniform(0.5, 0.9))
+        # ── 2. Conduits groupés (50% du temps) ─────────────────
+        if rng.random() < 0.50:
+            z_c = rng.uniform(self.WALL_Z_LO + 1.2, self.WALL_Z_HI - 1.2)
+            cg  = self._make_conduit_group(rng, z_c, depth * rng.uniform(0.45, 0.85))
             cg.reparentTo(self.node)
-            cg.setPos(0, rng.uniform(-half_d * 0.4, half_d * 0.4), z_c)
+            cg.setPos(0, rng.uniform(-half_d * 0.35, half_d * 0.35), z_c)
 
-        # ── Éléments individuels ────────────────────────────────
-        shape_pool = [
-            'box', 'box', 'box', 'box', 'box',
-            'cylinder_v', 'cylinder_v', 'cylinder_v',
-            'disc', 'disc',
-            'steps', 'steps',
-            'conduit',
-        ]
-        n_items  = rng.randint(5, 10)
-        placed_y = []
-
-        for _ in range(n_items * 8):
-            if len(placed_y) >= n_items:
+        # ── 3. Clusters connectés (1-3, pièces assemblées) ─────
+        n_clusters = rng.randint(1, 3)
+        cluster_y  = []
+        for _ in range(n_clusters * 6):
+            if len(cluster_y) >= n_clusters:
                 break
+            y   = rng.uniform(-half_d + 1.5, half_d - 1.5)
+            sep = rng.uniform(2.5, 4.5)
+            if any(abs(y - yp) < sep for yp in cluster_y):
+                continue
+            z_c   = rng.uniform(self.WALL_Z_LO + 1.0, self.WALL_Z_HI - 1.0)
+            cl_l  = rng.uniform(1.2, 3.5)
+            cl    = self._make_connected_cluster(rng, z_c, cl_l)
+            cl.reparentTo(self.node)
+            cl.setPos(self.inward * rng.uniform(0.3, 0.7), y, z_c)
+            cluster_y.append(y)
 
-            y = rng.uniform(-half_d + 0.8, half_d - 0.8)
-            min_sep = rng.uniform(0.8, 1.8)
-            if any(abs(y - yp) < min_sep for yp in placed_y):
+        # ── 4. Éléments terminaux ───────────────────────────────
+        terminal_pool = [
+            'tower', 'tower', 'tower',
+            'antenna', 'antenna',
+            'l_bracket', 'l_bracket',
+            'box',
+            'disc',
+            'steps',
+        ]
+        n_items  = rng.randint(3, 7)
+        placed_y = list(cluster_y)   # évite les chevauchements avec clusters
+
+        for _ in range(n_items * 10):
+            if len(placed_y) - len(cluster_y) >= n_items:
+                break
+            y   = rng.uniform(-half_d + 0.6, half_d - 0.6)
+            sep = rng.uniform(0.7, 1.6)
+            if any(abs(y - yp) < sep for yp in placed_y):
                 continue
 
-            z_ctr = rng.uniform(self.WALL_Z_LO + 0.8, self.WALL_Z_HI - 0.8)
-            shape = rng.choice(shape_pool)
+            z_ctr = rng.uniform(self.WALL_Z_LO + 0.6, self.WALL_Z_HI - 0.6)
+            shape = rng.choice(terminal_pool)
 
-            if shape == 'box':
-                bw = rng.uniform(0.3, 2.5)
-                bh = rng.uniform(0.25, 2.2)
-                bd = rng.uniform(0.25, 1.6)
+            if shape == 'tower':
+                sn = self._make_tower(rng, z_ctr, depth=rng.randint(2, 3))
+                protrude = 0.5
+
+            elif shape == 'antenna':
+                sn = self._make_antenna(rng, z_ctr)
+                protrude = 0.08
+
+            elif shape == 'l_bracket':
+                sn = self._make_l_bracket(rng, z_ctr)
+                protrude = 0.3
+
+            elif shape == 'box':
+                bw = rng.uniform(0.3, 2.2)
+                bh = rng.uniform(0.25, 1.8)
+                bd = rng.uniform(0.25, 1.4)
                 sn = self._make_box(bw, bh, bd, z_ctr)
                 protrude = bw / 2
 
-            elif shape == 'cylinder_v':
-                r = rng.uniform(0.15, 0.65)
-                h = rng.uniform(0.5, 3.0)
-                sn = self._make_cylinder_v(r, h, z_ctr)
-                protrude = r
-
             elif shape == 'disc':
-                r   = rng.uniform(0.35, 1.2)
-                th  = rng.uniform(0.15, 0.40)
+                r   = rng.uniform(0.3, 1.0)
+                th  = rng.uniform(0.12, 0.35)
                 sn  = self._make_disc(r, th, z_ctr)
                 protrude = th / 2
 
-            elif shape == 'conduit':
-                sn = self._make_conduit_group(rng, z_ctr, rng.uniform(0.8, 2.5))
-                protrude = 0.3
-
             else:  # steps
-                sz    = rng.uniform(0.7, 2.4)
-                n_st  = rng.randint(2, 4)
-                sn    = self._make_steps(sz, n_st, z_ctr)
+                sz   = rng.uniform(0.7, 2.0)
+                n_st = rng.randint(2, 4)
+                sn   = self._make_steps(sz, n_st, z_ctr)
                 protrude = sz * 0.35
 
             sn.reparentTo(self.node)
