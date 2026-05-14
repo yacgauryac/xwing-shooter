@@ -34,6 +34,7 @@ class LaserBolt:
         self.node.setPos(start_pos)
         self.node.lookAt(start_pos + direction)
         self.node.setLightOff()
+        self.node.setColorScale(2.5, 2.5, 2.5, 1.0)  # Surbrillance — bolts très lumineux
 
     def make_bolt(self, color_back, color_front):
         root = NodePath("bolt_root")
@@ -45,7 +46,7 @@ class LaserBolt:
         v1 = GeomVertexWriter(vdata1, "vertex")
         c1 = GeomVertexWriter(vdata1, "color")
 
-        hx, hy, hz = 0.03, 0.8, 0.03
+        hx, hy, hz = 0.05, 1.8, 0.05      # Plus long (0.8→1.8) et légèrement plus épais
         core_back = Vec4(0.9, 0.8, 0.7, 1)
         core_front = Vec4(1.0, 1.0, 1.0, 1)
 
@@ -76,9 +77,9 @@ class LaserBolt:
         v2 = GeomVertexWriter(vdata2, "vertex")
         c2 = GeomVertexWriter(vdata2, "color")
 
-        gx, gy, gz = 0.09, 0.9, 0.09
-        glow_back = Vec4(color_back.getX(), color_back.getY(), color_back.getZ(), 0.4)
-        glow_front = Vec4(color_front.getX(), color_front.getY(), color_front.getZ(), 0.5)
+        gx, gy, gz = 0.16, 2.2, 0.16      # Halo plus large et plus long
+        glow_back = Vec4(color_back.getX(), color_back.getY(), color_back.getZ(), 0.55)
+        glow_front = Vec4(color_front.getX(), color_front.getY(), color_front.getZ(), 0.75)
 
         corners2 = [
             (-gx, -gy, -gz), (gx, -gy, -gz), (gx, -gy, gz), (-gx, -gy, gz),

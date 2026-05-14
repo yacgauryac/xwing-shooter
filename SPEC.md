@@ -208,7 +208,7 @@ main.py
   - `CHARGE_DURATION` : 0.85→1.2 (charge traverse mieux le joueur avant de freiner)
 
 ### Priorité 1 — Visuel & Feel
-- [ ] **Lasers joueur** : bolts plus longs, plus lumineux, plus agressifs — augmenter scale Y + colorScale + épaisseur rendu
+- [x] **Lasers joueur** : bolts plus longs (hy 0.8→1.8), halo élargi (gy 0.9→2.2), colorScale ×2.5
 - [ ] **Couleur réacteurs** : X-Wing réacteurs bleu-blanc, TIE réacteurs rouge-orangé — vertex color animée (pulse)
 - [ ] **Repère hauteur joueur** : ✅ pyramide HUD 3 barres (vert→rouge, pointe haut/bas selon Z)
 - [ ] **Indicateur altitude ennemis** : disque au sol ou tiret lateral (A choisir)
@@ -225,7 +225,7 @@ main.py
 
 ### Priorité 2 — Gameplay
 - [ ] **Lock torpille Vader** : ✅ passer boss comme cible torpille en phase boss
-- [ ] **Contrôles** : inverser mouse1/mouse2 (torpille=clic gauche, force=clic milieu), ajouter F=Force au clavier
+- [x] **Contrôles** : mouse1=lock/torpille, mouse2=Force molette, F=Force clavier
 - [ ] **Hitbox pendant changement palier** : ennemis difficiles à toucher en transition — élargir hitbox ou ajouter auto-aim léger sur Z pendant transition
 - [ ] **Mode Free Ride** : voler librement sans ennemis, exploration des niveaux
 - [ ] **Mode Multijoueur** : coop ou versus local/réseau (à spécifier)
