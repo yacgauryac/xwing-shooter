@@ -211,7 +211,13 @@ main.py
 - [ ] **Couleur réacteurs** : X-Wing réacteurs bleu-blanc, TIE réacteurs rouge-orangé — vertex color animée (pulse)
 - [ ] **Repère hauteur joueur** : ✅ pyramide HUD 3 barres (vert→rouge, pointe haut/bas selon Z)
 - [ ] **Indicateur altitude ennemis** : disque au sol ou tiret lateral (A choisir)
-- [ ] **Ennemis sur paliers** : Z = -4 / 0 / +4, transitions douces (navmesh simplifié)
+- [x] **Ennemis sur paliers** : Z = -4 / 0 / +4, transitions lerp (TIER_LERP=2.8)
+  - B1 Mirror (TIEFighter) — suit le palier du joueur
+  - B2 Route (TIEInterceptor) — séquence aléatoire calculée au spawn
+  - B3 Kamikaze (TIEInterceptor, ProbeDroid) — fonce en 3D direct
+  - B4 Guard (TIEBomber, AttackBomber) — palier fixe, tir lourd
+  - B5 Flanking (ImperialShuttle) — spawn opposé, converge
+  - B6 Erratic (ProbeDroid) — change aléatoirement toutes 0.8-2.5s
 - [ ] **Bank Vader allégé** : coefficient -dx*6 → -dx*2.5, clamp ±40 → ±20°
 - [ ] **Tourelles L4 Nébuleuse** : retirer les tourelles au sol (niveau espace, incohérent)
 - [ ] **Assets 3D** : tourelles, nouveaux ennemis (Sketchfab CC0/CC-BY, format glb)

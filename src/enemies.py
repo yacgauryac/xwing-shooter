@@ -15,6 +15,22 @@ import os
 
 
 # ============================================================
+# Système de paliers (tiers) — Z = -4, 0, +4
+# ============================================================
+
+TIERS = [-4.0, 0.0, 4.0]       # 3 altitudes fixes
+TIER_LERP = 2.8                 # Vitesse de transition vers le palier cible (u/s)
+
+# Comportements disponibles
+# B1 Mirror   — suit le palier du joueur avec délai
+# B2 Route    — séquence aléatoire de paliers calculée au spawn
+# B3 Kamikaze — fonce directement sur le joueur en 3D
+# B4 Guard    — reste sur son palier de spawn, tire lourd
+# B5 Flanking — spawn au palier opposé du joueur, converge
+# B6 Erratic  — change de palier aléatoirement toutes les 1-3s
+
+
+# ============================================================
 # Tirs ennemis
 # ============================================================
 
@@ -142,6 +158,9 @@ class BaseEnemy:
     TARGET_SIZE = 2.0
     COLOR_BOOST = Vec4(1.8, 1.8, 2.0, 1)
 
+    # Comportements disponibles par sous-classe — override
+    BEHAVIORS = ["B4"]
+
     # Cache de modèles par classe
     _model_cache = {}
 
@@ -152,9 +171,8 @@ class BaseEnemy:
         self.game = game
         self.score_value = self.SCORE_VALUE
 
-        # Drift latéral
-        self.drift_x = random.uniform(-3.0, 3.0)
-        self.drift_z = random.uniform(-1.5, 1.5)
+        # Drift latéral (X seulement — Z géré par les paliers)
+        self.drift_x = random.uniform(-2.5, 2.5)
         self.drift_speed = random.uniform(0.5, 1.5)
         self.drift_time = random.uniform(0, math.pi * 2)
 
@@ -167,6 +185,9 @@ class BaseEnemy:
         self.node = self.load_model()
         self.node.reparentTo(parent_node)
         self.node.setPos(start_pos)
+
+        # Initialise le comportement de palier (après setPos)
+        self._init_behavior()
 
     def load_model(self):
         """Charge le modèle .glb/.gltf (caché) ou fallback procédural."""
@@ -239,38 +260,125 @@ class BaseEnemy:
         box.reparentTo(root)
         return root
 
+    # ------------------------------------------------------------------
+    # Système de paliers
+    # ------------------------------------------------------------------
+
+    def _init_behavior(self):
+        """Choisit un comportement au spawn et initialise l'état de palier."""
+        self.behavior = random.choice(self.BEHAVIORS)
+        self.tier_timer = 0.0
+        self.tier_route = []
+        self.tier_route_idx = 0
+
+        # Palier de spawn
+        if self.behavior == "B5":
+            # Flanking : spawn au palier opposé du joueur
+            pz = 0.0
+            if self.game and hasattr(self.game, 'player') and self.game.player:
+                pz = self.game.player.node.getPos().getZ()
+            player_tier = min(range(3), key=lambda i: abs(TIERS[i] - pz))
+            self.tier_idx = 2 - player_tier   # palier opposé (0↔2, 1→1)
+        else:
+            self.tier_idx = random.randint(0, 2)
+
+        self.target_z = TIERS[self.tier_idx]
+        self.node.setZ(self.target_z)  # snap immédiat au spawn
+
+        if self.behavior == "B2":
+            # Route : séquence 3-5 paliers, commence au palier actuel
+            n = random.randint(3, 5)
+            self.tier_route = [self.tier_idx] + [random.randint(0, 2) for _ in range(n - 1)]
+            self.tier_route_idx = 0
+            self.tier_timer = random.uniform(2.0, 4.5)
+
+        elif self.behavior == "B6":
+            self.tier_timer = random.uniform(0.5, 2.0)
+
+    def _update_tier(self, dt, player_pos):
+        """Met à jour target_z selon le comportement, puis lerp vers target_z."""
+        b = self.behavior
+
+        if b == "B1":
+            # Mirror : suit le palier le plus proche du joueur
+            if player_pos:
+                pz = player_pos.getZ()
+                nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
+                self.target_z = TIERS[nearest]
+
+        elif b == "B2":
+            # Route : avance dans la séquence sur timer
+            self.tier_timer -= dt
+            if self.tier_timer <= 0:
+                self.tier_route_idx = (self.tier_route_idx + 1) % len(self.tier_route)
+                self.target_z = TIERS[self.tier_route[self.tier_route_idx]]
+                self.tier_timer = random.uniform(2.0, 4.5)
+
+        elif b == "B3":
+            # Kamikaze : vise directement le Z du joueur (pas seulement les paliers)
+            if player_pos:
+                self.target_z = player_pos.getZ()
+
+        elif b == "B4":
+            pass  # Garde son palier de spawn — target_z ne change pas
+
+        elif b == "B5":
+            # Flanking : converge vers le palier du joueur une fois lancé
+            if player_pos:
+                pz = player_pos.getZ()
+                nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
+                self.target_z = TIERS[nearest]
+
+        elif b == "B6":
+            # Erratique : changement aléatoire sur timer court
+            self.tier_timer -= dt
+            if self.tier_timer <= 0:
+                self.tier_idx = random.randint(0, 2)
+                self.target_z = TIERS[self.tier_idx]
+                self.tier_timer = random.uniform(0.8, 2.5)
+
+        # Lerp vers target_z
+        cz = self.node.getZ()
+        dz = self.target_z - cz
+        if abs(dz) > 0.02:
+            self.node.setZ(cz + dz * min(1.0, TIER_LERP * dt))
+
+    # ------------------------------------------------------------------
+
     def update(self, dt, player_pos=None):
         if not self.alive:
             return None
+
+        # Comportement de palier (Z)
+        self._update_tier(dt, player_pos)
 
         # Accélération à l'approche du joueur
         if player_pos:
             dist = (self.node.getPos() - player_pos).length()
             if dist < self.CHARGE_DISTANCE:
-                # Plus on est proche, plus on accélère
                 charge_factor = 1.0 - (dist / self.CHARGE_DISTANCE)
                 self.current_speed = self.SPEED_BASE + (self.SPEED_CHARGE - self.SPEED_BASE) * charge_factor
             else:
                 self.current_speed = self.SPEED_BASE
 
-        self.node.setY(self.node.getY() - self.current_speed * dt)
+        if self.behavior == "B3" and player_pos:
+            # Kamikaze : mouvement 3D direct vers le joueur
+            my_pos = self.node.getPos()
+            direction = player_pos - my_pos
+            dist = direction.length()
+            if dist > 0.5:
+                direction.normalize()
+                self.node.setPos(my_pos + direction * self.current_speed * dt)
+        else:
+            # Mouvement normal : avance en Y + drift X
+            self.node.setY(self.node.getY() - self.current_speed * dt)
+            self.drift_time += self.drift_speed * dt
+            self.node.setX(self.node.getX() + math.sin(self.drift_time) * self.drift_x * dt)
 
-        # Drift
-        self.drift_time += self.drift_speed * dt
-        self.node.setX(self.node.getX() + math.sin(self.drift_time) * self.drift_x * dt)
-        self.node.setZ(self.node.getZ() + math.cos(self.drift_time * 0.7) * self.drift_z * dt)
-
-        # Clamp dans la zone jouable
+        # Clamp X (Z clampé par les paliers)
         x = self.node.getX()
-        z = self.node.getZ()
-        if x < -9:
-            self.node.setX(-9)
-        elif x > 9:
-            self.node.setX(9)
-        if z < -6:
-            self.node.setZ(-6)
-        elif z > 6:
-            self.node.setZ(6)
+        if x < -9:   self.node.setX(-9)
+        elif x > 9:  self.node.setX(9)
 
         # Flash de dégât
         if self.flash_timer > 0:
@@ -344,7 +452,8 @@ class BaseEnemy:
 # ============================================================
 
 class TIEFighter(BaseEnemy):
-    """TIE Fighter standard — équilibré."""
+    """TIE Fighter standard — équilibré. Mirror ou garde son palier."""
+    BEHAVIORS = ["B1", "B1", "B4"]   # 2/3 mirror, 1/3 guard
     SPEED_BASE = 18.0
     SPEED_CHARGE = 65.0       # Kamikaze !
     CHARGE_DISTANCE = 100.0   # Accélère de loin
@@ -372,7 +481,8 @@ class TIEFighter(BaseEnemy):
 
 
 class TIEInterceptor(BaseEnemy):
-    """TIE Interceptor — rapide et agressif, tir fréquent."""
+    """TIE Interceptor — rapide et agressif. Route imprévisible ou kamikaze."""
+    BEHAVIORS = ["B2", "B2", "B3"]   # 2/3 route, 1/3 kamikaze
     SPEED_BASE = 25.0
     SPEED_CHARGE = 80.0       # Ultra rapide en charge
     CHARGE_DISTANCE = 110.0   # Fonce de très loin
@@ -389,9 +499,8 @@ class TIEInterceptor(BaseEnemy):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Drift plus agressif
+        # Drift X plus agressif (Z géré par les paliers)
         self.drift_x = random.uniform(-5.0, 5.0)
-        self.drift_z = random.uniform(-3.0, 3.0)
         self.drift_speed = random.uniform(1.5, 3.0)
 
     def create_procedural(self):
@@ -416,7 +525,8 @@ class TIEInterceptor(BaseEnemy):
 
 
 class TIEBomber(BaseEnemy):
-    """TIE Bomber — lent, résistant, tire des salves lourdes."""
+    """TIE Bomber — lent, résistant. Garde son palier et tire lourd."""
+    BEHAVIORS = ["B4", "B4", "B1"]   # Surtout guard, parfois mirror
     SPEED_BASE = 10.0
     SPEED_CHARGE = 30.0       # Même le bomber accélère
     CHARGE_DISTANCE = 80.0
@@ -455,7 +565,8 @@ class TIEBomber(BaseEnemy):
 # ============================================================
 
 class ImperialShuttle(BaseEnemy):
-    """Imperial Shuttle — lent, très résistant, bon loot."""
+    """Imperial Shuttle — lent, très résistant. Flanking tactique."""
+    BEHAVIORS = ["B5", "B5", "B4"]   # Flanking ou garde
     SPEED_BASE = 8.0
     SPEED_CHARGE = 20.0
     CHARGE_DISTANCE = 80.0
@@ -504,7 +615,8 @@ class ImperialShuttle(BaseEnemy):
 
 
 class AttackBomber(BaseEnemy):
-    """Attack Bomber — plus lourd que le TIE Bomber, très résistant, triple tir."""
+    """Attack Bomber — plus lourd que le TIE Bomber, très résistant, triple tir. Garde."""
+    BEHAVIORS = ["B4"]   # Toujours guard — tire depuis une position fixe
     SPEED_BASE = 7.0
     SPEED_CHARGE = 18.0
     CHARGE_DISTANCE = 70.0
@@ -560,7 +672,8 @@ class AttackBomber(BaseEnemy):
 
 
 class ProbeDroid(BaseEnemy):
-    """Probe Droid — rapide, trajectoire erratique, fragile mais agaçant."""
+    """Probe Droid — rapide, erratique, kamikaze. Le plus imprévisible."""
+    BEHAVIORS = ["B6", "B6", "B3"]   # Erratique ou kamikaze
     SPEED_BASE = 22.0
     SPEED_CHARGE = 58.0
     CHARGE_DISTANCE = 130.0
@@ -576,11 +689,9 @@ class ProbeDroid(BaseEnemy):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Dérive très agressive et irrégulière
+        # Drift X très agressif + changement de palier erratique (B6)
         self.drift_x = random.uniform(-8.0, 8.0)
-        self.drift_z = random.uniform(-4.5, 4.5)
         self.drift_speed = random.uniform(3.0, 6.5)
-        # Phase aléatoire pour désynchroniser les droids
         self.drift_time = random.uniform(0, math.pi * 2)
 
     def create_procedural(self):
