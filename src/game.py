@@ -132,10 +132,11 @@ class Game(ShowBase):
         self.accept("r", self.reset_game)
         self.accept("mouse3",    self.start_lock)        # Clic droit — lock torpille
         self.accept("mouse3-up", self.fire_torpedo)      # Relâche droit — fire
-        self.accept("mouse2",    self.activate_force)    # Clic molette — Force ON
-        self.accept("mouse2-up", self.deactivate_force)  # Relâche molette — Force OFF
-        self.accept("f",         self.activate_force)    # F — Force ON
-        self.accept("f-up",      self.deactivate_force)  # F relâché — Force OFF
+        self.accept("mouse2",    self.activate_force)    # Molette — Force ON (hold)
+        self.accept("mouse2-up", self.deactivate_force)  # Molette — Force OFF
+        self.accept("shift",     self.activate_force)    # Shift gauche — Force ON (hold)
+        self.accept("shift-up",  self.deactivate_force)  # Shift — Force OFF
+        self.accept("f",         self.toggle_force)      # F — Force toggle ON/OFF
         self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
@@ -574,6 +575,15 @@ class Game(ShowBase):
     def deactivate_force(self):
         self.force.set_held(False)
 
+    def toggle_force(self):
+        """F = toggle : si actif on coupe, si inactif on active."""
+        if self.game_over:
+            return
+        if self.force.active:
+            self.force.set_held(False)
+        else:
+            self.activate_force()
+
     def _trigger_leaderboard(self):
         """Appelé au game over — lance le flow leaderboard."""
         score = self.spawner.score
@@ -653,7 +663,7 @@ class Game(ShowBase):
         self.taskMgr.remove("game_update")
 
         # Unbind game controls
-        for key in ["m", "r", "mouse3", "mouse3-up", "mouse2", "mouse2-up", "f", "f-up", "escape", "enter"]:
+        for key in ["m", "r", "mouse3", "mouse3-up", "mouse2", "mouse2-up", "shift", "shift-up", "f", "escape", "enter"]:
             self.ignore(key)
         self._lb_unbind_keys()
 
