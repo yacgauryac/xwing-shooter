@@ -47,31 +47,32 @@ class ForceAbility:
         """Jauge suffisante pour activer (seuil minimal 5%)."""
         return self.gauge >= FORCE_MAX * 0.05
 
-    def set_held(self, held):
-        """Appelé par game.py au press/release mouse2."""
-        if held and not self.held:
-            # Début du hold
-            if self.is_ready():
-                self.active = True
-                self._easing_in  = True
-                self._easing_out = False
-                self._ease_timer = 0.0
-        elif not held and self.held:
-            # Fin du hold
-            if self.active:
-                self.active      = False
-                self._easing_in  = False
-                self._easing_out = True
-                self._ease_timer = 0.0
-        self.held = held
-
     def activate(self):
-        """Compatibilité ancienne API — active si possible."""
-        self.set_held(True)
-        return self.active
+        """Active la Force si jauge suffisante."""
+        if not self.is_ready():
+            return False
+        self.active      = True
+        self.held        = True
+        self._easing_in  = True
+        self._easing_out = False
+        self._ease_timer = 0.0
+        return True
 
     def deactivate(self):
-        self.set_held(False)
+        """Désactive la Force."""
+        if self.active:
+            self.active      = False
+            self._easing_in  = False
+            self._easing_out = True
+            self._ease_timer = 0.0
+        self.held = False
+
+    def set_held(self, held):
+        """Compatibilité — redirige vers activate/deactivate."""
+        if held:
+            self.activate()
+        else:
+            self.deactivate()
 
     def update(self, dt):
         """Update drain, recharge et time_scale."""

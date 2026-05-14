@@ -547,30 +547,20 @@ class Game(ShowBase):
         if fired:
             self.sounds.play("explosion")
 
-    def activate_force(self):
-        if self.game_over:
-            return
-        was_active = self.force.active
-        self.force.set_held(True)
-        if self.force.active and not was_active:
-            self.sounds.play("force_activate")
-            # Reset overheat au moment de l'activation
-            if self.lasers.overheated:
-                self.lasers.heat = 0
-                self.lasers.overheated = False
-                self.lasers.cooldown_timer = 0
-
-    def deactivate_force(self):
-        self.force.set_held(False)
-
     def toggle_force(self):
-        """F = toggle : si actif on coupe, si inactif on active."""
+        """Molette = toggle Force ON/OFF."""
         if self.game_over:
             return
         if self.force.active:
-            self.force.set_held(False)
+            self.force.deactivate()
         else:
-            self.activate_force()
+            activated = self.force.activate()
+            if activated:
+                self.sounds.play("force_activate")
+                if self.lasers.overheated:
+                    self.lasers.heat = 0
+                    self.lasers.overheated = False
+                    self.lasers.cooldown_timer = 0
 
     def _trigger_leaderboard(self):
         """Appelé au game over — lance le flow leaderboard."""
