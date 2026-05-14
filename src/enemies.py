@@ -19,15 +19,15 @@ import os
 # ============================================================
 
 TIERS = [-4.0, 0.0, 4.0]       # 3 altitudes fixes
-TIER_LERP = 2.8                 # Vitesse de transition vers le palier cible (u/s)
+TIER_LERP = 1.8                 # Vitesse de transition vers le palier cible (u/s) — lent et fluide
 
 # Comportements disponibles
-# B1 Mirror   — suit le palier du joueur avec délai
-# B2 Route    — séquence aléatoire de paliers calculée au spawn
+# B1 Mirror   — suit le palier du joueur UNE SEULE FOIS avec latence, puis lock
+# B2 Route    — séquence aléatoire de paliers (2-3 transitions max, timers longs)
 # B3 Kamikaze — fonce directement sur le joueur en 3D
-# B4 Guard    — reste sur son palier de spawn, tire lourd
-# B5 Flanking — spawn au palier opposé du joueur, converge
-# B6 Erratic  — change de palier aléatoirement toutes les 1-3s
+# B4 Guard    — reste sur son palier de spawn, ne bouge jamais
+# B5 Flanking — spawn au palier opposé du joueur, converge UNE FOIS puis lock
+# B6 Erratic  — change de palier aléatoirement toutes les 2-4s
 
 
 # ============================================================
@@ -270,6 +270,10 @@ class BaseEnemy:
         self.tier_timer = 0.0
         self.tier_route = []
         self.tier_route_idx = 0
+        self.tier_moved = False          # True = a déjà changé de palier (B1/B5 lock après 1 fois)
+        self.tier_react_delay = 0.0      # Latence avant de réagir au prochain changement
+        self.formation_leader = None     # Référence au leader de formation (optionnel)
+        self.formation_delay  = 0.0      # Délai supplémentaire pour les followers
 
         # Palier de spawn
         if self.behavior == "B5":
@@ -286,56 +290,98 @@ class BaseEnemy:
         self.node.setZ(self.target_z)  # snap immédiat au spawn
 
         if self.behavior == "B2":
-            # Route : séquence 3-5 paliers, commence au palier actuel
-            n = random.randint(3, 5)
-            self.tier_route = [self.tier_idx] + [random.randint(0, 2) for _ in range(n - 1)]
+            # Route courte : 2-3 transitions seulement, timers longs
+            n = random.randint(2, 3)
+            route = [self.tier_idx]
+            for _ in range(n):
+                # Évite de rester sur le même palier deux fois de suite
+                choices = [t for t in range(3) if t != route[-1]]
+                route.append(random.choice(choices))
+            self.tier_route = route
             self.tier_route_idx = 0
-            self.tier_timer = random.uniform(2.0, 4.5)
+            self.tier_moves_left = n         # Nombre de transitions restantes
+            self.tier_timer = random.uniform(4.0, 7.0)  # Long délai avant première transition
+
+        elif self.behavior == "B1":
+            # Mirror : latence avant de réagir au joueur
+            self.tier_react_delay = random.uniform(1.5, 4.0)
+
+        elif self.behavior == "B5":
+            # Flanking : latence avant de converger
+            self.tier_react_delay = random.uniform(1.0, 3.0)
 
         elif self.behavior == "B6":
-            self.tier_timer = random.uniform(0.5, 2.0)
+            self.tier_timer = random.uniform(2.0, 4.0)   # Lent — changements espacés
 
     def _update_tier(self, dt, player_pos):
         """Met à jour target_z selon le comportement, puis lerp vers target_z."""
         b = self.behavior
 
+        # ── Leader de formation : suit le leader avec délai ────────────────
+        if self.formation_leader is not None and self.formation_leader.alive:
+            if self.formation_delay > 0:
+                self.formation_delay -= dt
+            else:
+                self.target_z = self.formation_leader.target_z
+            # Lerp et sortie — le follower ne fait rien d'autre
+            cz = self.node.getZ()
+            dz = self.target_z - cz
+            if abs(dz) > 0.02:
+                self.node.setZ(cz + dz * min(1.0, TIER_LERP * dt))
+            return
+
+        # ── Comportements autonomes ─────────────────────────────────────────
+
         if b == "B1":
-            # Mirror : suit le palier le plus proche du joueur
-            if player_pos:
-                pz = player_pos.getZ()
-                nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
-                self.target_z = TIERS[nearest]
+            # Mirror : attend la latence, bouge UNE FOIS vers le palier du joueur puis lock
+            if not self.tier_moved:
+                if self.tier_react_delay > 0:
+                    self.tier_react_delay -= dt
+                elif player_pos:
+                    pz = player_pos.getZ()
+                    nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
+                    new_z = TIERS[nearest]
+                    if abs(new_z - self.target_z) > 0.1:   # Seulement si palier différent
+                        self.target_z = new_z
+                        self.tier_moved = True               # Lock — ne bougera plus
 
         elif b == "B2":
-            # Route : avance dans la séquence sur timer
-            self.tier_timer -= dt
-            if self.tier_timer <= 0:
-                self.tier_route_idx = (self.tier_route_idx + 1) % len(self.tier_route)
-                self.target_z = TIERS[self.tier_route[self.tier_route_idx]]
-                self.tier_timer = random.uniform(2.0, 4.5)
+            # Route : transitions limitées, timers longs
+            if hasattr(self, 'tier_moves_left') and self.tier_moves_left > 0:
+                self.tier_timer -= dt
+                if self.tier_timer <= 0:
+                    self.tier_route_idx += 1
+                    if self.tier_route_idx < len(self.tier_route):
+                        self.target_z = TIERS[self.tier_route[self.tier_route_idx]]
+                        self.tier_moves_left -= 1
+                        self.tier_timer = random.uniform(5.0, 9.0)  # Long avant prochain
 
         elif b == "B3":
-            # Kamikaze : vise directement le Z du joueur (pas seulement les paliers)
+            # Kamikaze : suit le Z exact du joueur (pas de paliers fixes)
             if player_pos:
                 self.target_z = player_pos.getZ()
 
         elif b == "B4":
-            pass  # Garde son palier de spawn — target_z ne change pas
+            pass  # Garde son palier de spawn — jamais
 
         elif b == "B5":
-            # Flanking : converge vers le palier du joueur une fois lancé
-            if player_pos:
-                pz = player_pos.getZ()
-                nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
-                self.target_z = TIERS[nearest]
+            # Flanking : attend, converge UNE FOIS vers le palier du joueur puis lock
+            if not self.tier_moved:
+                if self.tier_react_delay > 0:
+                    self.tier_react_delay -= dt
+                elif player_pos:
+                    pz = player_pos.getZ()
+                    nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
+                    self.target_z = TIERS[nearest]
+                    self.tier_moved = True
 
         elif b == "B6":
-            # Erratique : changement aléatoire sur timer court
+            # Erratique : changements espacés (2-4s)
             self.tier_timer -= dt
             if self.tier_timer <= 0:
-                self.tier_idx = random.randint(0, 2)
-                self.target_z = TIERS[self.tier_idx]
-                self.tier_timer = random.uniform(0.8, 2.5)
+                choices = [t for t in range(3) if TIERS[t] != self.target_z]
+                self.target_z = TIERS[random.choice(choices)]
+                self.tier_timer = random.uniform(2.0, 4.0)
 
         # Lerp vers target_z
         cz = self.node.getZ()
@@ -1029,7 +1075,7 @@ class EnemySpawner:
             self.next_wave()
 
     def _spawn_next(self):
-        """Spawn le prochain ennemi de la vague."""
+        """Spawn le prochain ennemi de la vague, avec assignation du leader de formation."""
         if self.spawn_index >= len(self.wave_enemies_to_spawn):
             return
 
@@ -1037,6 +1083,22 @@ class EnemySpawner:
         pos = Point3(off_x, self.SPAWN_DEPTH + off_y, off_z)
 
         enemy = enemy_class(self.game.render, pos, game=self.game)
+
+        # Formation leader : cherche le premier ennemi vivant du même type dans la vague courante
+        # Les followers copient le palier du leader avec un délai croissant
+        if enemy.behavior in ("B1", "B4"):  # Mirror et Guard se forment en escadrille
+            leader = None
+            follower_count = 0
+            for e in self.enemies:
+                if type(e) == enemy_class and e.behavior == enemy.behavior and e.alive:
+                    if leader is None:
+                        leader = e
+                    follower_count += 1
+            if leader is not None:
+                enemy.formation_leader = leader
+                # Délai croissant selon le rang dans la formation
+                enemy.formation_delay = follower_count * random.uniform(0.3, 0.6)
+
         self.enemies.append(enemy)
         self.spawn_index += 1
 
