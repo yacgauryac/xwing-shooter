@@ -409,6 +409,7 @@ class Game(ShowBase):
             torpedo_count=self.torpedoes.stock,
             force_pct=self.force.get_gauge_pct(),
             force_active=self.force.active,
+            player_z=self.player.node.getPos().getZ(),
         )
 
         return task.cont

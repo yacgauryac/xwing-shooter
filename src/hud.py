@@ -290,8 +290,8 @@ class HUD:
 
         # ===== ANNONCE / FLASH / GAME OVER =====
         self.wave_announce = OnscreenText(
-            text="", pos=(0, 0.35), scale=0.06,
-            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=50,
+            text="", pos=(-1.15, 0.35), scale=0.05,
+            fg=C_BRIGHT, align=TextNode.ALeft, mayChange=True, sort=50,
             shadow=(0, 0, 0, 0.5),
         )
         self.announce_timer = 0.0
@@ -364,14 +364,22 @@ class HUD:
         self.screen_flash_duration  = 0.15
         self.screen_flash_intensity = 0.35
 
-        # ===== COMBO TEXT =====
+        # ===== COMBO TEXT (côté droit, hors regard central) =====
         self.combo_text = OnscreenText(
-            text="", pos=(0, 0.55), scale=0.09,
+            text="", pos=(1.15, 0.40), scale=0.07,
             fg=Vec4(1.0, 0.55, 0.1, 0.0),
-            align=TextNode.ACenter, mayChange=True, sort=65,
+            align=TextNode.ARight, mayChange=True, sort=65,
             shadow=(0, 0, 0, 0.6),
         )
         self.combo_timer = 0.0
+
+        # ===== PYRAMIDE ALTITUDE =====
+        self.altitude_root = game.aspect2d.attachNewNode("altitude_pyramid")
+        self.altitude_root.setTransparency(TransparencyAttrib.MAlpha)
+        self.altitude_root.setBin("fixed", 48)
+        self.altitude_root.setDepthTest(False)
+        self.altitude_root.setDepthWrite(False)
+        self.altitude_lines = None
 
         # ===== PANNEAU RADIO BOSS (bas d'écran, style HUD militaire) =====
         # Géométrie : rectangle + 2 demi-cercles — affiché uniquement pendant le boss
@@ -473,7 +481,7 @@ class HUD:
     def update(self, dt, score, wave, enemy_count, health, max_health,
                heat_pct=0.0, overheated=False, cooldown_pct=0.0,
                roll=0.0, pitch=0.0, torpedo_count=0,
-               force_pct=0.0, force_active=False):
+               force_pct=0.0, force_active=False, player_z=0.0):
         self.blink_timer += dt
 
         # Score
@@ -582,6 +590,9 @@ class HUD:
             if self.combo_timer <= 0:
                 self.combo_text.setText("")
 
+        # Pyramide altitude
+        self._update_altitude_pyramid(player_z)
+
         # Viseur statique — projection du point de repos du réticule 3D
         self._update_crosshair_static()
 
@@ -618,6 +629,76 @@ class HUD:
         radius = abs(p2d_r.getY() - p2d_c.getY())
         if radius > 1e-4:
             self._crosshair_geom.setScale(radius)
+
+    def _update_altitude_pyramid(self, player_z, bounds_z=8.0):
+        """3 barres horizontales en pyramide indiquant l'altitude.
+        Pointe vers le haut si Z>0, vers le bas si Z<0.
+        Couleur : vert → orange → rouge selon distance au 0.
+        """
+        if self.altitude_lines:
+            self.altitude_lines.removeNode()
+            self.altitude_lines = None
+
+        # Pas d'affichage si proche du 0
+        threshold = 0.4
+        if abs(player_z) < threshold:
+            return
+
+        norm = min(1.0, abs(player_z) / bounds_z)  # 0→1
+
+        # Couleur : vert (0) → orange (0.5) → rouge (1)
+        if norm < 0.5:
+            t = norm * 2.0
+            r, g = t * 0.9, 0.6 - t * 0.2
+        else:
+            t = (norm - 0.5) * 2.0
+            r, g = 0.9 + t * 0.1, 0.4 - t * 0.35
+        alpha = 0.15 + norm * 0.35  # très transparent près du 0, plus visible loin
+        color = Vec4(r, g, 0.05, alpha)
+
+        # Longueurs des 3 barres : grande / moyenne / petite
+        lengths = [0.13, 0.08, 0.04]
+        spacing = 0.045
+
+        # Z>0 → pyramide pointe vers le haut (petite barre en haut)
+        # Z<0 → pyramide pointe vers le bas (petite barre en bas)
+        pointing_up = player_z > 0
+
+        # Position de base : légèrement en-dessous du centre
+        base_x = 0.0
+        base_z = -0.12
+
+        fmt = GeomVertexFormat.getV3c4()
+        vd = GeomVertexData("alt", fmt, Geom.UHDynamic)
+        vw = GeomVertexWriter(vd, "vertex")
+        cw = GeomVertexWriter(vd, "color")
+        lines = GeomLines(Geom.UHDynamic)
+
+        for i, half_len in enumerate([l / 2.0 for l in lengths]):
+            if pointing_up:
+                # grande barre en bas (i=0), petite en haut (i=2)
+                bz = base_z + i * spacing
+            else:
+                # grande barre en haut (i=0), petite en bas (i=2) → inverser
+                bz = base_z + (2 - i) * spacing
+
+            # Couleur dégradée : la barre la plus éloignée du centre est plus transparente
+            fade = 1.0 - i * 0.2
+            bar_col = Vec4(r, g, 0.05, alpha * fade)
+
+            idx_base = i * 2
+            vw.addData3(base_x - half_len, 0, bz); cw.addData4(bar_col)
+            vw.addData3(base_x + half_len, 0, bz); cw.addData4(bar_col)
+            lines.addVertices(idx_base, idx_base + 1)
+
+        geom = Geom(vd)
+        geom.addPrimitive(lines)
+        gn = GeomNode("alt_pyramid")
+        gn.addGeom(geom)
+        np = NodePath(gn)
+        np.reparentTo(self.altitude_root)
+        np.setRenderModeThickness(2.0)
+        self.altitude_lines = np
 
     def _update_attitude(self, roll, pitch):
         if self.attitude_lines:

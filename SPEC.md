@@ -201,8 +201,9 @@ main.py
 
 ### Priorité 1 — Visuel & Feel
 - [ ] **Couleur réacteurs** : X-Wing réacteurs bleu-blanc, TIE réacteurs rouge-orangé — vertex color animée (pulse)
-- [ ] **Repère hauteur joueur** : plan Z=0 semi-transparent + altimètre HUD (A+C)
-- [ ] **Drop-line ennemis** : ✅ ligne verticale ennemi→Z=0 (D)
+- [ ] **Repère hauteur joueur** : ✅ pyramide HUD 3 barres (vert→rouge, pointe haut/bas selon Z)
+- [ ] **Indicateur altitude ennemis** : disque au sol ou tiret lateral (A choisir)
+- [ ] **Ennemis sur paliers** : Z = -4 / 0 / +4, transitions douces (navmesh simplifié)
 - [ ] **Bank Vader allégé** : coefficient -dx*6 → -dx*2.5, clamp ±40 → ±20°
 - [ ] **Tourelles L4 Nébuleuse** : retirer les tourelles au sol (niveau espace, incohérent)
 - [ ] **Assets 3D** : tourelles, nouveaux ennemis (Sketchfab CC0/CC-BY, format glb)
@@ -319,7 +320,9 @@ main.py
 #### `src/hud.py` — Nouveaux éléments
 - **Screen flash blanc** : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s, séparé du flash rouge dégâts
 - **Barre HP boss** : affichée à l'entrée du boss, masquée à sa mort, couleur ORANGE→WARN→DANGER selon HP
-- **Texte combo** : `show_combo(count)` — "xN COMBO!" orange pulsant, 1.5s, animé
+- **Texte combo** : `show_combo(count)` — "xN COMBO!" orange pulsant, 1.5s, animé — déplacé côté droit (1.15, 0.40)
+- **Wave Incoming** : déplacé côté gauche (-1.15, 0.35) hors axe de visée
+- **Pyramide altitude** : 3 barres horizontales décroissantes, vert→rouge selon |Z|, pointe haut si Z>0 bas si Z<0
 
 #### `src/game.py` — Intégration
 - Curseur souris masqué en jeu (`setCursorHidden(True)`), restauré au menu
