@@ -352,12 +352,8 @@ class TorpedoSystem:
         if self.cooldown > 0:
             self.cooldown -= dt
 
-        # Lock-on seulement si clic droit enfoncé
-        if locking and self.stock > 0:
-            self.update_lock(crosshair_x, crosshair_z, enemies)
-        else:
-            if not locking:
-                self.locked_target = None
+        # Lock-on automatique en permanence (ordi de visée)
+        self.update_lock(crosshair_x, crosshair_z, enemies)
 
         # Lock indicator
         lock_pos = None

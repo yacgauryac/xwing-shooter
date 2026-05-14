@@ -131,8 +131,7 @@ class Game(ShowBase):
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
         self.accept("mouse2",    self.toggle_force)       # Molette — Force toggle
-        self.accept("mouse3",    self.start_lock)         # Clic droit — lock torpille
-        self.accept("mouse3-up", self.fire_torpedo)      # Relâche clic droit — fire
+        self.accept("mouse3",    self.fire_torpedo)        # Clic droit — fire torpille
         self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
@@ -268,7 +267,7 @@ class Game(ShowBase):
         torp_targets = [self.boss] if (self.boss and self.boss.alive) else self.spawner.enemies
         self.torpedoes.update(
             dt_player, self.player.crosshair_x, self.player.crosshair_z,
-            torp_targets, locking=self.locking
+            torp_targets
         )
         score_tracker = {"last_kill_pos": None}
         torpedo_score = self.torpedoes.check_impacts(
@@ -540,18 +539,11 @@ class Game(ShowBase):
         self.hud.game_over_text.setText("")
         self.hud.game_over_sub.setText("")
 
-    def start_lock(self):
-        if self.game_over:
-            return
-        self.locking = True
-
     def fire_torpedo(self):
         if self.game_over:
-            self.locking = False
             return
         player_pos = self.player.node.getPos()
         fired = self.torpedoes.fire(player_pos)
-        self.locking = False  # Après fire() pour garder locked_target valide
         if fired:
             self.sounds.play("explosion")
 
@@ -659,7 +651,7 @@ class Game(ShowBase):
         self.taskMgr.remove("game_update")
 
         # Unbind game controls
-        for key in ["m", "r", "mouse2", "mouse3", "mouse3-up", "escape", "enter"]:
+        for key in ["m", "r", "mouse2", "mouse3", "escape", "enter"]:
             self.ignore(key)
         self._lb_unbind_keys()
 
