@@ -199,6 +199,14 @@ main.py
 
 ## Roadmap
 
+### Priorité 0 — Boss trop proche
+- [ ] **Comportement boss** : augmenter distance d'orbite — actuellement `yo=15` (décalage Y devant joueur) dans 3 états HP
+  - `ORBIT_HIGH` (HP>65%) : yo 15→40, rx 9→14, rz 4→7
+  - `ORBIT_MID`  (HP 32-65%) : yo 13→30, rx 7→11, rz 3.2→6
+  - `ORBIT_LOW`  (HP<32%, rage) : yo 11→22, rx 5.5→9
+  - `RETREAT_Y` : 25→55 (retraite plus longue)
+  - `CHARGE_DURATION` : 0.85→1.2 (charge traverse mieux le joueur avant de freiner)
+
 ### Priorité 1 — Visuel & Feel
 - [ ] **Couleur réacteurs** : X-Wing réacteurs bleu-blanc, TIE réacteurs rouge-orangé — vertex color animée (pulse)
 - [ ] **Repère hauteur joueur** : ✅ pyramide HUD 3 barres (vert→rouge, pointe haut/bas selon Z)
