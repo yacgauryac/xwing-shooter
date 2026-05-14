@@ -890,12 +890,13 @@ class TrenchWallPanel:
     PANEL_SIZE = 3.0   # taille d'un panneau en unités monde
     SEAM_W     = 0.06  # épaisseur du joint (fraction de l'unité)
 
-    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, lit=True,
-                 textured=True):
+    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, lit=True):
         self.alive = True
         self.is_right = (x_side > 0)
         self.lit = lit
-        self.textured = textured
+        # Offset UV unique par segment — brise la répétition visuelle
+        self.uv_offset_y = (y_pos * 0.137) % 1.0
+        self.uv_offset_z = (y_pos * 0.073 + abs(x_side) * 0.031) % 1.0
         self.node = self._make_wall(height, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_side, y_pos, 0)
@@ -922,7 +923,6 @@ class TrenchWallPanel:
 
         segs_z = max(4, int(h))
         segs_y = max(4, int(d))
-        # UV : 1 unité monde = 1/6 de tuile → panneau = 6u → texture grande, peu de répétition
         uv_scale = 1.0 / 6.0
 
         for i in range(segs_z + 1):
@@ -931,7 +931,9 @@ class TrenchWallPanel:
                 z = -h / 2 + i * h / segs_z
                 vw.addData3(0, y, z)
                 cw.addData4(self._wall_color(z, h))
-                tw.addData2(y * uv_scale, z * uv_scale)
+                # Offset unique par segment : chaque dalle montre une zone différente
+                tw.addData2(y * uv_scale + self.uv_offset_y,
+                            z * uv_scale + self.uv_offset_z)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_z):
@@ -1021,6 +1023,107 @@ class TrenchFloorPanel:
     def update(self, dt, scroll_speed):
         if not self.alive:
             return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -35:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+class TrenchWallCrest:
+    """Objets qui dépassent du sommet du mur — antennes, blocs, équipements.
+    Brise la ligne droite du bord supérieur et ajoute de la silhouette.
+    """
+
+    CREST_Z = 8.0   # Z sommet des murs
+
+    def __init__(self, parent, x_wall, y_pos, depth=22.0):
+        self.alive = True
+        self.inward = 1.0 if x_wall < 0 else -1.0
+        rng = random.Random(int(round(abs(x_wall) * 211 + y_pos * 53.7)) & 0xFFFFFF)
+        self.node = NodePath("wall_crest")
+        self.node.reparentTo(parent)
+        self.node.setPos(x_wall, y_pos, self.CREST_Z)
+        self.node.setLightOff()
+        self._build(rng, depth)
+
+    def _shade(self, dz):
+        """Gris sombre — éléments en silhouette contre le ciel."""
+        g = max(0.08, min(0.45, 0.25 + dz * 0.04))
+        return Vec4(g * 1.02, g, g * 0.95, 1.0)
+
+    def _make_block(self, w, h, d, dz=0):
+        root  = NodePath("cblock")
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("cb", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+        hx, hy, hz = w/2, d/2, h/2
+        corners = [
+            (-hx,-hy,-hz),( hx,-hy,-hz),( hx, hy,-hz),(-hx, hy,-hz),
+            (-hx,-hy, hz),( hx,-hy, hz),( hx, hy, hz),(-hx, hy, hz),
+        ]
+        for cx2,cy2,cz2 in corners:
+            vw.addData3(cx2, cy2, cz2)
+            cw.addData4(self._shade(dz + cz2))
+        tris = GeomTriangles(Geom.UHStatic)
+        for f in [(0,1,2),(0,2,3),(4,6,5),(4,7,6),(0,4,5),(0,5,1),
+                  (2,6,7),(2,7,3),(0,3,7),(0,7,4),(1,5,6),(1,6,2)]:
+            tris.addVertices(*f)
+        geom = Geom(vdata); geom.addPrimitive(tris)
+        gn = GeomNode("cb_m"); gn.addGeom(geom)
+        NodePath(gn).reparentTo(root)
+        return root
+
+    def _build(self, rng, depth):
+        half_d = depth / 2.0
+        n_items = rng.randint(2, 5)
+        placed  = []
+        for _ in range(n_items * 8):
+            if len(placed) >= n_items:
+                break
+            y = rng.uniform(-half_d + 0.5, half_d - 0.5)
+            if any(abs(y - yp) < rng.uniform(1.0, 2.5) for yp in placed):
+                continue
+            kind = rng.choice(['block','block','block','antenna','antenna'])
+            if kind == 'block':
+                w = rng.uniform(0.4, 2.0)
+                h = rng.uniform(0.3, 1.8)   # dépasse vers le haut
+                d = rng.uniform(0.3, 1.2)
+                obj = self._make_block(w, h, d, h/2)
+                obj.reparentTo(self.node)
+                obj.setPos(self.inward * rng.uniform(0.1, 1.5), y, h/2)
+            else:  # antenna — tige fine très haute
+                r  = rng.uniform(0.04, 0.10)
+                h  = rng.uniform(1.0, 3.5)
+                # cylindre vertical simple
+                root2 = NodePath("cant")
+                fmt2  = GeomVertexFormat.getV3c4()
+                vd2   = GeomVertexData("ant", fmt2, Geom.UHStatic)
+                vw2 = GeomVertexWriter(vd2, "vertex")
+                cw2 = GeomVertexWriter(vd2, "color")
+                segs = 6
+                for zi in (0, h):
+                    for s in range(segs):
+                        a = 2*math.pi*s/segs
+                        vw2.addData3(r*math.cos(a), r*math.sin(a), zi)
+                        cw2.addData4(self._shade(zi))
+                tr2 = GeomTriangles(Geom.UHStatic)
+                for s in range(segs):
+                    b0=s; b1=(s+1)%segs; t0=segs+s; t1=segs+(s+1)%segs
+                    tr2.addVertices(b0,b1,t0); tr2.addVertices(b1,t1,t0)
+                g2 = Geom(vd2); g2.addPrimitive(tr2)
+                gn2 = GeomNode("ant_m"); gn2.addGeom(g2)
+                NodePath(gn2).reparentTo(root2)
+                root2.reparentTo(self.node)
+                root2.setPos(self.inward * rng.uniform(0.2, 2.0), y, 0)
+            placed.append(y)
+
+    def update(self, dt, scroll_speed):
+        if not self.alive: return
         self.node.setY(self.node.getY() - scroll_speed * dt)
         if self.node.getY() < -35:
             self.destroy()
@@ -1331,31 +1434,46 @@ class TrenchDecorGroup:
             box.setPos(0, 0, z_off)
         return root
 
-    def _make_light_spot(self, color):
-        """Petit disque plat collé au mur — lumière orange/rouge/verte."""
-        r  = 0.20
-        th = 0.06
-        root  = NodePath("dlspot")
-        fmt   = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("lspot", fmt, Geom.UHStatic)
-        vw = GeomVertexWriter(vdata, "vertex")
-        cw = GeomVertexWriter(vdata, "color")
-        segs = 10
-        ht = th / 2
-        # Centre face avant
-        vw.addData3(ht, 0, 0);  cw.addData4(color)
-        for s in range(segs):
-            a = 2 * math.pi * s / segs
-            vw.addData3(ht, r * math.cos(a), r * math.sin(a))
-            cw.addData4(color)
-        tris = GeomTriangles(Geom.UHStatic)
-        for s in range(segs):
-            tris.addVertices(0, 1 + s, 1 + (s + 1) % segs)
-        geom = Geom(vdata)
-        geom.addPrimitive(tris)
-        gn = GeomNode("dlspot_m")
-        gn.addGeom(geom)
-        NodePath(gn).reparentTo(root)
+    def _make_light_spot(self, rng, color):
+        """Halo de lumière diffuse collé au mur — gradient centre opaque → bord transparent.
+        Deux couches : noyau brillant (r_core) + halo large (r_halo) semi-transparent.
+        """
+        r_core = rng.uniform(0.12, 0.25)
+        r_halo = r_core * rng.uniform(2.5, 4.5)
+        root   = NodePath("dlspot")
+        root.setTransparency(TransparencyAttrib.MAlpha)
+
+        fmt  = GeomVertexFormat.getV3c4()
+
+        def make_disc(radius, c_center, c_edge):
+            vdata = GeomVertexData("lspot", fmt, Geom.UHStatic)
+            vw = GeomVertexWriter(vdata, "vertex")
+            cw = GeomVertexWriter(vdata, "color")
+            segs = 14
+            vw.addData3(0.01, 0, 0);  cw.addData4(c_center)
+            for s in range(segs):
+                a = 2 * math.pi * s / segs
+                vw.addData3(0.01, radius * math.cos(a), radius * math.sin(a))
+                cw.addData4(c_edge)
+            tris = GeomTriangles(Geom.UHStatic)
+            for s in range(segs):
+                tris.addVertices(0, 1 + s, 1 + (s + 1) % segs)
+            geom = Geom(vdata)
+            geom.addPrimitive(tris)
+            gn = GeomNode("lspot_m")
+            gn.addGeom(geom)
+            np = NodePath(gn)
+            np.setTwoSided(True)
+            np.reparentTo(root)
+
+        # Noyau : couleur pleine
+        c_full  = Vec4(color.getX(), color.getY(), color.getZ(), 1.0)
+        # Halo : même teinte mais transparent sur les bords
+        c_mid   = Vec4(color.getX(), color.getY(), color.getZ(), 0.55)
+        c_fade  = Vec4(color.getX() * 0.6, color.getY() * 0.6, color.getZ() * 0.6, 0.0)
+
+        make_disc(r_core, c_full, c_mid)
+        make_disc(r_halo, c_mid,  c_fade)
         return root
 
     def _make_conduit_group(self, rng, z_center, length):
@@ -1592,7 +1710,7 @@ class TrenchDecorGroup:
             ly = rng.uniform(-half_d + 0.5, half_d - 0.5)
             lz = rng.uniform(self.WALL_Z_LO + 0.8, self.WALL_Z_HI - 0.8)
             col = rng.choice(light_colors)
-            ls  = self._make_light_spot(col)
+            ls  = self._make_light_spot(rng, col)
             ls.reparentTo(self.node)
             # Collé au mur (X=0 car node est déjà à x_wall), orienté vers l'intérieur
             ls.setPos(self.inward * 0.04, ly, lz)
@@ -1731,6 +1849,10 @@ class Environment:
             self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False))
         self.decor_groups.append(TrenchDecorGroup(
             self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True))
+        self.decor_groups.append(TrenchWallCrest(
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d))
+        self.decor_groups.append(TrenchWallCrest(
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
 
     def _spawn_nebula_planet(self):
         """L4 — Nébuleuse colorée en fond."""
