@@ -7,7 +7,7 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomLines, GeomNode,
-    NodePath, TransparencyAttrib,
+    NodePath, TransparencyAttrib, ColorBlendAttrib,
 )
 import random
 import math
@@ -53,37 +53,55 @@ class EnemyBolt:
         self.node.setLightOff()
 
     def make_bolt(self):
+        """Bolt ennemi : noyau blanc + halo vert, blending additif (pas d'enveloppe)."""
         fmt = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("enemy_bolt", fmt, Geom.UHStatic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        col = GeomVertexWriter(vdata, "color")
+        root = NodePath("enemy_bolt_root")
 
-        hx, hy, hz = 0.05, 0.6, 0.05
-        color_back = Vec4(0.1, 0.8, 0.1, 1)
-        color_front = Vec4(0.4, 1.0, 0.4, 1)
+        def make_box(hx, hy, hz, col_back, col_front):
+            vd = GeomVertexData("b", fmt, Geom.UHStatic)
+            v  = GeomVertexWriter(vd, "vertex")
+            c  = GeomVertexWriter(vd, "color")
+            corners = [
+                (-hx,-hy,-hz),(hx,-hy,-hz),(hx,-hy,hz),(-hx,-hy,hz),
+                (-hx, hy,-hz),(hx, hy,-hz),(hx, hy,hz),(-hx, hy,hz),
+            ]
+            for i, corner in enumerate(corners):
+                v.addData3(*corner)
+                c.addData4(col_back if i < 4 else col_front)
+            tris = GeomTriangles(Geom.UHStatic)
+            for f in [(0,1,2),(0,2,3),(4,6,5),(4,7,6),
+                      (0,4,5),(0,5,1),(2,6,7),(2,7,3),
+                      (0,3,7),(0,7,4),(1,5,6),(1,6,2)]:
+                tris.addVertices(*f)
+            geom = Geom(vd); geom.addPrimitive(tris)
+            gn = GeomNode("box"); gn.addGeom(geom)
+            return NodePath(gn)
 
-        corners = [
-            (-hx, -hy, -hz), (hx, -hy, -hz), (hx, -hy, hz), (-hx, -hy, hz),
-            (-hx,  hy, -hz), (hx,  hy, -hz), (hx,  hy, hz), (-hx,  hy, hz),
-        ]
-        colors = [color_back]*4 + [color_front]*4
-        for i, c in enumerate(corners):
-            vertex.addData3(*c)
-            col.addData4(colors[i])
+        def additive(np):
+            np.setAttrib(ColorBlendAttrib.make(
+                ColorBlendAttrib.MAdd, ColorBlendAttrib.OOne, ColorBlendAttrib.OOne))
+            np.setDepthWrite(False)
+            np.setTransparency(TransparencyAttrib.MNone)
 
-        tris = GeomTriangles(Geom.UHStatic)
-        for f in [
-            (0,1,2),(0,2,3),(4,6,5),(4,7,6),
-            (0,4,5),(0,5,1),(2,6,7),(2,7,3),
-            (0,3,7),(0,7,4),(1,5,6),(1,6,2),
-        ]:
-            tris.addVertices(*f)
+        # Noyau blanc
+        core = make_box(0.04, 1.1, 0.04,
+                        Vec4(0.8, 0.9, 0.8, 1),
+                        Vec4(1.0, 1.0, 1.0, 1))
+        core.reparentTo(root); additive(core)
 
-        geom = Geom(vdata)
-        geom.addPrimitive(tris)
-        node = GeomNode("enemy_bolt")
-        node.addGeom(geom)
-        return NodePath(node)
+        # Halo intermédiaire blanc→vert
+        mid = make_box(0.08, 1.3, 0.08,
+                       Vec4(0.3, 0.9, 0.3, 1),
+                       Vec4(0.6, 1.0, 0.6, 1))
+        mid.reparentTo(root); additive(mid)
+
+        # Halo extérieur vert sombre
+        glow = make_box(0.14, 1.5, 0.14,
+                        Vec4(0.05, 0.5, 0.05, 1),
+                        Vec4(0.1,  0.6, 0.1,  1))
+        glow.reparentTo(root); additive(glow)
+
+        return root
 
     def update(self, dt):
         if not self.alive:
