@@ -490,15 +490,26 @@ class HUD:
         # Torpilles
         self.torpedo_count_text.setText(f"{torpedo_count}")
 
-        # Force gauge
-        force_color = Vec4(0.4, 0.5, 1.0, 0.8)
-        if force_pct >= 1.0 and not force_active:
-            # Prêt — pulse
+        # Force gauge — drain continu en usage, recharge aux kills
+        if force_active:
+            # En cours d'utilisation : bleu vif pulsant, drain visible
+            pulse = 0.85 + 0.15 * abs(math.sin(self.blink_timer * 9))
+            force_color = Vec4(0.3 * pulse, 0.5 * pulse, 1.0 * pulse, 1.0)
+            self.force_ready_text.setText("FORCE ACTIVE")
+            self.force_ready_text.setFg(Vec4(0.4, 0.6, 1.0, pulse))
+        elif force_pct >= 1.0:
+            # Jauge pleine — pulse pour signaler
             pulse = 0.7 + 0.3 * abs(math.sin(self.blink_timer * 4))
             force_color = Vec4(0.5 * pulse, 0.6 * pulse, 1.0 * pulse, 1.0)
             self.force_ready_text.setText("USE THE FORCE")
             self.force_ready_text.setFg(Vec4(0.5, 0.6, 1.0, pulse))
+        elif force_pct > 0.05:
+            # Jauge disponible (pas pleine) — bleu atténué, pas de texte
+            force_color = Vec4(0.3, 0.4, 0.85, 0.7)
+            self.force_ready_text.setText("")
         else:
+            # Vide
+            force_color = Vec4(0.15, 0.2, 0.5, 0.4)
             self.force_ready_text.setText("")
         _update_bar(self.force_bar, force_pct, force_color)
 

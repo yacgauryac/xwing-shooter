@@ -132,7 +132,8 @@ class Game(ShowBase):
         self.accept("r", self.reset_game)
         self.accept("mouse3", self.start_lock)
         self.accept("mouse3-up", self.fire_torpedo)
-        self.accept("mouse2", self.activate_force)
+        self.accept("mouse2",    self.activate_force)
+        self.accept("mouse2-up", self.deactivate_force)
         self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
@@ -558,13 +559,18 @@ class Game(ShowBase):
     def activate_force(self):
         if self.game_over:
             return
-        if self.force.activate():
+        was_active = self.force.active
+        self.force.set_held(True)
+        if self.force.active and not was_active:
             self.sounds.play("explosion")  # Son temporaire
-            # Reset overheat si actif
+            # Reset overheat au moment de l'activation
             if self.lasers.overheated:
                 self.lasers.heat = 0
                 self.lasers.overheated = False
                 self.lasers.cooldown_timer = 0
+
+    def deactivate_force(self):
+        self.force.set_held(False)
 
     def _trigger_leaderboard(self):
         """Appelé au game over — lance le flow leaderboard."""
