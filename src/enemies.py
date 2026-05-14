@@ -176,6 +176,10 @@ class BaseEnemy:
         self.drift_speed = random.uniform(0.5, 1.5)
         self.drift_time = random.uniform(0, math.pi * 2)
 
+        # Ease-in vitesse au spawn : part lentement, accélère
+        self.spawn_age = 0.0
+        self.spawn_ease_duration = random.uniform(2.5, 4.5)  # Variée par ennemi
+
         # Tir
         self.fire_timer = random.uniform(1.0, 3.0)
 
@@ -274,6 +278,10 @@ class BaseEnemy:
         self.tier_react_delay = 0.0      # Latence avant de réagir au prochain changement
         self.formation_leader = None     # Référence au leader de formation (optionnel)
         self.formation_delay  = 0.0      # Délai supplémentaire pour les followers
+        # Transition Z — ease-in exponentiel (t=0→1, démarre lent accélère)
+        self.tier_transition_t    = 1.0  # 1.0 = pas de transition en cours
+        self.tier_start_z         = 0.0  # Z au moment où la transition a démarré
+        self.tier_duration        = 2.2  # Durée d'une transition (secondes)
 
         # Palier de spawn
         if self.behavior == "B5":
@@ -288,6 +296,7 @@ class BaseEnemy:
 
         self.target_z = TIERS[self.tier_idx]
         self.node.setZ(self.target_z)  # snap immédiat au spawn
+        self.tier_start_z = self.target_z
 
         if self.behavior == "B2":
             # Route courte : 2-3 transitions seulement, timers longs
@@ -322,12 +331,8 @@ class BaseEnemy:
             if self.formation_delay > 0:
                 self.formation_delay -= dt
             else:
-                self.target_z = self.formation_leader.target_z
-            # Lerp et sortie — le follower ne fait rien d'autre
-            cz = self.node.getZ()
-            dz = self.target_z - cz
-            if abs(dz) > 0.02:
-                self.node.setZ(cz + dz * min(1.0, TIER_LERP * dt))
+                self._set_target_z(self.formation_leader.target_z)
+            self._apply_tier_ease(dt)
             return
 
         # ── Comportements autonomes ─────────────────────────────────────────
@@ -342,7 +347,7 @@ class BaseEnemy:
                     nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
                     new_z = TIERS[nearest]
                     if abs(new_z - self.target_z) > 0.1:   # Seulement si palier différent
-                        self.target_z = new_z
+                        self._set_target_z(new_z)
                         self.tier_moved = True               # Lock — ne bougera plus
 
         elif b == "B2":
@@ -352,14 +357,17 @@ class BaseEnemy:
                 if self.tier_timer <= 0:
                     self.tier_route_idx += 1
                     if self.tier_route_idx < len(self.tier_route):
-                        self.target_z = TIERS[self.tier_route[self.tier_route_idx]]
+                        self._set_target_z(TIERS[self.tier_route[self.tier_route_idx]])
                         self.tier_moves_left -= 1
                         self.tier_timer = random.uniform(5.0, 9.0)  # Long avant prochain
 
         elif b == "B3":
-            # Kamikaze : suit le Z exact du joueur (pas de paliers fixes)
+            # Kamikaze : suit le Z exact du joueur — transition directe sans ease
             if player_pos:
                 self.target_z = player_pos.getZ()
+                self.tier_start_z = self.node.getZ()
+                self.tier_transition_t = 0.0
+                self.tier_duration = 0.6  # Réactif
 
         elif b == "B4":
             pass  # Garde son palier de spawn — jamais
@@ -372,7 +380,7 @@ class BaseEnemy:
                 elif player_pos:
                     pz = player_pos.getZ()
                     nearest = min(range(3), key=lambda i: abs(TIERS[i] - pz))
-                    self.target_z = TIERS[nearest]
+                    self._set_target_z(TIERS[nearest])
                     self.tier_moved = True
 
         elif b == "B6":
@@ -380,14 +388,34 @@ class BaseEnemy:
             self.tier_timer -= dt
             if self.tier_timer <= 0:
                 choices = [t for t in range(3) if TIERS[t] != self.target_z]
-                self.target_z = TIERS[random.choice(choices)]
+                self._set_target_z(TIERS[random.choice(choices)])
                 self.tier_timer = random.uniform(2.0, 4.0)
 
-        # Lerp vers target_z
-        cz = self.node.getZ()
-        dz = self.target_z - cz
-        if abs(dz) > 0.02:
-            self.node.setZ(cz + dz * min(1.0, TIER_LERP * dt))
+        # Applique la transition ease-in
+        self._apply_tier_ease(dt)
+
+    def _set_target_z(self, new_z):
+        """Démarre une nouvelle transition de palier depuis la position courante."""
+        if abs(new_z - self.target_z) < 0.1:
+            return  # Déjà sur ce palier
+        self.tier_start_z = self.node.getZ()
+        self.target_z = new_z
+        self.tier_transition_t = 0.0
+        self.tier_duration = random.uniform(1.8, 2.8)  # Légère variation
+
+    def _apply_tier_ease(self, dt):
+        """Courbe ease-in exponentielle : démarre lentement, accélère vers le palier cible."""
+        if self.tier_transition_t >= 1.0:
+            return  # Transition terminée, position fixe
+
+        self.tier_transition_t = min(1.0, self.tier_transition_t + dt / self.tier_duration)
+        t = self.tier_transition_t
+
+        # Ease-in cubique : t³ — démarre très lentement, accélère fort à la fin
+        t_eased = t * t * t
+
+        new_z = self.tier_start_z + (self.target_z - self.tier_start_z) * t_eased
+        self.node.setZ(new_z)
 
     # ------------------------------------------------------------------
 
@@ -398,14 +426,21 @@ class BaseEnemy:
         # Comportement de palier (Z)
         self._update_tier(dt, player_pos)
 
+        # Ease-in vitesse au spawn : part à 20% de la vitesse, monte en t²
+        self.spawn_age += dt
+        spawn_t = min(1.0, self.spawn_age / self.spawn_ease_duration)
+        spawn_factor = 0.20 + 0.80 * (spawn_t * spawn_t)  # 20% → 100%, ease-in quadratique
+
         # Accélération à l'approche du joueur
         if player_pos:
             dist = (self.node.getPos() - player_pos).length()
             if dist < self.CHARGE_DISTANCE:
                 charge_factor = 1.0 - (dist / self.CHARGE_DISTANCE)
-                self.current_speed = self.SPEED_BASE + (self.SPEED_CHARGE - self.SPEED_BASE) * charge_factor
+                self.current_speed = (self.SPEED_BASE + (self.SPEED_CHARGE - self.SPEED_BASE) * charge_factor) * spawn_factor
             else:
-                self.current_speed = self.SPEED_BASE
+                self.current_speed = self.SPEED_BASE * spawn_factor
+        else:
+            self.current_speed = self.SPEED_BASE * spawn_factor
 
         if self.behavior == "B3" and player_pos:
             # Kamikaze : mouvement 3D direct vers le joueur
