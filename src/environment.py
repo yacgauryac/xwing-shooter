@@ -8,7 +8,7 @@ from panda3d.core import (
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomNode,
     NodePath, TransparencyAttrib,
-    PNMImage, Texture,
+    Fog,
 )
 import random
 import math
@@ -567,34 +567,55 @@ class TrenchWallPanel:
     WALL_X_LEFT  = -13.5
     WALL_X_RIGHT =  13.5
 
-    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0, texture=None):
+    # Panneaux vertex-color : joints fins + gradient Z (haut clair, bas sombre)
+    PANEL_SIZE = 3.0   # taille d'un panneau en unités monde
+    SEAM_W     = 0.06  # épaisseur du joint (fraction de l'unité)
+
+    def __init__(self, parent, x_side, y_pos, height=16.0, depth=22.0):
         self.alive = True
         self.is_right = (x_side > 0)
         self.node = self._make_wall(height, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_side, y_pos, 0)
         self.node.setLightOff()
-        if texture:
-            self.node.setTexture(texture)
+
+    @staticmethod
+    def _wall_color(z, h, y, ps, sw):
+        """Couleur vertex : gradient Z + joints de panneaux."""
+        # Gradient vertical : bas sombre (0.22) → haut clair (0.72)
+        t = (z + h / 2) / h
+        z_grad = 0.22 + 0.50 * t
+
+        # Détection joint : distance au bord de panneau le plus proche
+        pz = z % ps;  py = y % ps
+        dz = min(pz, ps - pz);  dy = min(py, ps - py)
+        bevel = min(1.0, min(dz, dy) / sw)  # 0 = joint, 1 = centre
+
+        # Variation par cellule (pseudo-aléatoire déterministe)
+        pi = int((z + 100) / ps);  pj = int((y + 100) / ps)
+        pv = math.sin(pi * 1.73 + pj * 2.31) * 0.04
+
+        base = (0.44 + pv) * (0.15 + 0.85 * bevel) * z_grad
+        g = max(0.03, min(0.80, base))
+        return Vec4(g * 1.03, g, g * 0.95, 1.0)  # Légèrement chaud
 
     def _make_wall(self, h, d):
         root = NodePath("trench_wall")
-        fmt = GeomVertexFormat.getV3t2()   # vertex + UV
+        fmt  = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("wall", fmt, Geom.UHStatic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        uv     = GeomVertexWriter(vdata, "texcoord")
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
 
-        segs_z = max(4, int(h))    # 1u/seg
-        segs_y = max(4, int(d))    # 1u/seg
+        segs_z = max(4, int(h))
+        segs_y = max(4, int(d))
+        ps, sw = self.PANEL_SIZE, self.SEAM_W
 
         for i in range(segs_z + 1):
             for j in range(segs_y + 1):
                 y = -d / 2 + j * d / segs_y
                 z = -h / 2 + i * h / segs_z
-                vertex.addData3(0, y, z)
-                # 1 répétition texture ≈ 24u → panneau ~3u en monde
-                uv.addData2(j / segs_y * (d / 24.0),
-                            i / segs_z * (h / 24.0))
+                vw.addData3(0, y, z)
+                cw.addData4(self._wall_color(z, h, y, ps, sw))
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_z):
@@ -633,32 +654,38 @@ class TrenchFloorPanel:
 
     FLOOR_Z = -7.5
 
-    def __init__(self, parent, x_center, y_pos, width=28.0, depth=22.0, texture=None):
+    def __init__(self, parent, x_center, y_pos, width=28.0, depth=22.0):
         self.alive = True
         self.node = self._make_floor(width, depth)
         self.node.reparentTo(parent)
         self.node.setPos(x_center, y_pos, self.FLOOR_Z)
         self.node.setLightOff()
-        if texture:
-            self.node.setTexture(texture)
 
     def _make_floor(self, w, d):
         root = NodePath("trench_floor")
-        fmt = GeomVertexFormat.getV3t2()
+        fmt  = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("floor", fmt, Geom.UHStatic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        uv     = GeomVertexWriter(vdata, "texcoord")
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
 
         segs_x = max(4, int(w / 2))
         segs_y = max(4, int(d / 2))
+        ps, sw = 4.0, 0.08   # panneaux larges sur le sol
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
-                vertex.addData3(x, y, 0)
-                uv.addData2(j / segs_y * (d / 24.0),
-                            i / segs_x * (w / 24.0))
+                vw.addData3(x, y, 0)
+                # Joints + légère variation
+                px = x % ps;  py = y % ps
+                dx = min(px, ps - px);  dy_v = min(py, ps - py)
+                bevel = min(1.0, min(dx, dy_v) / sw)
+                pi = int((x + 100) / ps);  pj = int((y + 100) / ps)
+                pv = math.sin(pi * 1.73 + pj * 2.31) * 0.03
+                base = (0.28 + pv) * (0.12 + 0.88 * bevel)
+                g = max(0.02, min(0.45, base))
+                cw.addData4(g * 1.02, g, g * 0.94, 1.0)
 
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
@@ -697,7 +724,7 @@ class TrenchSurfacePanel:
     WALL_HALF  = 13.5     # bord intérieur = bord du mur
     SURFACE_W  = 110.0    # largeur depuis le mur vers l'extérieur (couvre le FOV 60° à Y=200)
 
-    def __init__(self, parent, side, y_pos, depth=22.0, texture=None):
+    def __init__(self, parent, side, y_pos, depth=22.0):
         """side: -1 gauche, +1 droite."""
         self.alive = True
         self.node = self._make_surface(depth)
@@ -705,30 +732,34 @@ class TrenchSurfacePanel:
         x_center = side * (self.WALL_HALF + self.SURFACE_W / 2.0)
         self.node.setPos(x_center, y_pos, self.SURFACE_Z)
         self.node.setLightOff()
-        if texture:
-            self.node.setTexture(texture)
 
     def _make_surface(self, d):
         root = NodePath("trench_surface")
         w = self.SURFACE_W
-        fmt = GeomVertexFormat.getV3t2()
+        fmt  = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("surface", fmt, Geom.UHStatic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        uv     = GeomVertexWriter(vdata, "texcoord")
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
 
         segs_x = max(8, int(w / 8))
         segs_y = max(4, int(d / 4))
+        ps, sw = 3.0, 0.06
 
         for i in range(segs_x + 1):
             for j in range(segs_y + 1):
                 x = -w / 2 + i * w / segs_x
                 y = -d / 2 + j * d / segs_y
-                vertex.addData3(x, y, 0)
-                uv.addData2(j / segs_y * (d / 24.0),
-                            i / segs_x * (w / 24.0))
+                vw.addData3(x, y, 0)
+                px = x % ps;  py = y % ps
+                dx = min(px, ps - px);  dy_v = min(py, ps - py)
+                bevel = min(1.0, min(dx, dy_v) / sw)
+                pi = int((x + 200) / ps);  pj = int((y + 100) / ps)
+                pv = math.sin(pi * 1.73 + pj * 2.31) * 0.04
+                base = (0.38 + pv) * (0.14 + 0.86 * bevel)
+                g = max(0.03, min(0.65, base))
+                cw.addData4(g * 1.03, g, g * 0.95, 1.0)
 
-        # Face visible depuis le BAS (caméra sous Z=8.2)
-        # Winding CCW vu d'en bas → a, a+1, b / a+1, b+1, b
+        # Face visible depuis le BAS (winding CCW vu d'en bas)
         tris = GeomTriangles(Geom.UHStatic)
         for i in range(segs_x):
             for j in range(segs_y):
@@ -1089,6 +1120,9 @@ class Environment:
         self.game = game
         self.level = level
 
+        # Nettoie tout brouillard d'un niveau précédent
+        game.render.clearFog()
+
         AsteroidModelCache.load(game)
 
         # Listes communes
@@ -1143,9 +1177,15 @@ class Environment:
             y += d
 
     def _init_trench(self):
-        """L3 — Tranchée continue, step exact = pas de Z-fighting."""
-        self._trench_wall_tex  = self._gen_trench_wall_texture()
-        self._trench_floor_tex = self._gen_trench_floor_texture()
+        """L3 — Tranchée continue + brouillard linéaire pour masquer le clipping."""
+        # Brouillard : fond gris sombre, onset 90u → opaque 215u
+        bg = (0.04, 0.04, 0.05)
+        fog = Fog("trench_fog")
+        fog.setColor(*bg)
+        fog.setLinearRange(90.0, 215.0)
+        self.game.render.setFog(fog)
+        self._trench_fog = fog
+
         d = self.TILE_DEPTH
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
@@ -1153,139 +1193,21 @@ class Environment:
             y += d
 
     def _spawn_trench_row(self, y):
-        d  = self.TILE_DEPTH
-        wt = getattr(self, '_trench_wall_tex',  None)
-        ft = getattr(self, '_trench_floor_tex', None)
+        d = self.TILE_DEPTH
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, texture=wt))
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d))
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, texture=wt))
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
         self.floor_panels.append(TrenchFloorPanel(
-            self.game.render, 0, y, depth=d, texture=ft))
+            self.game.render, 0, y, depth=d))
         self.surface_panels.append(TrenchSurfacePanel(
-            self.game.render, -1, y, depth=d, texture=wt))
+            self.game.render, -1, y, depth=d))
         self.surface_panels.append(TrenchSurfacePanel(
-            self.game.render, +1, y, depth=d, texture=wt))
+            self.game.render, +1, y, depth=d))
         self.decor_groups.append(TrenchDecorGroup(
             self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d))
         self.decor_groups.append(TrenchDecorGroup(
             self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
-
-    # ----------------------------------------------------------
-    # Génération de textures procédurales — panneaux Death Star
-    # ----------------------------------------------------------
-
-    @staticmethod
-    def _trench_tex_setup(tex):
-        tex.setWrapU(Texture.WM_repeat)
-        tex.setWrapV(Texture.WM_repeat)
-        tex.setMagfilter(Texture.FT_linear)
-        tex.setMinfilter(Texture.FT_linear_mipmap_linear)
-        return tex
-
-    @staticmethod
-    def _draw_panels(img, panels, cell, seam, bevel, rng, base_val, base_range):
-        """Dessine une liste de panneaux (gx, gy, pw, ph) sur un PNMImage."""
-        SIZE = img.getXSize()
-        for gx, gy, pw, ph in panels:
-            x0 = gx * cell + seam
-            x1 = (gx + pw) * cell - seam
-            y0 = gy * cell + seam
-            y1 = (gy + ph) * cell - seam
-            if x1 <= x0 or y1 <= y0:
-                continue
-            pv   = math.sin(gx * 1.73 + gy * 2.31) * base_range
-            base = max(base_val - base_range, min(base_val + base_range, base_val + pv))
-            for py in range(max(0, y0), min(SIZE, y1)):
-                for px in range(max(0, x0), min(SIZE, x1)):
-                    d_edge = min(px - x0, x1 - 1 - px, py - y0, y1 - 1 - py)
-                    if d_edge < bevel:
-                        t = d_edge / bevel
-                        # Bevel fort : 40% → 100% brightness (faux relief visible)
-                        g = base * (0.40 + 0.60 * t)
-                    else:
-                        g = base
-                    img.setXel(px, py, g * 1.005, g, g * 0.975)
-
-    @staticmethod
-    def _build_panel_layout(cells, rng, allow_tall=True):
-        """Construit un layout 2D de panneaux variés (1×1, 2×1, 1×2, 2×2)."""
-        used = [[False] * cells for _ in range(cells)]
-        panels = []
-        for gy in range(cells):
-            for gx in range(cells):
-                if used[gy][gx]:
-                    continue
-                # Options : 1×1 toujours, 2×1, 1×2, 2×2 si la place est libre
-                can_w2 = (gx + 1 < cells and not used[gy][gx + 1])
-                can_h2 = allow_tall and (gy + 1 < cells and not used[gy + 1][gx])
-                can_2x2 = (can_w2 and can_h2
-                           and not used[gy + 1][gx + 1])
-                opts = [(1, 1)] * 3
-                if can_w2:  opts += [(2, 1)] * 2
-                if can_h2:  opts += [(1, 2)] * 2
-                if can_2x2: opts += [(2, 2)]
-                pw, ph = rng.choice(opts)
-                for dy in range(ph):
-                    for dx in range(pw):
-                        used[gy + dy][gx + dx] = True
-                panels.append((gx, gy, pw, ph))
-        return panels
-
-    def _gen_trench_wall_texture(self):
-        """Texture mur Death Star 256×256 — panneaux 2D variés, bevel fort."""
-        path = "assets/textures/trench_wall.jpg"
-        if os.path.exists(path):
-            try:
-                tex = self.game.loader.loadTexture(path)
-                if tex:
-                    return self._trench_tex_setup(tex)
-            except Exception:
-                pass
-
-        SIZE, CELLS = 256, 8
-        cell = SIZE // CELLS   # 32 px/cellule
-        img  = PNMImage(SIZE, SIZE)
-        # Fond joint
-        for y in range(SIZE):
-            for x in range(SIZE):
-                img.setXel(x, y, 0.14, 0.135, 0.13)
-
-        rng    = random.Random(12345)
-        layout = self._build_panel_layout(CELLS, rng, allow_tall=True)
-        self._draw_panels(img, layout, cell, seam=4, bevel=6,
-                          rng=rng, base_val=0.48, base_range=0.08)
-
-        tex = Texture("trench_wall")
-        tex.load(img)
-        return self._trench_tex_setup(tex)
-
-    def _gen_trench_floor_texture(self):
-        """Texture sol Death Star 256×256 — dalles larges, bevel fort."""
-        path = "assets/textures/trench_floor.jpg"
-        if os.path.exists(path):
-            try:
-                tex = self.game.loader.loadTexture(path)
-                if tex:
-                    return self._trench_tex_setup(tex)
-            except Exception:
-                pass
-
-        SIZE, CELLS = 256, 6    # 6×6 → dalles plus larges que les murs
-        cell = SIZE // CELLS    # 42 px/cellule
-        img  = PNMImage(SIZE, SIZE)
-        for y in range(SIZE):
-            for x in range(SIZE):
-                img.setXel(x, y, 0.11, 0.105, 0.10)
-
-        rng    = random.Random(54321)
-        layout = self._build_panel_layout(CELLS, rng, allow_tall=False)
-        self._draw_panels(img, layout, cell, seam=5, bevel=7,
-                          rng=rng, base_val=0.34, base_range=0.06)
-
-        tex = Texture("trench_floor")
-        tex.load(img)
-        return self._trench_tex_setup(tex)
 
     def _spawn_nebula_planet(self):
         """L4 — Nébuleuse colorée en fond."""

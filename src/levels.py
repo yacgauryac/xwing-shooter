@@ -33,7 +33,7 @@ LEVELS = {
         "name": "DEATH STAR TRENCH",
         "waves": 7,
         "intro_text": "Stay on target... USE THE FORCE!",
-        "bg_color": (0.22, 0.05, 0.03),    # Lueur rouge exhaust port (visible au fond de la tranchée)
+        "bg_color": (0.04, 0.04, 0.05),    # Gris sombre — tranchée Death Star
         "description": "Probe Droids + Attack Bombers + Turrets",
     },
     4: {
