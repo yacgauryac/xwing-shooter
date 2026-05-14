@@ -716,7 +716,6 @@ class HUD:
         bz = pos.getZ() + 1.5   # au-dessus du vaisseau
         by = pos.getY()
 
-        self._heat_bar_root_pos = Vec3(bx, by, bz)
         self.heat_bar_root.setPos(bx, by, bz)
         self.heat_bar_root.lookAt(self.game.camera)
 
