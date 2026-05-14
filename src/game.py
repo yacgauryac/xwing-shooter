@@ -130,13 +130,9 @@ class Game(ShowBase):
         self.accept("escape", self._game_escape)
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
-        self.accept("mouse3",    self.start_lock)        # Clic droit — lock torpille
-        self.accept("mouse3-up", self.fire_torpedo)      # Relâche droit — fire
-        self.accept("mouse2",    self.activate_force)    # Molette — Force ON (hold)
-        self.accept("mouse2-up", self.deactivate_force)  # Molette — Force OFF
-        self.accept("shift",     self.activate_force)    # Shift gauche — Force ON (hold)
-        self.accept("shift-up",  self.deactivate_force)  # Shift — Force OFF
-        self.accept("f",         self.toggle_force)      # F — Force toggle ON/OFF
+        self.accept("mouse2",    self.start_lock)         # Molette — lock torpille
+        self.accept("mouse2-up", self.fire_torpedo)      # Relâche molette — fire
+        self.accept("mouse3",    self.toggle_force)      # Clic droit — Force toggle
         self.accept("enter", self._lb_key, ["enter"])
 
     def setup_window(self):
@@ -663,7 +659,7 @@ class Game(ShowBase):
         self.taskMgr.remove("game_update")
 
         # Unbind game controls
-        for key in ["m", "r", "mouse3", "mouse3-up", "mouse2", "mouse2-up", "shift", "shift-up", "f", "escape", "enter"]:
+        for key in ["m", "r", "mouse2", "mouse2-up", "mouse3", "escape", "enter"]:
             self.ignore(key)
         self._lb_unbind_keys()
 
