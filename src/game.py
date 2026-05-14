@@ -179,6 +179,14 @@ class Game(ShowBase):
         fill_np.setHpr(-120, 30, 0)
         self.render.setLight(fill_np)
 
+        # Lumière frontale — éclaire les faces qui arrivent vers le joueur
+        # (astéroïdes, ennemis de face) depuis derrière la caméra
+        front = DirectionalLight("front")
+        front.setColor(Vec4(0.35, 0.38, 0.45, 1))
+        front_np = self.render.attachNewNode(front)
+        front_np.setHpr(0, 0, 0)   # pointe dans +Y = éclaire les faces -Y
+        self.render.setLight(front_np)
+
     def update(self, task):
         """Boucle de jeu principale."""
         dt = globalClock.getDt()

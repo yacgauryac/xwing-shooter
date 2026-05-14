@@ -71,30 +71,44 @@ class LaserBolt:
         node1.addGeom(geom1)
         NodePath(node1).reparentTo(root)
 
-        # --- Halo coloré (plus gros, semi-transparent) ---
+        # --- Halo coloré — 2 quads croisés avec dégradé alpha center→edge ---
+        # Chaque quad : colonne gauche alpha=0, colonne centre alpha=max, colonne droite alpha=0
+        # Quad 1 dans le plan XY (fade en X), Quad 2 dans le plan ZY (fade en Z)
+        gx, gy = 0.22, 1.65
+        r, g, b = color_back.getX(), color_back.getY(), color_back.getZ()
+        rf, gf, bf = color_front.getX(), color_front.getY(), color_front.getZ()
+
+        c_edge_b  = Vec4(r,  g,  b,  0.0)   # bord arrière  — transparent
+        c_mid_b   = Vec4(r,  g,  b,  0.55)  # centre arrière — opaque
+        c_edge_f  = Vec4(rf, gf, bf, 0.0)   # bord avant    — transparent
+        c_mid_f   = Vec4(rf, gf, bf, 0.65)  # centre avant  — opaque
+
         vdata2 = GeomVertexData("glow", fmt, Geom.UHStatic)
         v2 = GeomVertexWriter(vdata2, "vertex")
         c2 = GeomVertexWriter(vdata2, "color")
 
-        gx, gy, gz = 0.16, 1.6, 0.16
-        glow_back  = Vec4(color_back.getX(),  color_back.getY(),  color_back.getZ(),  0.4)
-        glow_front = Vec4(color_front.getX(), color_front.getY(), color_front.getZ(), 0.5)
+        def add_cross_quad(ax, az):
+            """Quad avec 3 colonnes : (-a,0), (0,0), (+a,0) en XZ."""
+            # 6 sommets : back-left, back-center, back-right, front-left, front-center, front-right
+            v2.addData3(-ax, -gy, -az); c2.addData4(c_edge_b)   # 0
+            v2.addData3(  0, -gy,   0); c2.addData4(c_mid_b)    # 1
+            v2.addData3( ax, -gy,  az); c2.addData4(c_edge_b)   # 2
+            v2.addData3(-ax,  gy, -az); c2.addData4(c_edge_f)   # 3
+            v2.addData3(  0,  gy,   0); c2.addData4(c_mid_f)    # 4
+            v2.addData3( ax,  gy,  az); c2.addData4(c_edge_f)   # 5
 
-        corners2 = [
-            (-gx, -gy, -gz), (gx, -gy, -gz), (gx, -gy, gz), (-gx, -gy, gz),
-            (-gx,  gy, -gz), (gx,  gy, -gz), (gx,  gy, gz), (-gx,  gy, gz),
-        ]
-        for i, corner in enumerate(corners2):
-            v2.addData3(*corner)
-            c2.addData4(glow_back if i < 4 else glow_front)
+        add_cross_quad(gx, 0)    # Quad 1 : fade en X
+        add_cross_quad(0, gx)    # Quad 2 : fade en Z
 
         tris2 = GeomTriangles(Geom.UHStatic)
-        for f in [
-            (0,1,2),(0,2,3),(4,6,5),(4,7,6),
-            (0,4,5),(0,5,1),(2,6,7),(2,7,3),
-            (0,3,7),(0,7,4),(1,5,6),(1,6,2),
-        ]:
-            tris2.addVertices(*f)
+        for base in [0, 6]:      # un bloc de 6 sommets par quad
+            b0 = base
+            # Triangle gauche-centre (back→front)
+            tris2.addVertices(b0+0, b0+1, b0+4)
+            tris2.addVertices(b0+0, b0+4, b0+3)
+            # Triangle centre-droit (back→front)
+            tris2.addVertices(b0+1, b0+2, b0+5)
+            tris2.addVertices(b0+1, b0+5, b0+4)
 
         geom2 = Geom(vdata2)
         geom2.addPrimitive(tris2)
@@ -103,6 +117,7 @@ class LaserBolt:
         glow_np = NodePath(node2)
         glow_np.reparentTo(root)
         glow_np.setTransparency(TransparencyAttrib.MAlpha)
+        glow_np.setTwoSided(True)
 
         return root
 
