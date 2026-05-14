@@ -667,20 +667,20 @@ class HUD:
             self._crosshair_geom.setScale(radius)
 
     def _build_heat_bar_3d(self):
-        """Barre de chaleur laser 3D — fine ligne horizontale au-dessus du vaisseau."""
-        from panda3d.core import GeomLines
-        BAR_W = 2.2   # largeur totale
-        BAR_H = 0.10  # épaisseur
+        """Barre de chaleur laser 3D — fine barre au-dessus du vaisseau."""
+        BAR_W = 1.8
+        BAR_H = 0.12
 
-        # Fond (toujours visible, très sombre)
         fmt = GeomVertexFormat.getV3c4()
+
+        # Fond sombre
         vd = GeomVertexData("hbg", fmt, Geom.UHStatic)
         v = GeomVertexWriter(vd, "vertex"); c = GeomVertexWriter(vd, "color")
-        col_bg = Vec4(0.15, 0.06, 0.02, 0.5)
-        v.addData3(-BAR_W/2, 0, 0);       c.addData4(col_bg)
-        v.addData3( BAR_W/2, 0, 0);       c.addData4(col_bg)
-        v.addData3( BAR_W/2, 0, BAR_H);   c.addData4(col_bg)
-        v.addData3(-BAR_W/2, 0, BAR_H);   c.addData4(col_bg)
+        col_bg = Vec4(0.08, 0.04, 0.01, 0.6)
+        v.addData3(0,     0, 0);      c.addData4(col_bg)
+        v.addData3(BAR_W, 0, 0);      c.addData4(col_bg)
+        v.addData3(BAR_W, 0, BAR_H);  c.addData4(col_bg)
+        v.addData3(0,     0, BAR_H);  c.addData4(col_bg)
         tris = GeomTriangles(Geom.UHStatic)
         tris.addVertices(0,1,2); tris.addVertices(0,2,3)
         g = Geom(vd); g.addPrimitive(tris)
@@ -688,14 +688,16 @@ class HUD:
         bg = NodePath(gn)
         bg.reparentTo(self.heat_bar_root)
         bg.setTransparency(TransparencyAttrib.MAlpha)
-        self._heat_bar_bg = bg
 
-        # Remplissage (largeur dynamique)
-        vd2 = GeomVertexData("hbf", fmt, Geom.UHDynamic)
+        # Fill pleine largeur — on scale en X pour simuler le remplissage
+        vd2 = GeomVertexData("hbf", fmt, Geom.UHStatic)
         v2 = GeomVertexWriter(vd2, "vertex"); c2 = GeomVertexWriter(vd2, "color")
-        col_fill = Vec4(0.9, 0.55, 0.1, 0.85)
-        for _ in range(4): v2.addData3(0,0,0); c2.addData4(col_fill)
-        tris2 = GeomTriangles(Geom.UHDynamic)
+        col_f = Vec4(0.4, 0.9, 0.2, 0.9)
+        v2.addData3(0,     0, 0);      c2.addData4(col_f)
+        v2.addData3(BAR_W, 0, 0);      c2.addData4(col_f)
+        v2.addData3(BAR_W, 0, BAR_H);  c2.addData4(col_f)
+        v2.addData3(0,     0, BAR_H);  c2.addData4(col_f)
+        tris2 = GeomTriangles(Geom.UHStatic)
         tris2.addVertices(0,1,2); tris2.addVertices(0,2,3)
         g2 = Geom(vd2); g2.addPrimitive(tris2)
         gn2 = GeomNode("hbf"); gn2.addGeom(g2)
@@ -703,101 +705,84 @@ class HUD:
         fill.reparentTo(self.heat_bar_root)
         fill.setTransparency(TransparencyAttrib.MAlpha)
         self._heat_bar_fill = fill
-        self._heat_bar_vdata = vd2
         self._heat_bar_w = BAR_W
-        self._heat_bar_h = BAR_H
 
     def _update_heat_bar_3d(self, player_node, heat_pct, overheated, blink_timer):
         """Met à jour la barre de chaleur près du vaisseau."""
         if not player_node or player_node.isEmpty():
             return
         pos = player_node.getPos()
-        bx = pos.getX() - self._heat_bar_w / 2
-        bz = pos.getZ() + 1.5   # au-dessus du vaisseau
-        by = pos.getY()
-
-        self.heat_bar_root.setPos(bx, by, bz)
+        # Centré au-dessus du vaisseau
+        self.heat_bar_root.setPos(
+            pos.getX() - self._heat_bar_w / 2,
+            pos.getY(),
+            pos.getZ() + 1.3
+        )
         self.heat_bar_root.lookAt(self.game.camera)
 
-        # Couleur selon chaleur
+        # Scale X = niveau de chaleur
+        pct = 1.0 if overheated else max(0.0, heat_pct)
+        self._heat_bar_fill.setScale(pct, 1, 1)
+
+        # Couleur
         if overheated:
             pulse = abs(math.sin(blink_timer * 10))
-            col = Vec4(1.0, 0.1 + 0.1*pulse, 0.0, 0.9)
+            self._heat_bar_fill.setColorScale(1.0, 0.05 + 0.1*pulse, 0.0, 1.0)
         elif heat_pct > 0.75:
-            col = Vec4(1.0, 0.25, 0.0, 0.85)
+            self._heat_bar_fill.setColorScale(1.0, 0.25, 0.0, 1.0)
         elif heat_pct > 0.45:
-            col = Vec4(1.0, 0.55, 0.05, 0.8)
+            self._heat_bar_fill.setColorScale(1.0, 0.6, 0.05, 1.0)
         else:
-            col = Vec4(0.4, 0.9, 0.2, 0.75)
-
-        # Redessine le fill
-        BAR_W = self._heat_bar_w
-        BAR_H = self._heat_bar_h
-        fill_w = BAR_W * (heat_pct if not overheated else 1.0)
-        vd = self._heat_bar_vdata
-        vd.modifyArray(0).modifyHandle().copyDataFrom(b'')  # reset
-        v = GeomVertexWriter(vd, "vertex")
-        c = GeomVertexWriter(vd, "color")
-        v.addData3(0,        0, 0);       c.addData4(col)
-        v.addData3(fill_w,   0, 0);       c.addData4(col)
-        v.addData3(fill_w,   0, BAR_H);   c.addData4(col)
-        v.addData3(0,        0, BAR_H);   c.addData4(col)
+            self._heat_bar_fill.setColorScale(0.4, 1.0, 0.2, 1.0)
 
     def _build_torp_pips(self, max_count):
-        """Crée les pips torpilles (petits losanges 3D sous le vaisseau)."""
+        """Crée les pips torpilles (petits tirets sous le vaisseau)."""
         from panda3d.core import GeomLines
-        for np in self._torp_pips:
-            np.removeNode()
+        for p in self._torp_pips:
+            p.removeNode()
         self._torp_pips = []
 
-        s = 0.18   # taille du losange
-        col = Vec4(0.85, 0.55, 0.1, 0.9)
-        col_dim = Vec4(0.25, 0.15, 0.04, 0.35)
+        s   = 0.09   # demi-taille du losange
+        col = Vec4(0.9, 0.6, 0.1, 1.0)
 
         for i in range(max_count):
             fmt = GeomVertexFormat.getV3c4()
-            vd = GeomVertexData("pip", fmt, Geom.UHStatic)
-            v = GeomVertexWriter(vd, "vertex")
-            c = GeomVertexWriter(vd, "color")
-            # Losange horizontal (dans le plan XY du render, face caméra via lookAt)
-            v.addData3(0,  0,  s); c.addData4(col)   # top
-            v.addData3(s,  0,  0); c.addData4(col)   # right
-            v.addData3(0,  0, -s); c.addData4(col)   # bottom
-            v.addData3(-s, 0,  0); c.addData4(col)   # left
+            vd  = GeomVertexData("pip", fmt, Geom.UHStatic)
+            v   = GeomVertexWriter(vd, "vertex")
+            c   = GeomVertexWriter(vd, "color")
+            v.addData3( 0,  0,  s); c.addData4(col)
+            v.addData3( s,  0,  0); c.addData4(col)
+            v.addData3( 0,  0, -s); c.addData4(col)
+            v.addData3(-s,  0,  0); c.addData4(col)
             lines = GeomLines(Geom.UHStatic)
-            lines.addVertices(0, 1); lines.addVertices(1, 2)
-            lines.addVertices(2, 3); lines.addVertices(3, 0)
+            lines.addVertices(0,1); lines.addVertices(1,2)
+            lines.addVertices(2,3); lines.addVertices(3,0)
             geom = Geom(vd); geom.addPrimitive(lines)
-            gn = GeomNode(f"pip_{i}"); gn.addGeom(geom)
-            pip = NodePath(gn)
+            gn   = GeomNode(f"pip_{i}"); gn.addGeom(geom)
+            pip  = NodePath(gn)
             pip.reparentTo(self.torp_indicator_root)
-            pip.setRenderModeThickness(1.8)
+            pip.setRenderModeThickness(2.0)
             pip.setTransparency(TransparencyAttrib.MAlpha)
             pip.hide()
             self._torp_pips.append(pip)
 
     def _update_torp_pips(self, player_node, torpedo_count, max_count=9):
-        """Positionne les pips sous le vaisseau, allumés selon le stock."""
+        """Positionne les pips sous le vaisseau — seulement les torpilles dispo."""
         if not player_node or player_node.isEmpty():
             return
-        pos = player_node.getPos()
-        spacing = 0.55
+        pos     = player_node.getPos()
+        spacing = 0.28
         total_w = (max_count - 1) * spacing
-        base_x = pos.getX() - total_w / 2.0
-        base_z = pos.getZ() - 1.6   # juste sous le vaisseau
+        base_x  = pos.getX() - total_w / 2.0
+        base_z  = pos.getZ() - 1.0   # juste sous le vaisseau
 
         for i, pip in enumerate(self._torp_pips):
-            pip_x = base_x + i * spacing
-            pip.setPos(pip_x, pos.getY(), base_z)
-            pip.lookAt(self.game.camera)
             if i < torpedo_count:
+                pip.setPos(base_x + i * spacing, pos.getY(), base_z)
+                pip.lookAt(self.game.camera)
                 pip.show()
-                pip.setColorScale(1, 1, 1, 1)
-            elif i < max_count:
-                pip.show()
-                pip.setColorScale(0.3, 0.2, 0.05, 0.4)  # vide = très dim
             else:
-                pip.hide()
+                pip.hide()   # pas de slot vide visible
 
     def _update_altitude_pyramid(self, player_z, bounds_z=8.0):
         """3 barres horizontales en pyramide indiquant l'altitude.

@@ -120,7 +120,10 @@ class SoundManager:
         else:
             s.setPlayRate(1.0)
 
-        s.play()
+        try:
+            s.play()
+        except Exception as e:
+            print(f"[Sound] Erreur play {name}: {e}")
 
     def play_loop(self, name, volume=None):
         """Joue un son en boucle."""
