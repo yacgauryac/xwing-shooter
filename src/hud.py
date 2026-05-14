@@ -321,9 +321,9 @@ class HUD:
             fg=C_ORANGE, align=TextNode.ACenter, mayChange=True, sort=50,
         )
 
-        # Attitude
+        # Attitude — désactivé
         self.attitude_root = game.aspect2d.attachNewNode("attitude")
-        self.attitude_root.setTransparency(TransparencyAttrib.MAlpha)
+        self.attitude_root.hide()
         self.attitude_lines = None
 
         # Pickup feedback
@@ -545,8 +545,8 @@ class HUD:
             self.overheat_text.setText("")
             _update_bar(self.heat_bar, energy, C_ORANGE)
 
-        # Attitude
-        self._update_attitude(roll, pitch)
+        # Attitude — désactivé
+        # self._update_attitude(roll, pitch)
 
         # Annonce
         if self.announce_timer > 0:
