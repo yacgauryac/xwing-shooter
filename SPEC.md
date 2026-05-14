@@ -220,7 +220,9 @@ main.py
   - B5 Flanking (ImperialShuttle) — spawn opposé, converge
   - B6 Erratic (ProbeDroid) — change aléatoirement toutes 0.8-2.5s
 - [ ] **Bank Vader allégé** : coefficient -dx*6 → -dx*2.5, clamp ±40 → ±20°
-- [ ] **Tourelles L4 Nébuleuse** : retirer les tourelles au sol (niveau espace, incohérent)
+- [x] **Tourelles L2+L4 retirées** : GroundTurret supprimé des vagues L2 (lunaire) et L4 (nébuleuse)
+- [ ] **L2 — Surface lunaire** : marquages sol style aéroport (pistes, taxiways, lignes) + bâtiments à éviter (cubes, cônes, pyramides, cylindres procéduraux)
+- [ ] **Navmesh L2** : grille d'obstacles pour que les ennemis contournent les bâtiments
 - [ ] **Assets 3D** : tourelles, nouveaux ennemis (Sketchfab CC0/CC-BY, format glb)
 
 ### Priorité 2 — Gameplay

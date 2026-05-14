@@ -974,15 +974,15 @@ WAVE_DEFS_BY_LEVEL = {
         {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 3 + [TIEBomber] * 1, "formation": "swarm"},
         {"enemies": [TIEInterceptor] * 4 + [TIEBomber] * 2 + [TIEFighter] * 4, "formation": "pincer"},
     ],
-    # L2 — Surface lunaire : Shuttles + Tourelles sol
+    # L2 — Surface lunaire : Shuttles (tourelles retirées — bâtiments à venir)
     2: [
-        {"enemies": [TIEFighter] * 4 + [GroundTurret] * 2, "formation": "line"},
+        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 2, "formation": "line"},
         {"enemies": [ImperialShuttle] * 1 + [TIEFighter] * 4, "formation": "v"},
-        {"enemies": [GroundTurret] * 3 + [TIEInterceptor] * 3, "formation": "swarm"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEFighter] * 2 + [GroundTurret] * 2, "formation": "line"},
-        {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4 + [GroundTurret] * 2, "formation": "pincer"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEBomber] * 1 + [GroundTurret] * 3, "formation": "swarm"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEInterceptor] * 3 + [GroundTurret] * 4, "formation": "pincer"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEInterceptor] * 3, "formation": "swarm"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEFighter] * 2 + [TIEBomber] * 1, "formation": "line"},
+        {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4 + [TIEBomber] * 1, "formation": "pincer"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEBomber] * 2 + [TIEFighter] * 2, "formation": "swarm"},
+        {"enemies": [ImperialShuttle] * 2 + [TIEInterceptor] * 3 + [TIEBomber] * 2, "formation": "pincer"},
     ],
     # L3 — Tranchée : Probe Droids + Attack Bombers + Tourelles
     3: [
@@ -994,15 +994,15 @@ WAVE_DEFS_BY_LEVEL = {
         {"enemies": [AttackBomber] * 1 + [ProbeDroid] * 4 + [GroundTurret] * 3, "formation": "swarm"},
         {"enemies": [AttackBomber] * 2 + [TIEInterceptor] * 3 + [GroundTurret] * 3, "formation": "pincer"},
     ],
-    # L4 — Nébuleuse : tout mélangé, difficulté max
+    # L4 — Nébuleuse : tout mélangé, difficulté max (tourelles retirées — niveau spatial)
     4: [
         {"enemies": [TIEFighter] * 4 + [ProbeDroid] * 3, "formation": "swarm"},
         {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4, "formation": "v"},
-        {"enemies": [AttackBomber] * 1 + [GroundTurret] * 3 + [TIEFighter] * 3, "formation": "line"},
+        {"enemies": [AttackBomber] * 1 + [ProbeDroid] * 2 + [TIEFighter] * 3, "formation": "line"},
         {"enemies": [ProbeDroid] * 4 + [ImperialShuttle] * 2, "formation": "pincer"},
-        {"enemies": [AttackBomber] * 2 + [TIEBomber] * 2 + [GroundTurret] * 3, "formation": "swarm"},
+        {"enemies": [AttackBomber] * 2 + [TIEBomber] * 2 + [ProbeDroid] * 2, "formation": "swarm"},
         {"enemies": [ImperialShuttle] * 2 + [AttackBomber] * 1 + [ProbeDroid] * 3, "formation": "swarm"},
-        {"enemies": [AttackBomber] * 2 + [ImperialShuttle] * 2 + [GroundTurret] * 4, "formation": "pincer"},
+        {"enemies": [AttackBomber] * 2 + [ImperialShuttle] * 2 + [TIEInterceptor] * 3, "formation": "pincer"},
     ],
 }
 
