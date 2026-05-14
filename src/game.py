@@ -420,6 +420,7 @@ class Game(ShowBase):
             force_pct=self.force.get_gauge_pct(),
             force_active=self.force.active,
             player_z=self.player.node.getPos().getZ(),
+            player_node=self.player.node,
         )
 
         return task.cont

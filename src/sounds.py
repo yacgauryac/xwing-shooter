@@ -182,12 +182,15 @@ class SoundManager:
             "force_activate": f"{SOUND_DIR}/force_activate.wav",
         }
         for name, path in targets.items():
-            if not self._find_file(name.replace("_", "_")) and not os.path.exists(path):
+            # Cherche d'abord le fichier "officiel" (ex: laser_fire.wav pour "laser")
+            official_base = SOUND_FILES.get(name, name)
+            if self._find_file(official_base):
+                continue  # Fichier audio réel présent — pas de génération procédurale
+            if not os.path.exists(path):
                 to_regen[name](path)
-            elif os.path.exists(path):
+            elif os.path.getsize(path) < 50000:
                 # Régénère si c'est un vieux fichier procédural (< 50KB)
-                if os.path.getsize(path) < 50000:
-                    to_regen[name](path)
+                to_regen[name](path)
 
     def _make_laser_sound(self, filepath):
         """Laser joueur — sweep descendant court et punchy, style Star Wars."""

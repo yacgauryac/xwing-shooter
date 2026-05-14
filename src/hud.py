@@ -373,6 +373,17 @@ class HUD:
         )
         self.combo_timer = 0.0
 
+        # ===== INDICATEUR TORPILLES (suit le vaisseau en 3D) =====
+        self.torp_indicator_root = game.render.attachNewNode("torp_indicators")
+        self.torp_indicator_root.setLightOff()
+        self.torp_indicator_root.setBin("fixed", 46)
+        self.torp_indicator_root.setDepthWrite(False)
+        self.torp_indicator_root.setDepthTest(False)
+        self.torp_indicator_root.setTransparency(TransparencyAttrib.MAlpha)
+        self._torp_pips = []      # liste de NodePath, un par torpille max
+        self._torp_count_shown = -1
+        self._build_torp_pips(9)  # max 9 torpilles
+
         # ===== PYRAMIDE ALTITUDE =====
         self.altitude_root = game.aspect2d.attachNewNode("altitude_pyramid")
         self.altitude_root.setTransparency(TransparencyAttrib.MAlpha)
@@ -480,7 +491,7 @@ class HUD:
 
     def update(self, dt, score, wave, enemy_count, health, max_health,
                heat_pct=0.0, overheated=False, cooldown_pct=0.0,
-               roll=0.0, pitch=0.0, torpedo_count=0,
+               roll=0.0, pitch=0.0, torpedo_count=0, player_node=None,
                force_pct=0.0, force_active=False, player_z=0.0):
         self.blink_timer += dt
 
@@ -489,6 +500,8 @@ class HUD:
 
         # Torpilles
         self.torpedo_count_text.setText(f"{torpedo_count}")
+        if player_node:
+            self._update_torp_pips(player_node, torpedo_count)
 
         # Force gauge — drain continu en usage, recharge aux kills
         if force_active:
@@ -640,6 +653,62 @@ class HUD:
         radius = abs(p2d_r.getY() - p2d_c.getY())
         if radius > 1e-4:
             self._crosshair_geom.setScale(radius)
+
+    def _build_torp_pips(self, max_count):
+        """Crée les pips torpilles (petits losanges 3D sous le vaisseau)."""
+        from panda3d.core import GeomLines
+        for np in self._torp_pips:
+            np.removeNode()
+        self._torp_pips = []
+
+        s = 0.18   # taille du losange
+        col = Vec4(0.85, 0.55, 0.1, 0.9)
+        col_dim = Vec4(0.25, 0.15, 0.04, 0.35)
+
+        for i in range(max_count):
+            fmt = GeomVertexFormat.getV3c4()
+            vd = GeomVertexData("pip", fmt, Geom.UHStatic)
+            v = GeomVertexWriter(vd, "vertex")
+            c = GeomVertexWriter(vd, "color")
+            # Losange horizontal (dans le plan XY du render, face caméra via lookAt)
+            v.addData3(0,  0,  s); c.addData4(col)   # top
+            v.addData3(s,  0,  0); c.addData4(col)   # right
+            v.addData3(0,  0, -s); c.addData4(col)   # bottom
+            v.addData3(-s, 0,  0); c.addData4(col)   # left
+            lines = GeomLines(Geom.UHStatic)
+            lines.addVertices(0, 1); lines.addVertices(1, 2)
+            lines.addVertices(2, 3); lines.addVertices(3, 0)
+            geom = Geom(vd); geom.addPrimitive(lines)
+            gn = GeomNode(f"pip_{i}"); gn.addGeom(geom)
+            pip = NodePath(gn)
+            pip.reparentTo(self.torp_indicator_root)
+            pip.setRenderModeThickness(1.8)
+            pip.setTransparency(TransparencyAttrib.MAlpha)
+            pip.hide()
+            self._torp_pips.append(pip)
+
+    def _update_torp_pips(self, player_node, torpedo_count, max_count=9):
+        """Positionne les pips sous le vaisseau, allumés selon le stock."""
+        if not player_node or player_node.isEmpty():
+            return
+        pos = player_node.getPos()
+        spacing = 0.55
+        total_w = (max_count - 1) * spacing
+        base_x = pos.getX() - total_w / 2.0
+        base_z = pos.getZ() - 1.6   # juste sous le vaisseau
+
+        for i, pip in enumerate(self._torp_pips):
+            pip_x = base_x + i * spacing
+            pip.setPos(pip_x, pos.getY(), base_z)
+            pip.lookAt(self.game.camera)
+            if i < torpedo_count:
+                pip.show()
+                pip.setColorScale(1, 1, 1, 1)
+            elif i < max_count:
+                pip.show()
+                pip.setColorScale(0.3, 0.2, 0.05, 0.4)  # vide = très dim
+            else:
+                pip.hide()
 
     def _update_altitude_pyramid(self, player_z, bounds_z=8.0):
         """3 barres horizontales en pyramide indiquant l'altitude.
