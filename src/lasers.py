@@ -7,7 +7,7 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomNode,
-    NodePath, ColorBlendAttrib, TransparencyAttrib
+    NodePath, TransparencyAttrib
 )
 import math
 
@@ -36,63 +36,73 @@ class LaserBolt:
         self.node.setLightOff()
 
     def make_bolt(self, color_back, color_front):
-        """Bolt laser : noyau blanc + halo coloré en blending additif (pas d'enveloppe visible)."""
         root = NodePath("bolt_root")
+
         fmt = GeomVertexFormat.getV3c4()
 
-        def make_box(hx, hy, hz, col_back, col_front):
-            vd = GeomVertexData("b", fmt, Geom.UHStatic)
-            v  = GeomVertexWriter(vd, "vertex")
-            c  = GeomVertexWriter(vd, "color")
-            corners = [
-                (-hx,-hy,-hz),(hx,-hy,-hz),(hx,-hy,hz),(-hx,-hy,hz),
-                (-hx, hy,-hz),(hx, hy,-hz),(hx, hy,hz),(-hx, hy,hz),
-            ]
-            for i, corner in enumerate(corners):
-                v.addData3(*corner)
-                c.addData4(col_back if i < 4 else col_front)
-            tris = GeomTriangles(Geom.UHStatic)
-            for f in [(0,1,2),(0,2,3),(4,6,5),(4,7,6),
-                      (0,4,5),(0,5,1),(2,6,7),(2,7,3),
-                      (0,3,7),(0,7,4),(1,5,6),(1,6,2)]:
-                tris.addVertices(*f)
-            geom = Geom(vd); geom.addPrimitive(tris)
-            gn = GeomNode("box"); gn.addGeom(geom)
-            return NodePath(gn)
+        # --- Noyau blanc (fin, brillant) ---
+        vdata1 = GeomVertexData("core", fmt, Geom.UHStatic)
+        v1 = GeomVertexWriter(vdata1, "vertex")
+        c1 = GeomVertexWriter(vdata1, "color")
 
-        def additive(np):
-            """Blending additif : pixels noirs = invisibles, pas d'enveloppe."""
-            np.setAttrib(ColorBlendAttrib.make(
-                ColorBlendAttrib.MAdd, ColorBlendAttrib.OOne, ColorBlendAttrib.OOne))
-            np.setDepthWrite(False)
-            np.setTransparency(TransparencyAttrib.MNone)
+        hx, hy, hz = 0.03, 0.8, 0.03
+        core_back = Vec4(0.9, 0.8, 0.7, 1)
+        core_front = Vec4(1.0, 1.0, 1.0, 1)
 
-        # ── Noyau blanc brillant ─────────────────────────────────────────
-        core = make_box(0.05, 1.8, 0.05,
-                        Vec4(0.85, 0.85, 0.85, 1),   # arrière : blanc chaud
-                        Vec4(1.0,  1.0,  1.0,  1))   # avant   : blanc pur
-        core.reparentTo(root)
-        additive(core)
+        corners = [
+            (-hx, -hy, -hz), (hx, -hy, -hz), (hx, -hy, hz), (-hx, -hy, hz),
+            (-hx,  hy, -hz), (hx,  hy, -hz), (hx,  hy, hz), (-hx,  hy, hz),
+        ]
+        for i, corner in enumerate(corners):
+            v1.addData3(*corner)
+            c1.addData4(core_back if i < 4 else core_front)
 
-        # ── Halo intermédiaire : dégradé blanc → couleur ────────────────
-        mid = make_box(0.10, 2.0, 0.10,
-                       Vec4(color_back.getX() * 0.6 + 0.4,   # mélange blanc + couleur
-                            color_back.getY() * 0.6 + 0.4,
-                            color_back.getZ() * 0.6 + 0.4, 1),
-                       Vec4(color_front.getX(), color_front.getY(), color_front.getZ(), 1))
-        mid.reparentTo(root)
-        additive(mid)
+        tris1 = GeomTriangles(Geom.UHStatic)
+        for f in [
+            (0,1,2),(0,2,3),(4,6,5),(4,7,6),
+            (0,4,5),(0,5,1),(2,6,7),(2,7,3),
+            (0,3,7),(0,7,4),(1,5,6),(1,6,2),
+        ]:
+            tris1.addVertices(*f)
 
-        # ── Halo extérieur : pleine couleur, large ───────────────────────
-        glow = make_box(0.20, 2.4, 0.20,
-                        Vec4(color_back.getX()  * 0.7,
-                             color_back.getY()  * 0.7,
-                             color_back.getZ()  * 0.7, 1),
-                        Vec4(color_front.getX() * 0.5,
-                             color_front.getY() * 0.5,
-                             color_front.getZ() * 0.5, 1))
-        glow.reparentTo(root)
-        additive(glow)
+        geom1 = Geom(vdata1)
+        geom1.addPrimitive(tris1)
+        node1 = GeomNode("bolt_core")
+        node1.addGeom(geom1)
+        NodePath(node1).reparentTo(root)
+
+        # --- Halo coloré (plus gros, semi-transparent) ---
+        vdata2 = GeomVertexData("glow", fmt, Geom.UHStatic)
+        v2 = GeomVertexWriter(vdata2, "vertex")
+        c2 = GeomVertexWriter(vdata2, "color")
+
+        gx, gy, gz = 0.09, 0.9, 0.09
+        glow_back  = Vec4(color_back.getX(),  color_back.getY(),  color_back.getZ(),  0.4)
+        glow_front = Vec4(color_front.getX(), color_front.getY(), color_front.getZ(), 0.5)
+
+        corners2 = [
+            (-gx, -gy, -gz), (gx, -gy, -gz), (gx, -gy, gz), (-gx, -gy, gz),
+            (-gx,  gy, -gz), (gx,  gy, -gz), (gx,  gy, gz), (-gx,  gy, gz),
+        ]
+        for i, corner in enumerate(corners2):
+            v2.addData3(*corner)
+            c2.addData4(glow_back if i < 4 else glow_front)
+
+        tris2 = GeomTriangles(Geom.UHStatic)
+        for f in [
+            (0,1,2),(0,2,3),(4,6,5),(4,7,6),
+            (0,4,5),(0,5,1),(2,6,7),(2,7,3),
+            (0,3,7),(0,7,4),(1,5,6),(1,6,2),
+        ]:
+            tris2.addVertices(*f)
+
+        geom2 = Geom(vdata2)
+        geom2.addPrimitive(tris2)
+        node2 = GeomNode("bolt_glow")
+        node2.addGeom(geom2)
+        glow_np = NodePath(node2)
+        glow_np.reparentTo(root)
+        glow_np.setTransparency(TransparencyAttrib.MAlpha)
 
         return root
 
