@@ -424,59 +424,38 @@ class HUD:
         self.crosshair = self._make_crosshair(game)
 
     def _make_crosshair(self, game):
-        """Viseur statique : même géométrie 4 arcs + croix que le réticule 3D du joueur.
-        Position et taille mises à jour chaque frame par update() via camLens.project().
-        """
-        # Couleur identique au réticule 3D (player.py)
-        c = Vec4(0.2, 1.0, 0.3, 0.6)
+        """Viseur fixe : croix simple 4 branches avec gap central, vert."""
+        c = Vec4(0.2, 1.0, 0.3, 0.75)
 
-        # Mêmes paramètres que _create_crosshair() dans player.py
-        gap_angle       = 0.15
-        segments_per_arc = 8
-        arc_angles = [
-            (math.pi / 2 + gap_angle, math.pi - gap_angle),
-            (0 + gap_angle,           math.pi / 2 - gap_angle),
-            (-math.pi / 2 + gap_angle, 0 - gap_angle),
-            (math.pi + gap_angle,     math.pi * 1.5 - gap_angle),
-        ]
-
-        # Nœud racine : sa position (X, 0, Z) est mise à jour chaque frame
+        # Nœud racine positionné chaque frame par _update_crosshair_static()
         root = game.aspect2d.attachNewNode("crosshair_static")
         root.setBin("fixed", 60)
         root.setDepthTest(False)
         root.setDepthWrite(False)
         root.setTransparency(TransparencyAttrib.MAlpha)
 
-        # Géométrie dessinée à radius=1.0 — mise à l'échelle via setScale()
+        # Géométrie à échelle 1.0 — scale mis à jour dans update()
+        # gap=0.25 (espace au centre), bras de 0.25 à 1.0 → pas de ligne au centre
         fmt   = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("xhair_s", fmt, Geom.UHStatic)
         vw = GeomVertexWriter(vdata, "vertex")
         cw = GeomVertexWriter(vdata, "color")
 
-        # 4 arcs (radius = 1.0, même proportion que le 3D)
-        verts = []
-        for a_start, a_end in arc_angles:
-            for i in range(segments_per_arc + 1):
-                t = i / segments_per_arc
-                a = a_start + t * (a_end - a_start)
-                verts.append((math.cos(a), 0, math.sin(a)))
-
-        # Petite croix centrale (proportion 0.06/0.6 = 0.1 × radius)
-        cross = 0.1
-        verts += [(-cross, 0, 0), (cross, 0, 0), (0, 0, -cross), (0, 0, cross)]
-
-        for v in verts:
-            vw.addData3(*v)
-            cw.addData4(c)
+        gap = 0.30   # début des bras (en fraction du radius)
+        #  4 branches : droite / gauche / haut / bas
+        segs = [
+            ( gap, 0,  1.0,  0),
+            (-gap, 0, -1.0,  0),
+            (0,  gap,   0,  1.0),
+            (0, -gap,   0, -1.0),
+        ]
+        for x0, z0, x1, z1 in segs:
+            vw.addData3(x0, 0, z0);  cw.addData4(c)
+            vw.addData3(x1, 0, z1);  cw.addData4(c)
 
         lines = GeomLines(Geom.UHStatic)
-        idx = 0
-        for _ in range(4):
-            for i in range(segments_per_arc):
-                lines.addVertices(idx + i, idx + i + 1)
-            idx += segments_per_arc + 1
-        lines.addVertices(idx, idx + 1)       # croix H
-        lines.addVertices(idx + 2, idx + 3)   # croix V
+        for i in range(0, 8, 2):
+            lines.addVertices(i, i + 1)
 
         geom = Geom(vdata)
         geom.addPrimitive(lines)
@@ -484,8 +463,8 @@ class HUD:
         gn.addGeom(geom)
         np = NodePath(gn)
         np.reparentTo(root)
-        np.setRenderModeThickness(2)
-        np.setScale(0.022)  # valeur initiale, recalculée dans update()
+        np.setRenderModeThickness(1.5)
+        np.setScale(0.022)   # recalculé dans _update_crosshair_static()
         self._crosshair_geom = np
 
         return root
