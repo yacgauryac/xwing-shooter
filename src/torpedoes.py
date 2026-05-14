@@ -200,11 +200,7 @@ class ProtonTorpedo:
 
 
 class LockIndicator:
-    """Brackets verts qui tournent autour de l'ennemi locké."""
-
-    SPIN_IDLE   = 90.0    # degrés/s en veille
-    SPIN_SNAP   = 540.0   # degrés/s au snap (arrivée/départ)
-    SNAP_DURATION = 0.35  # durée du spin rapide
+    """Losange orange qui pulse autour de l'ennemi locké."""
 
     def __init__(self, game):
         self.game = game
@@ -216,44 +212,41 @@ class LockIndicator:
         self.node.setBin("fixed", 45)
         self.node.setDepthWrite(False)
         self.node.setDepthTest(False)
-        self.timer    = 0.0
-        self.angle    = 0.0
-        self._snap_t  = 0.0   # timer snap en cours (0 = pas de snap)
-        self._had_target = False
+        self.timer = 0.0
 
     def _make_diamond(self):
-        """4 brackets en L aux coins — vert X-Wing."""
+        """Losange/bracket autour de la cible."""
         from panda3d.core import GeomLines
         fmt = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("lock", fmt, Geom.UHDynamic)
+        vdata = GeomVertexData("lock", fmt, Geom.UHStatic)
         v = GeomVertexWriter(vdata, "vertex")
         c = GeomVertexWriter(vdata, "color")
 
-        s  = 1.2    # rayon
-        b  = 0.45   # longueur du bras
-        col = Vec4(0.1, 1.0, 0.25, 0.95)   # vert vif
+        s = 1.2
+        col = Vec4(1.0, 0.6, 0.1, 0.9)
 
-        # Coin haut-gauche  (– –)
-        v.addData3(-s,    0,  s+b); c.addData4(col)
-        v.addData3(-s,    0,  s  ); c.addData4(col)
-        v.addData3(-s-b,  0,  s  ); c.addData4(col)
-        # Coin haut-droit   (+ –)
-        v.addData3( s+b,  0,  s  ); c.addData4(col)
-        v.addData3( s,    0,  s  ); c.addData4(col)
-        v.addData3( s,    0,  s+b); c.addData4(col)
-        # Coin bas-droit    (+ +)
-        v.addData3( s,    0, -s-b); c.addData4(col)
-        v.addData3( s,    0, -s  ); c.addData4(col)
-        v.addData3( s+b,  0, -s  ); c.addData4(col)
-        # Coin bas-gauche   (– +)
-        v.addData3(-s-b,  0, -s  ); c.addData4(col)
-        v.addData3(-s,    0, -s  ); c.addData4(col)
-        v.addData3(-s,    0, -s-b); c.addData4(col)
+        # 4 coins du losange (brackets)
+        # Top
+        v.addData3(-s*0.3, 0, s); c.addData4(col)
+        v.addData3(0, 0, s*1.2); c.addData4(col)
+        v.addData3(s*0.3, 0, s); c.addData4(col)
+        # Right
+        v.addData3(s, 0, s*0.3); c.addData4(col)
+        v.addData3(s*1.2, 0, 0); c.addData4(col)
+        v.addData3(s, 0, -s*0.3); c.addData4(col)
+        # Bottom
+        v.addData3(s*0.3, 0, -s); c.addData4(col)
+        v.addData3(0, 0, -s*1.2); c.addData4(col)
+        v.addData3(-s*0.3, 0, -s); c.addData4(col)
+        # Left
+        v.addData3(-s, 0, -s*0.3); c.addData4(col)
+        v.addData3(-s*1.2, 0, 0); c.addData4(col)
+        v.addData3(-s, 0, s*0.3); c.addData4(col)
 
-        lines = GeomLines(Geom.UHDynamic)
+        lines = GeomLines(Geom.UHStatic)
         for i in range(4):
             base = i * 3
-            lines.addVertices(base,     base + 1)
+            lines.addVertices(base, base + 1)
             lines.addVertices(base + 1, base + 2)
 
         geom = Geom(vdata)
@@ -261,42 +254,19 @@ class LockIndicator:
         node = GeomNode("lock_indicator")
         node.addGeom(geom)
         np = NodePath(node)
-        np.setRenderModeThickness(2.5)
+        np.setRenderModeThickness(2.0)
         return np
-
-    def _trigger_snap(self):
-        """Lance le spin rapide (arrivée ou départ de cible)."""
-        self._snap_t = self.SNAP_DURATION
 
     def update(self, dt, target_pos):
         self.timer += dt
-        has_target = target_pos is not None
-
-        # Détecte changement de cible → snap
-        if has_target != self._had_target:
-            self._trigger_snap()
-        self._had_target = has_target
-
-        # Vitesse de rotation
-        if self._snap_t > 0:
-            self._snap_t = max(0.0, self._snap_t - dt)
-            spin_speed = self.SPIN_SNAP
-        else:
-            spin_speed = self.SPIN_IDLE
-
-        self.angle = (self.angle + spin_speed * dt) % 360.0
-
-        if has_target:
+        if target_pos:
             self.node.show()
             self.node.setPos(target_pos)
             self.node.lookAt(self.game.camera)
-            self.node.setR(self.angle)   # rotation sur l'axe Y (face cam)
-
-            # Pulse doux
-            pulse = 0.95 + 0.08 * math.sin(self.timer * 7.0)
+            # Pulse
+            pulse = 0.9 + 0.2 * math.sin(self.timer * 8.0)
             self.node.setScale(pulse)
-            alpha = 0.75 + 0.25 * math.sin(self.timer * 5.0)
-            self.node.setColorScale(1, 1, 1, alpha)
+            self.node.setColorScale(1, 1, 1, 0.7 + 0.3 * math.sin(self.timer * 6.0))
         else:
             self.node.hide()
 
