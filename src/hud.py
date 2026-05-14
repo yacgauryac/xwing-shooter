@@ -611,7 +611,7 @@ class HUD:
         if not hasattr(self, 'crosshair') or not hasattr(self, '_crosshair_geom'):
             return
         game = self.game
-        if not hasattr(game, 'player') or not game.player.alive:
+        if not hasattr(game, 'player') or game.player is None:
             return
 
         sp   = game.player.node.getPos()
