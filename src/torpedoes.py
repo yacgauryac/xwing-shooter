@@ -280,8 +280,8 @@ class TorpedoSystem:
 
     def __init__(self, game):
         self.game = game
-        self.stock = 3
-        self.max_stock = 9
+        self.stock = 20
+        self.max_stock = 30
         self.torpedoes = []
         self.cooldown = 0.0
         self.locked_target = None
@@ -431,7 +431,7 @@ class TorpedoSystem:
         for t in self.torpedoes:
             t.destroy()
         self.torpedoes = []
-        self.stock = 3
+        self.stock = 20
         self.cooldown = 0.0
         self.locked_target = None
         self.lock_indicator.destroy()
