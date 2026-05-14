@@ -493,6 +493,8 @@ class Game(ShowBase):
             f.destroy()
         for s in self.environment.surface_panels:
             s.destroy()
+        for dg in self.environment.decor_groups:
+            dg.destroy()
 
         self.environment.asteroids      = []
         self.environment.planets        = []
@@ -502,6 +504,7 @@ class Game(ShowBase):
         self.environment.wall_panels    = []
         self.environment.floor_panels   = []
         self.environment.surface_panels = []
+        self.environment.decor_groups   = []
         self.environment.asteroid_timer = 2.0
         self.environment.nebula_timer   = 15.0
         self.environment.debris_timer   = 4.0

@@ -758,6 +758,317 @@ class TrenchSurfacePanel:
 
 
 # ============================================================
+# L3 — Décorations 3D murs de tranchée
+# ============================================================
+
+class TrenchDecorGroup:
+    """Groupe de décorations 3D fixées sur un segment de mur de tranchée.
+
+    Génère aléatoirement des boîtes, cylindres, disques, marches et rails
+    avec coloration par vertex simulant un éclairage zénithal (haut lumineux,
+    bas dans l'ombre).
+    """
+
+    WALL_Z_LO = -7.5    # Z sol tranchée
+    WALL_Z_HI =  8.0    # Z sommet murs
+
+    def __init__(self, parent, x_wall, y_pos, depth=22.0):
+        self.alive = True
+        # Direction de protrusion depuis le mur vers l'intérieur de la tranchée
+        self.inward = 1.0 if x_wall < 0 else -1.0
+
+        # Seed déterministe — même (x_wall, y_pos) = même décor à chaque spawn
+        rng = random.Random(int(round(abs(x_wall) * 137 + y_pos * 73.1)) & 0xFFFFFF)
+
+        self.node = NodePath("decor_group")
+        self.node.reparentTo(parent)
+        self.node.setPos(x_wall, y_pos, 0)
+        self.node.setLightOff()
+
+        self._build(rng, depth)
+
+    # ----------------------------------------------------------
+    # Nuance vertex — gradient Z (ombre bas → lumière haut)
+    # ----------------------------------------------------------
+
+    def _shade(self, z_world):
+        """Gris Death Star, gradient vertical : ombre en bas, lumière en haut."""
+        t = (z_world - self.WALL_Z_LO) / (self.WALL_Z_HI - self.WALL_Z_LO)
+        t = max(0.0, min(1.0, t))
+        g = 0.18 + t * 0.52   # 0.18 (ombre) → 0.70 (lumière)
+        return Vec4(g * 1.03, g * 1.00, g * 0.96, 1.0)  # Légèrement chaud
+
+    # ----------------------------------------------------------
+    # Primitives géométriques
+    # ----------------------------------------------------------
+
+    def _make_box(self, bw, bh, bd, z_center):
+        """Boîte pleine — bw=X(protrusion), bh=Z(hauteur), bd=Y(épaisseur)."""
+        root = NodePath("dbox")
+        fmt  = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("box", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+
+        hx, hy, hz = bw / 2, bd / 2, bh / 2
+        corners = [
+            (-hx, -hy, -hz), ( hx, -hy, -hz), ( hx,  hy, -hz), (-hx,  hy, -hz),
+            (-hx, -hy,  hz), ( hx, -hy,  hz), ( hx,  hy,  hz), (-hx,  hy,  hz),
+        ]
+        for cx, cy, cz in corners:
+            vw.addData3(cx, cy, cz)
+            cw.addData4(self._shade(z_center + cz))
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for f in [
+            (0, 1, 2), (0, 2, 3),           # bas
+            (4, 6, 5), (4, 7, 6),           # haut
+            (0, 4, 5), (0, 5, 1),           # avant
+            (2, 6, 7), (2, 7, 3),           # arrière
+            (0, 3, 7), (0, 7, 4),           # gauche
+            (1, 5, 6), (1, 6, 2),           # droite
+        ]:
+            tris.addVertices(*f)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn = GeomNode("dbox_m")
+        gn.addGeom(geom)
+        np = NodePath(gn)
+        np.setTwoSided(True)
+        np.reparentTo(root)
+        return root
+
+    def _make_cylinder_v(self, radius, height, z_center, segs=8):
+        """Cylindre vertical (axe Z) — colonne / tuyau debout."""
+        root  = NodePath("dcylv")
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("cylv", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+
+        hz = height / 2
+        for zi in (-hz, hz):
+            for s in range(segs):
+                a = 2 * math.pi * s / segs
+                vw.addData3(radius * math.cos(a), radius * math.sin(a), zi)
+                cw.addData4(self._shade(z_center + zi))
+
+        # Centres des disques bas/haut
+        vw.addData3(0, 0, -hz);  cw.addData4(self._shade(z_center - hz))
+        vw.addData3(0, 0,  hz);  cw.addData4(self._shade(z_center + hz))
+        c_bot = 2 * segs
+        c_top = 2 * segs + 1
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for s in range(segs):
+            b0 = s;           b1 = (s + 1) % segs
+            t0 = segs + s;    t1 = segs + (s + 1) % segs
+            # Manteau
+            tris.addVertices(b0, b1, t0)
+            tris.addVertices(b1, t1, t0)
+            # Disque bas (CW vu d'en bas)
+            tris.addVertices(c_bot, b1, b0)
+            # Disque haut (CCW vu d'en haut)
+            tris.addVertices(c_top, t0, t1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn = GeomNode("dcylv_m")
+        gn.addGeom(geom)
+        np = NodePath(gn)
+        np.setTwoSided(True)
+        np.reparentTo(root)
+        return root
+
+    def _make_cylinder_h(self, radius, length, z_center, segs=6):
+        """Cylindre horizontal (axe Y) — rail / barre / tuyau couché."""
+        root  = NodePath("dcylh")
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("cylh", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+
+        hl = length / 2
+        for yi in (-hl, hl):
+            for s in range(segs):
+                a = 2 * math.pi * s / segs
+                x = radius * math.cos(a)
+                z = radius * math.sin(a)
+                vw.addData3(x, yi, z)
+                cw.addData4(self._shade(z_center + z))
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for s in range(segs):
+            b0 = s;           b1 = (s + 1) % segs
+            t0 = segs + s;    t1 = segs + (s + 1) % segs
+            tris.addVertices(b0, t0, b1)
+            tris.addVertices(b1, t0, t1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn = GeomNode("dcylh_m")
+        gn.addGeom(geom)
+        np = NodePath(gn)
+        np.setTwoSided(True)
+        np.reparentTo(root)
+        return root
+
+    def _make_disc(self, radius, thickness, z_center, segs=12):
+        """Disque circulaire dans le plan YZ — hublot / panneau rond."""
+        root  = NodePath("ddisc")
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("disc", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+
+        ht = thickness / 2
+
+        # Face avant (+X) : centre puis anneau
+        vw.addData3(ht, 0, 0);  cw.addData4(self._shade(z_center))
+        c_front = 0
+        for s in range(segs):
+            a = 2 * math.pi * s / segs
+            y, z = radius * math.cos(a), radius * math.sin(a)
+            vw.addData3(ht, y, z);  cw.addData4(self._shade(z_center + z))
+        # Anneau avant : indices 1..segs
+
+        # Face arrière (−X) : centre puis anneau
+        vw.addData3(-ht, 0, 0);  cw.addData4(self._shade(z_center))
+        c_back = segs + 1
+        for s in range(segs):
+            a = 2 * math.pi * s / segs
+            y, z = radius * math.cos(a), radius * math.sin(a)
+            vw.addData3(-ht, y, z);  cw.addData4(self._shade(z_center + z))
+        # Anneau arrière : indices segs+2..2*segs+1
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for s in range(segs):
+            f0 = 1 + s;           f1 = 1 + (s + 1) % segs
+            b0 = c_back + 1 + s;  b1 = c_back + 1 + (s + 1) % segs
+            # Face avant
+            tris.addVertices(c_front, f0, f1)
+            # Face arrière
+            tris.addVertices(c_back, b1, b0)
+            # Tranche
+            tris.addVertices(f0, b0, f1)
+            tris.addVertices(f1, b0, b1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn = GeomNode("ddisc_m")
+        gn.addGeom(geom)
+        np = NodePath(gn)
+        np.setTwoSided(True)
+        np.reparentTo(root)
+        return root
+
+    def _make_steps(self, size, n_steps, z_center):
+        """Structure en marches : n boîtes empilées, plus large et profonde en bas."""
+        root = NodePath("dsteps")
+        total_h = size * 0.40 * n_steps
+        for i in range(n_steps):
+            t = (n_steps - 1 - i) / max(n_steps - 1, 1)   # 1.0 bas → 0.0 haut
+            sw = size * (0.35 + 0.65 * t)   # protrusion
+            sh = size * 0.38                 # hauteur de la marche
+            sd = size * (0.4 + 0.6 * t)     # épaisseur le long du mur
+            z_off = -total_h / 2 + i * sh + sh / 2
+            box = self._make_box(sw, sh * 0.92, sd, z_center + z_off)
+            box.reparentTo(root)
+            box.setPos(0, 0, z_off)
+        return root
+
+    # ----------------------------------------------------------
+    # Construction du groupe
+    # ----------------------------------------------------------
+
+    def _build(self, rng, depth):
+        """Génère et place aléatoirement les décorations sur ce segment."""
+        half_d = depth / 2.0
+
+        # ── Rails horizontaux (présents ~60% du temps) ─────────
+        if rng.random() < 0.60:
+            z_rail = rng.choice([-3.5, -1.0, 1.5, 4.0])
+            r_rail = rng.uniform(0.07, 0.14)
+            rail   = self._make_cylinder_h(r_rail, depth * 0.92, z_rail)
+            rail.reparentTo(self.node)
+            rail.setPos(self.inward * (r_rail + 0.05), 0, z_rail)
+
+            # Deuxième rail parallèle (moins fréquent)
+            if rng.random() < 0.35:
+                z2 = z_rail + rng.uniform(1.2, 2.5)
+                r2 = rng.uniform(0.05, 0.10)
+                rail2 = self._make_cylinder_h(r2, depth * 0.88, z2)
+                rail2.reparentTo(self.node)
+                rail2.setPos(self.inward * (r2 + 0.05), 0, z2)
+
+        # ── Éléments individuels ────────────────────────────────
+        shape_pool = [
+            'box', 'box', 'box', 'box',
+            'cylinder_v', 'cylinder_v',
+            'disc', 'disc',
+            'steps',
+        ]
+        n_items   = rng.randint(2, 5)
+        placed_y  = []
+
+        for _ in range(n_items * 5):
+            if len(placed_y) >= n_items:
+                break
+
+            y = rng.uniform(-half_d + 1.2, half_d - 1.2)
+            min_sep = rng.uniform(2.0, 3.5)
+            if any(abs(y - yp) < min_sep for yp in placed_y):
+                continue
+
+            z_ctr = rng.uniform(self.WALL_Z_LO + 1.2, self.WALL_Z_HI - 1.2)
+            shape = rng.choice(shape_pool)
+
+            if shape == 'box':
+                bw = rng.uniform(0.4, 2.0)
+                bh = rng.uniform(0.35, 1.8)
+                bd = rng.uniform(0.3, 1.4)
+                sn = self._make_box(bw, bh, bd, z_ctr)
+                protrude = bw / 2
+
+            elif shape == 'cylinder_v':
+                r = rng.uniform(0.20, 0.60)
+                h = rng.uniform(0.7, 2.5)
+                sn = self._make_cylinder_v(r, h, z_ctr)
+                protrude = r
+
+            elif shape == 'disc':
+                r   = rng.uniform(0.45, 1.1)
+                th  = rng.uniform(0.18, 0.35)
+                sn  = self._make_disc(r, th, z_ctr)
+                protrude = th / 2
+
+            else:  # steps
+                sz     = rng.uniform(0.9, 2.0)
+                n_st   = rng.randint(2, 3)
+                sn     = self._make_steps(sz, n_st, z_ctr)
+                protrude = sz * 0.35
+
+            sn.reparentTo(self.node)
+            sn.setPos(self.inward * protrude, y, z_ctr)
+            placed_y.append(y)
+
+    # ----------------------------------------------------------
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -35:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ============================================================
 # Environment principal (level-aware)
 # ============================================================
 
@@ -791,6 +1102,7 @@ class Environment:
         self.wall_panels    = []   # L3 murs tranchée
         self.floor_panels   = []   # L3 sol tranchée
         self.surface_panels = []   # L3 surface Death Star (au-dessus des murs)
+        self.decor_groups   = []   # L3 décorations 3D sur les murs
 
         # Timers
         self.asteroid_timer = 2.0
@@ -854,6 +1166,10 @@ class Environment:
             self.game.render, -1, y, depth=d, texture=wt))
         self.surface_panels.append(TrenchSurfacePanel(
             self.game.render, +1, y, depth=d, texture=wt))
+        self.decor_groups.append(TrenchDecorGroup(
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d))
+        self.decor_groups.append(TrenchDecorGroup(
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d))
 
     # ----------------------------------------------------------
     # Génération de textures procédurales — panneaux Death Star
@@ -1003,6 +1319,7 @@ class Environment:
         self.wall_panels    = [w for w in self.wall_panels    if w.alive]
         self.floor_panels   = [f for f in self.floor_panels   if f.alive]
         self.surface_panels = [s for s in self.surface_panels if s.alive]
+        self.decor_groups   = [dg for dg in self.decor_groups  if dg.alive]
 
         for p in self.planets:
             p.update(dt)
@@ -1077,6 +1394,8 @@ class Environment:
             f.update(dt, scroll_speed)
         for s in self.surface_panels:
             s.update(dt, scroll_speed)
+        for dg in self.decor_groups:
+            dg.update(dt, scroll_speed)
 
         # Spawn : ajoute une rangée quand le dernier panneau se rapproche trop
         alive_walls = [w for w in self.wall_panels if w.alive and not w.node.isEmpty()]

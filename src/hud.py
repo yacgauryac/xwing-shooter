@@ -420,6 +420,51 @@ class HUD:
             align=TextNode.ACenter, mayChange=True, sort=55,
         )
 
+        # ===== VISEUR CENTRE =====
+        self.crosshair = self._make_crosshair(game)
+
+    def _make_crosshair(self, game):
+        """Croix fine au centre de l'écran — ne bouge pas."""
+        root = game.aspect2d.attachNewNode("crosshair")
+        root.setBin("fixed", 60)
+        root.setDepthTest(False)
+        root.setDepthWrite(False)
+        root.setTransparency(TransparencyAttrib.MAlpha)
+
+        gap  = 0.018   # Espace vide au centre
+        arm  = 0.040   # Longueur de chaque branche
+        r, g, b, a = 0.9, 0.85, 0.75, 0.75  # Blanc légèrement chaud, semi-transparent
+
+        fmt  = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("xhair", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+
+        # 4 branches — 2 points par branche
+        segments = [
+            ( gap,        0,     gap + arm,  0     ),  # droite
+            (-(gap + arm), 0,   -gap,         0     ),  # gauche
+            ( 0,          gap,   0,           gap + arm),  # haut
+            ( 0,        -(gap + arm), 0,      -gap  ),  # bas
+        ]
+        for x0, z0, x1, z1 in segments:
+            vw.addData3(x0, 0, z0);  cw.addData4(r, g, b, a)
+            vw.addData3(x1, 0, z1);  cw.addData4(r, g, b, a)
+
+        lines = GeomLines(Geom.UHStatic)
+        for i in range(0, len(segments) * 2, 2):
+            lines.addVertices(i, i + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(lines)
+        gn = GeomNode("crosshair_mesh")
+        gn.addGeom(geom)
+        np = NodePath(gn)
+        np.reparentTo(root)
+        np.setRenderModeThickness(1.5)
+
+        return root
+
     def update(self, dt, score, wave, enemy_count, health, max_health,
                heat_pct=0.0, overheated=False, cooldown_pct=0.0,
                roll=0.0, pitch=0.0, torpedo_count=0,
