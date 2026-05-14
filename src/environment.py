@@ -576,6 +576,140 @@ def _make_v3c4t2():
 _V3C4T2 = _make_v3c4t2()
 
 
+def _draw_wall_tex(img, size):
+    """Texture mur Death Star structurée en registres horizontaux.
+
+    Pattern harmonieux (non-aléatoire dans sa structure globale) :
+      - Registre A (haut, ~20%) : panneaux lisses clairs — zone propre
+      - Registre B (~30%) : zone de détail circuit (traces + pads)
+      - Registre C (~20%) : panneaux lisses — zone propre
+      - Registre D (~30%) : autre zone de détail circuit
+      - Joints horizontaux épais entre registres (marque la structure)
+
+    À l'intérieur des registres de détail : variation par colonne
+    (colonnes larges avec ou sans circuit → rythme vertical cohérent).
+    """
+    rng  = random.Random(42)
+    buf  = [[0.0] * size for _ in range(size)]
+
+    # ── Découpage en registres horizontaux ────────────────────
+    # Y = 0 en haut, Y = size-1 en bas dans PNMImage
+    reg_cuts = [0,
+                int(size * 0.20),   # fin registre A (propre)
+                int(size * 0.50),   # fin registre B (circuit)
+                int(size * 0.70),   # fin registre C (propre)
+                size]               # fin registre D (circuit)
+    reg_types = ['clean', 'circuit', 'clean', 'circuit']
+
+    # Colonnes : alterner "détail" / "propre" sur ~150px de largeur
+    col_w = rng.randint(90, 160)
+    col_pattern = []   # list of (x_start, x_end, has_detail)
+    cx = 0
+    detail = True
+    while cx < size:
+        w = rng.randint(80, 160)
+        col_pattern.append((cx, min(cx + w, size), detail))
+        detail = not detail
+        cx += w
+
+    for ri, (y0, y1) in enumerate(zip(reg_cuts, reg_cuts[1:])):
+        rtype = reg_types[ri]
+        # Valeur de base du registre
+        if rtype == 'clean':
+            base = 0.62 + rng.uniform(-0.04, 0.04)
+        else:
+            base = 0.34 + rng.uniform(-0.03, 0.03)
+
+        for py in range(y0, y1):
+            for px in range(size):
+                # Trouver la colonne
+                has_detail = False
+                for (cx0, cx1, det) in col_pattern:
+                    if cx0 <= px < cx1:
+                        has_detail = det
+                        break
+
+                if rtype == 'clean' or not has_detail:
+                    g = base
+                else:
+                    # Zone de circuit : variation par sous-panneau
+                    sp_x = (px // 48)
+                    sp_y = (py // 48)
+                    sv = math.sin(sp_x * 1.73 + sp_y * 2.31) * 0.06
+                    g = 0.38 + sv
+                buf[py][px] = g
+
+    # Joints horizontaux entre registres (5px, sombres)
+    for cut in reg_cuts[1:-1]:
+        for j in range(5):
+            yj = min(cut + j - 2, size - 1)
+            if 0 <= yj < size:
+                for px in range(size):
+                    buf[yj][px] = 0.15
+
+    # Joints verticaux entre colonnes (3px)
+    for (cx0, cx1, _) in col_pattern:
+        for j in range(3):
+            xj = min(cx1 + j - 1, size - 1)
+            if 0 <= xj < size:
+                for py in range(size):
+                    buf[py][xj] = min(buf[py][xj], 0.20)
+
+    # ── Traces PCB uniquement dans les zones "circuit" + colonne "détail" ─
+    rng2 = random.Random(77)
+    for ri, (y0, y1) in enumerate(zip(reg_cuts, reg_cuts[1:])):
+        if reg_types[ri] != 'circuit':
+            continue
+        for (cx0, cx1, has_detail) in col_pattern:
+            if not has_detail:
+                continue
+            # 2-4 traces H dans cette cellule
+            n_h = rng2.randint(2, 4)
+            for _ in range(n_h):
+                ty  = rng2.randint(y0 + 4, y1 - 4)
+                tx0 = cx0 + rng2.randint(0, (cx1 - cx0) // 4)
+                tx1 = cx1 - rng2.randint(0, (cx1 - cx0) // 4)
+                tw  = rng2.randint(2, 4)
+                br  = 0.70 * rng2.uniform(0.9, 1.1)
+                for px in range(tx0, tx1):
+                    for dy in range(-tw // 2, tw // 2 + 1):
+                        py = ty + dy
+                        if y0 <= py < y1 and cx0 <= px < cx1:
+                            buf[py][px] = max(buf[py][px], br)
+            # 1-2 traces V
+            n_v = rng2.randint(1, 2)
+            for _ in range(n_v):
+                tx  = rng2.randint(cx0 + 4, cx1 - 4)
+                ty0b = y0 + rng2.randint(0, (y1 - y0) // 4)
+                ty1b = y1 - rng2.randint(0, (y1 - y0) // 4)
+                tw   = rng2.randint(2, 3)
+                br   = 0.65 * rng2.uniform(0.9, 1.05)
+                for py in range(ty0b, ty1b):
+                    for dx in range(-tw // 2, tw // 2 + 1):
+                        px = tx + dx
+                        if y0 <= py < y1 and cx0 <= px < cx1:
+                            buf[py][px] = max(buf[py][px], br)
+            # Pads
+            n_pads = rng2.randint(1, 3)
+            for _ in range(n_pads):
+                cy2 = rng2.randint(y0 + 6, y1 - 6)
+                cx2 = rng2.randint(cx0 + 6, cx1 - 6)
+                r   = rng2.randint(4, 8)
+                br  = min(1.0, 0.75 * rng2.uniform(1.0, 1.2))
+                for py in range(cy2 - r, cy2 + r + 1):
+                    for px in range(cx2 - r, cx2 + r + 1):
+                        if (px - cx2)**2 + (py - cy2)**2 <= r*r:
+                            if y0 <= py < y1 and cx0 <= px < cx1:
+                                buf[py][px] = br
+
+    # ── Écriture finale ────────────────────────────────────────
+    nrng = random.Random(13)
+    for py in range(size):
+        for px in range(size):
+            g = max(0.0, min(1.0, buf[py][px] + nrng.uniform(-0.008, 0.008)))
+            img.setXelA(px, py, g * 1.02, g, g * 0.95, 1.0)
+
+
 def _draw_circuit_tex(img, size, rng, base_g, trace_g, panel_g):
     """Texture circuit Death Star lisible en mouvement.
 
@@ -689,14 +823,10 @@ def _draw_circuit_tex(img, size, rng, base_g, trace_g, panel_g):
 
 
 def _gen_trench_wall_tex(size=512):
-    """Texture circuit imprimé Death Star pour les murs de la tranchée."""
+    """Texture mur Death Star structurée en registres harmonieux."""
     img = PNMImage(size, size)
     img.makeRgb()
-    rng = random.Random(42)
-    _draw_circuit_tex(img, size, rng,
-                      base_g=0.13,    # fond très sombre
-                      trace_g=0.72,   # traces lumineuses
-                      panel_g=0.28)   # plaques de fond
+    _draw_wall_tex(img, size)
     tex = Texture("trench_wall")
     tex.load(img)
     tex.setWrapU(Texture.WM_repeat)
@@ -772,16 +902,15 @@ class TrenchWallPanel:
         self.node.setLightOff()
 
     def _wall_color(self, z, h):
-        """Couleur vertex = gradient Z × contraste directionnel.
-        Utilisée en mode M_modulate : multipliée par la texture au rendu.
-        Lit  : 0.55 (bas) → 1.00 (haut)   — côté lune
-        Dark : 0.18 (bas) → 0.42 (haut)   — côté ombre
+        """Couleur vertex × texture = pixel final (M_modulate).
+        Lit  : 0.80 (bas) → 1.30 (haut) → texture 0.62 × 1.30 ≈ 0.80 gris clair
+        Dark : 0.12 (bas) → 0.30 (haut) → texture 0.62 × 0.30 ≈ 0.19 gris très sombre
         """
         t = (z + h / 2) / h
         if self.lit:
-            g = 0.55 + 0.45 * t
+            g = 0.80 + 0.50 * t    # max ~1.30, clampé par Panda → ~0.78 gris doux
         else:
-            g = 0.18 + 0.24 * t
+            g = 0.12 + 0.18 * t    # 0.12→0.30, très sombre côté ombre
         return Vec4(g * 1.02, g, g * 0.96, 1.0)
 
     def _make_wall(self, h, d):
@@ -1202,6 +1331,33 @@ class TrenchDecorGroup:
             box.setPos(0, 0, z_off)
         return root
 
+    def _make_light_spot(self, color):
+        """Petit disque plat collé au mur — lumière orange/rouge/verte."""
+        r  = 0.20
+        th = 0.06
+        root  = NodePath("dlspot")
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("lspot", fmt, Geom.UHStatic)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+        segs = 10
+        ht = th / 2
+        # Centre face avant
+        vw.addData3(ht, 0, 0);  cw.addData4(color)
+        for s in range(segs):
+            a = 2 * math.pi * s / segs
+            vw.addData3(ht, r * math.cos(a), r * math.sin(a))
+            cw.addData4(color)
+        tris = GeomTriangles(Geom.UHStatic)
+        for s in range(segs):
+            tris.addVertices(0, 1 + s, 1 + (s + 1) % segs)
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn = GeomNode("dlspot_m")
+        gn.addGeom(geom)
+        NodePath(gn).reparentTo(root)
+        return root
+
     def _make_conduit_group(self, rng, z_center, length):
         """2-4 tuyaux horizontaux parallèles de diamètres variés."""
         root  = NodePath("dconduit")
@@ -1423,6 +1579,24 @@ class TrenchDecorGroup:
             sn.setPos(self.inward * protrude, y, z_ctr)
             placed_y.append(y)
 
+        # ── 5. Petites lumières colorées sur le mur ─────────────
+        # Orange, rouge, vert — accrochées directement au mur (X≈0)
+        light_colors = [
+            Vec4(1.00, 0.50, 0.08, 1.0),   # orange
+            Vec4(1.00, 0.50, 0.08, 1.0),   # orange (plus fréquent)
+            Vec4(0.85, 0.12, 0.08, 1.0),   # rouge
+            Vec4(0.15, 0.90, 0.20, 1.0),   # vert
+        ]
+        n_lights = rng.randint(2, 5)
+        for _ in range(n_lights):
+            ly = rng.uniform(-half_d + 0.5, half_d - 0.5)
+            lz = rng.uniform(self.WALL_Z_LO + 0.8, self.WALL_Z_HI - 0.8)
+            col = rng.choice(light_colors)
+            ls  = self._make_light_spot(col)
+            ls.reparentTo(self.node)
+            # Collé au mur (X=0 car node est déjà à x_wall), orienté vers l'intérieur
+            ls.setPos(self.inward * 0.04, ly, lz)
+
     # ----------------------------------------------------------
 
     def update(self, dt, scroll_speed):
@@ -1543,17 +1717,10 @@ class Environment:
 
     def _spawn_trench_row(self, y):
         d = self.TILE_DEPTH
-        # Varier la texture par segment : ~30% des rangées sont sans texture (zones propres)
-        rng_row = random.Random(int(round(y * 17.3)) & 0xFFFF)
-        tex_l = rng_row.random() > 0.28
-        tex_r = rng_row.random() > 0.28
-        # Côté gauche : dans l'ombre (lit=False) | Côté droit : éclairé par la lune (lit=True)
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False,
-            textured=tex_l))
+            self.game.render, TrenchWallPanel.WALL_X_LEFT,  y, depth=d, lit=False))
         self.wall_panels.append(TrenchWallPanel(
-            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True,
-            textured=tex_r))
+            self.game.render, TrenchWallPanel.WALL_X_RIGHT, y, depth=d, lit=True))
         self.floor_panels.append(TrenchFloorPanel(
             self.game.render, 0, y, depth=d))
         self.surface_panels.append(TrenchSurfacePanel(
