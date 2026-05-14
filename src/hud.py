@@ -601,8 +601,8 @@ class HUD:
             if self.combo_timer <= 0:
                 self.combo_text.setText("")
 
-        # Pyramide altitude
-        self._update_altitude_pyramid(player_z)
+        # Pyramide altitude — désactivée, remplacée par paliers ennemis
+        # self._update_altitude_pyramid(player_z)
 
         # Viseur statique — projection du point de repos du réticule 3D
         self._update_crosshair_static()
