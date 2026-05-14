@@ -278,6 +278,9 @@ class Game(ShowBase):
             self.total_kills += 1
             if score_tracker["last_kill_pos"]:
                 self.spawner.last_kill_pos = score_tracker["last_kill_pos"]
+            for kill_class in score_tracker.get("killed_classes", []):
+                self.force.add_kill(kill_class, torpedo_kill=True)
+                self._register_combo_kill()
 
         # Son laser
         if self.lasers.firing and self.lasers.fire_timer <= 0 and not self.lasers.overheated:

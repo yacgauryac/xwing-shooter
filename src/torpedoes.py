@@ -417,6 +417,9 @@ class TorpedoSystem:
                             score_val = getattr(enemy, 'SCORE_VALUE', 5000)
                             total_score += score_val
                             score_tracker["last_kill_pos"] = Vec3(epos)
+                            score_tracker.setdefault("killed_classes", []).append(
+                                type(enemy).__name__
+                            )
                             explosion_manager.spawn(epos, preset="small", score=score_val)
 
         return total_score
