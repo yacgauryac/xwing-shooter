@@ -418,9 +418,10 @@ class TorpedoSystem:
                     if dist < TORPEDO_SPLASH_RADIUS:
                         destroyed = enemy.hit(TORPEDO_SPLASH_DAMAGE)
                         if destroyed:
-                            total_score += enemy.SCORE_VALUE
+                            score_val = getattr(enemy, 'SCORE_VALUE', 5000)
+                            total_score += score_val
                             score_tracker["last_kill_pos"] = Vec3(epos)
-                            explosion_manager.spawn(epos, preset="small", score=enemy.SCORE_VALUE)
+                            explosion_manager.spawn(epos, preset="small", score=score_val)
 
         return total_score
 
