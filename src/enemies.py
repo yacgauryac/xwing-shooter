@@ -6,8 +6,8 @@ Types : TIE Fighter (standard), TIE Interceptor (rapide), TIE Bomber (tank).
 from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
-    Geom, GeomTriangles, GeomNode,
-    NodePath
+    Geom, GeomTriangles, GeomLines, GeomNode,
+    NodePath, TransparencyAttrib,
 )
 import random
 import math
@@ -21,7 +21,7 @@ import os
 class EnemyBolt:
     """Un tir laser ennemi (vert)."""
 
-    SPEED = 40.0
+    SPEED = 52.0    # +30% — plus rapides, moins faciles à éviter
     DAMAGE = 1
     HIT_RADIUS = 1.8
 
@@ -87,6 +87,40 @@ class EnemyBolt:
 # Classe de base ennemi
 # ============================================================
 
+def _make_drop_line(parent):
+    """Ligne verticale pointillée de l'ennemi jusqu'à Z=0 — repère de hauteur.
+    Dessinée en espace local : de Z=0 (position de l'ennemi) vers Z=-pos.z
+    (sol). Mise à jour chaque frame via setScale.
+    """
+    fmt   = GeomVertexFormat.getV3c4()
+    vdata = GeomVertexData("dline", fmt, Geom.UHStatic)
+    vw = GeomVertexWriter(vdata, "vertex")
+    cw = GeomVertexWriter(vdata, "color")
+
+    # 2 segments discontinus pour effet pointillé (4 points)
+    c_top = Vec4(1.0, 1.0, 1.0, 0.55)
+    c_bot = Vec4(1.0, 1.0, 1.0, 0.0)   # fondu vers le bas
+    vw.addData3(0, 0,  0.0);  cw.addData4(c_top)
+    vw.addData3(0, 0, -1.0);  cw.addData4(c_bot)
+
+    lines = GeomLines(Geom.UHDynamic)
+    lines.addVertices(0, 1)
+
+    geom = Geom(vdata)
+    geom.addPrimitive(lines)
+    gn = GeomNode("drop_line")
+    gn.addGeom(geom)
+    np = NodePath(gn)
+    np.setRenderModeThickness(1.5)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    np.setLightOff()
+    np.setBin("fixed", 5)
+    np.setDepthWrite(False)
+    np.reparentTo(parent)
+    np.setPos(0, 0, 0)
+    return np
+
+
 class BaseEnemy:
     """Classe de base pour tous les ennemis."""
 
@@ -133,6 +167,9 @@ class BaseEnemy:
         self.node = self.load_model()
         self.node.reparentTo(parent_node)
         self.node.setPos(start_pos)
+
+        # Drop-line : repère vertical vers Z=0
+        self._drop_line = _make_drop_line(parent_node)
 
     def load_model(self):
         """Charge le modèle .glb/.gltf (caché) ou fallback procédural."""
@@ -248,6 +285,15 @@ class BaseEnemy:
             self.destroy()
             return None
 
+        # Drop-line : repère vertical ennemi → Z=0
+        epos = self.node.getPos()
+        if epos.getZ() > 0.15:
+            self._drop_line.setPos(epos.getX(), epos.getY(), epos.getZ())
+            self._drop_line.setScale(1, 1, epos.getZ())
+            self._drop_line.show()
+        else:
+            self._drop_line.hide()
+
         # Tir
         self.fire_timer -= dt
         if self.fire_timer <= 0 and player_pos is not None:
@@ -298,6 +344,8 @@ class BaseEnemy:
         self.alive = False
         if not self.node.isEmpty():
             self.node.removeNode()
+        if hasattr(self, '_drop_line') and not self._drop_line.isEmpty():
+            self._drop_line.removeNode()
 
     def get_pos(self):
         if self.alive and not self.node.isEmpty():

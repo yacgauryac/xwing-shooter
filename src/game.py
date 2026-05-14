@@ -31,7 +31,7 @@ from src.levels import LEVELS
 class Game(ShowBase):
     """Classe principale du jeu X-Wing Shooter."""
 
-    PLAYER_MAX_HP = 10
+    PLAYER_MAX_HP = 16   # +6 HP — bolts font 1 dmg, 16 tirs pour mourir
 
     def __init__(self):
         ShowBase.__init__(self)
@@ -264,14 +264,15 @@ class Game(ShowBase):
                 self.hud.show_pickup("+2 HULL")
             self.sounds.play("hit")
 
-        # Torpilles (temps normal pour le joueur)
+        # Torpilles — cibles : ennemis normaux OU boss si phase boss
+        torp_targets = [self.boss] if (self.boss and self.boss.alive) else self.spawner.enemies
         self.torpedoes.update(
             dt_player, self.player.crosshair_x, self.player.crosshair_z,
-            self.spawner.enemies, locking=self.locking
+            torp_targets, locking=self.locking
         )
         score_tracker = {"last_kill_pos": None}
         torpedo_score = self.torpedoes.check_impacts(
-            self.spawner.enemies, self.explosions, score_tracker
+            torp_targets, self.explosions, score_tracker
         )
         if torpedo_score > 0:
             self.spawner.score += torpedo_score

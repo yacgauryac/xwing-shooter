@@ -197,6 +197,28 @@ main.py
 
 ---
 
+## Roadmap
+
+### Priorité 1 — Visuel & Feel
+- [ ] **Couleur réacteurs** : X-Wing réacteurs bleu-blanc, TIE réacteurs rouge-orangé — vertex color animée (pulse)
+- [ ] **Repère hauteur joueur** : plan Z=0 semi-transparent + altimètre HUD (A+C)
+- [ ] **Drop-line ennemis** : ✅ ligne verticale ennemi→Z=0 (D)
+- [ ] **Bank Vader allégé** : coefficient -dx*6 → -dx*2.5, clamp ±40 → ±20°
+- [ ] **Tourelles L4 Nébuleuse** : retirer les tourelles au sol (niveau espace, incohérent)
+- [ ] **Assets 3D** : tourelles, nouveaux ennemis (Sketchfab CC0/CC-BY, format glb)
+
+### Priorité 2 — Gameplay
+- [ ] **Lock torpille Vader** : ✅ passer boss comme cible torpille en phase boss
+- [ ] **IA ennemis** : comportements plus variés, flanking, esquive
+- [ ] **Difficulté progressive** : paramètres dynamiques selon le niveau + kills
+
+### Priorité 3 — Polish
+- [ ] **Son réacteurs** : bruit moteur ambiant, variation selon vitesse
+- [ ] **Écran de fin** : récap score + kills par vague
+- [ ] **Sauvegardes** : config (volume, difficulté) persistante
+
+---
+
 ## Historique des versions
 
 ### v0.1 — Setup projet (commit `fd7c86f`)
