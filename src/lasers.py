@@ -45,7 +45,7 @@ class LaserBolt:
         v1 = GeomVertexWriter(vdata1, "vertex")
         c1 = GeomVertexWriter(vdata1, "color")
 
-        hx, hy, hz = 0.03, 0.8, 0.03
+        hx, hy, hz = 0.06, 1.4, 0.06
         core_back = Vec4(0.9, 0.8, 0.7, 1)
         core_front = Vec4(1.0, 1.0, 1.0, 1)
 
@@ -76,7 +76,7 @@ class LaserBolt:
         v2 = GeomVertexWriter(vdata2, "vertex")
         c2 = GeomVertexWriter(vdata2, "color")
 
-        gx, gy, gz = 0.09, 0.9, 0.09
+        gx, gy, gz = 0.16, 1.6, 0.16
         glow_back  = Vec4(color_back.getX(),  color_back.getY(),  color_back.getZ(),  0.4)
         glow_front = Vec4(color_front.getX(), color_front.getY(), color_front.getZ(), 0.5)
 
