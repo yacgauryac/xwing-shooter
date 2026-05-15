@@ -45,6 +45,9 @@
 #### 1. Visuels distincts par niveau
 - [ ] L1 (Champ d'astéroïdes) : actuel ✅
 - [ ] L2 (Surface lunaire) : plan de terrain, tourelles sol, éclairage monochrome
+  - [ ] Spaceport — bâtiments procéduraux, lignes de piste, structures
+  - [ ] Navmesh — ennemis contournent les bâtiments et la surface lunaire
+  - [ ] **Bug connu** : boss touche les murs et traverse la lune → navmesh obligatoire pour L2
 - [ ] L3 (Tranchée) : murs latéraux défilants, espace étroit, éclairage industriel
 - [ ] L4 (Nébuleuse) : volume de brouillard, faible visibilité, particules, éclairage tamisé
 - [ ] Couleur de fond change par niveau

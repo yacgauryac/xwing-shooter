@@ -14,6 +14,7 @@ from panda3d.core import (
 import random
 import math
 import os
+from src.lunar_base import LunarBaseGroup
 
 
 class AsteroidModelCache:
@@ -1748,6 +1749,7 @@ class Environment:
 
         # Listes spécifiques L2/L3
         self.terrain_tiles  = []   # L2 sol lunaire
+        self.base_groups    = []   # L2 bâtiments spaceport
         self.wall_panels    = []   # L3 murs tranchée
         self.floor_panels   = []   # L3 sol tranchée
         self.surface_panels = []   # L3 surface Death Star (au-dessus des murs)
@@ -1784,12 +1786,19 @@ class Environment:
     # ----------------------------------------------------------
 
     def _init_lunar(self):
-        """L2 — Sol continu du joueur jusqu'à SPAWN_DEPTH, pas d'overlap (bords déterministes)."""
+        """L2 — Sol continu + groupes de bâtiments spaceport."""
         d = self.TILE_DEPTH
         y = 15.0
         while y <= self.SPAWN_DEPTH + d:
             self.terrain_tiles.append(LunarTerrain(self.game.render, 0, y, depth=d))
             y += d
+        # Groupes de bâtiments toutes les ~55 unités
+        by = 50.0
+        seed = 1337
+        while by <= self.SPAWN_DEPTH:
+            self.base_groups.append(LunarBaseGroup(self.game, by, seed))
+            by += random.uniform(48, 70)
+            seed += 97
 
     def _init_trench(self):
         """L3 — Tranchée continue + brouillard linéaire pour masquer le clipping."""
@@ -1904,16 +1913,7 @@ class Environment:
             d.update(dt)
 
     def _update_l2(self, dt, scroll_speed):
-        """L2 — Surface lunaire : rochers gris + terrain continu."""
-        speed_factor = scroll_speed / 20.0
-
-        # Rochers lunaires
-        self.asteroid_timer -= dt
-        if self.asteroid_timer <= 0:
-            self._spawn_lunar_rock(scroll_speed)
-            self.asteroid_timer = (self.ASTEROID_INTERVAL * 0.85) / speed_factor
-        for a in self.asteroids:
-            a.update(dt)
+        """L2 — Surface lunaire : terrain continu + bâtiments spaceport (pas de rochers)."""
 
         # Terrain sol — spawn basé sur la position Y (pas de timer)
         for t in self.terrain_tiles:
@@ -1921,20 +1921,24 @@ class Environment:
 
         alive_tiles = [t for t in self.terrain_tiles if t.alive and not t.node.isEmpty()]
         max_tile_y = max((t.node.getY() for t in alive_tiles), default=0)
-        # Spawn quand le bord avant de la dernière dalle arrive à SPAWN_DEPTH
-        # → nouvelle dalle exactement un TILE_DEPTH devant la dernière, zéro overlap
         if max_tile_y < self.SPAWN_DEPTH - self.TILE_DEPTH / 2:
             new_y = max_tile_y + self.TILE_DEPTH
             self.terrain_tiles.append(
                 LunarTerrain(self.game.render, 0, new_y, depth=self.TILE_DEPTH))
 
-        # Débris rocheux légers
-        self.debris_timer -= dt
-        if self.debris_timer <= 0:
-            self._spawn_debris(scroll_speed)
-            self.debris_timer = (self.DEBRIS_INTERVAL * 1.4) + random.uniform(-1, 1)
-        for d in self.debris:
-            d.update(dt)
+        # Bâtiments spaceport
+        for bg in self.base_groups:
+            bg.update(dt, scroll_speed)
+        self.base_groups = [bg for bg in self.base_groups if bg.alive]
+        # Spawn de nouveaux groupes
+        if self.base_groups:
+            max_by = max(bg.node.getY() for bg in self.base_groups if not bg.node.isEmpty())
+        else:
+            max_by = 40.0
+        if max_by < self.SPAWN_DEPTH - 50:
+            new_y  = max_by + random.uniform(45, 65)
+            seed   = int(abs(new_y) * 17 + len(self.base_groups) * 53) & 0xFFFF
+            self.base_groups.append(LunarBaseGroup(self.game, new_y, seed))
 
     def _update_l3(self, dt, scroll_speed):
         """L3 — Tranchée : murs + sol + surface Death Star continus."""
@@ -1998,8 +2002,10 @@ class Environment:
     # ----------------------------------------------------------
 
     def check_player_collision(self, player_pos):
-        """Vérifie collision avec décor. Retourne les dégâts."""
+        """Vérifie collision avec décor. Retourne (damage, push_x)."""
         damage = 0
+        push_x = 0.0
+
         for asteroid in self.asteroids:
             if not asteroid.alive:
                 continue
@@ -2022,7 +2028,15 @@ class Environment:
                 damage += 1
                 d.destroy()
 
-        return damage
+        # Bâtiments L2
+        for bg in self.base_groups:
+            dmg, px = bg.check_collision(player_pos)
+            if dmg > 0:
+                damage += dmg
+                push_x  = px
+                break   # un seul bâtiment à la fois
+
+        return damage, push_x
 
     # ----------------------------------------------------------
     # Spawners

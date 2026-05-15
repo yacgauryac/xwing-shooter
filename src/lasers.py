@@ -198,28 +198,22 @@ class LaserSystem:
                 self.fire_pair(player_node, force_active=True)
                 self.fire_timer = self.FIRE_RATE * 0.7  # Tir plus rapide
         else:
-            # Gestion surchauffe normale
-            if self.overheated:
-                self.cooldown_timer -= dt
-                if self.cooldown_timer <= 0:
-                    self.overheated = False
-                    self.heat = 0.0
-                    self.cooldown_timer = 0.0
+            # Refroidissement
+            if not self.firing or self.overheated:
+                self.heat = max(0, self.heat - self.HEAT_DECAY * dt)
             else:
-                if not self.firing:
-                    self.heat = max(0, self.heat - self.HEAT_DECAY * dt)
-                else:
-                    self.heat = max(0, self.heat - self.HEAT_DECAY * 0.3 * dt)
+                self.heat = max(0, self.heat - self.HEAT_DECAY * 0.3 * dt)
 
-                if self.firing and self.fire_timer <= 0 and not self.overheated:
-                    self.fire_pair(player_node)
-                    self.fire_timer = self.FIRE_RATE
-                    self.heat += self.HEAT_PER_SHOT
+            # Débloque dès que la chaleur repasse sous 50% (pas besoin d'attendre 0)
+            if self.overheated and self.heat <= self.OVERHEAT_THRESHOLD * 0.25:
+                self.overheated = False
 
-                    if self.heat >= self.OVERHEAT_THRESHOLD:
-                        self.overheated = True
-                        self.cooldown_timer = self.COOLDOWN_TIME
-                        self.cooldown_total = self.COOLDOWN_TIME
+            if self.firing and self.fire_timer <= 0 and not self.overheated:
+                self.fire_pair(player_node)
+                self.fire_timer = self.FIRE_RATE
+                self.heat += self.HEAT_PER_SHOT
+                if self.heat >= self.OVERHEAT_THRESHOLD:
+                    self.overheated = True
 
         # Update bolts
         for bolt in self.bolts:

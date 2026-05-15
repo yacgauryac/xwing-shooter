@@ -297,15 +297,11 @@ class HUD:
         self._torp_diamonds = []
 
         # ===== WARNINGS near-ship (overheat + torp low) =====
+        # Texte WARN clignotant near-ship
         self._warn_overheat = OnscreenText(
-            text="", pos=(0, 0.12), scale=0.032,
-            fg=Vec4(1.0, 0.15, 0.0, 1.0), align=TextNode.ACenter,
-            mayChange=True, sort=55, shadow=(0,0,0,0.8),
-        )
-        self._warn_torp = OnscreenText(
-            text="", pos=(0, 0.07), scale=0.028,
-            fg=Vec4(1.0, 0.65, 0.1, 1.0), align=TextNode.ACenter,
-            mayChange=True, sort=55, shadow=(0,0,0,0.8),
+            text="", pos=(0, 0), scale=0.022,
+            fg=Vec4(1.0, 0.35, 0.0, 1.0), align=TextNode.ACenter,
+            mayChange=True, sort=56, shadow=(0,0,0,0.7),
         )
         self._warn_torp_shown = False
 
@@ -395,17 +391,7 @@ class HUD:
         self.combo_timer = 0.0
 
         # (pips 3D torpilles supprimés — remplacés par losange aspect2d near-ship)
-
-        # ===== BARRE CHALEUR LASER (suit le vaisseau) =====
-        self.heat_bar_root = game.render.attachNewNode("heat_bar_3d")
-        self.heat_bar_root.setLightOff()
-        self.heat_bar_root.setBin("fixed", 46)
-        self.heat_bar_root.setDepthWrite(False)
-        self.heat_bar_root.setDepthTest(False)
-        self.heat_bar_root.setTransparency(TransparencyAttrib.MAlpha)
-        self._heat_bar_fill = None
-        self._heat_bar_bg   = None
-        self._build_heat_bar_3d()
+        # (barre chaleur 3D supprimée — remplacée par warning near-ship)
 
         # ===== PYRAMIDE ALTITUDE =====
         self.altitude_root = game.aspect2d.attachNewNode("altitude_pyramid")
@@ -522,9 +508,8 @@ class HUD:
         self.score_text.setText(f"{score:,}".replace(",", " "))
 
         # Torpilles + warnings
-        self._update_torp_display(torpedo_count, 20, self.blink_timer)
-        if player_node:
-            self._update_heat_bar_3d(player_node, heat_pct, overheated, self.blink_timer)
+        self._update_torp_display(torpedo_count, 20, self.blink_timer, player_node)
+        self._update_heat_warnings(player_node, heat_pct, overheated, self.blink_timer)
 
         # Force gauge — drain continu en usage, recharge aux kills
         if force_active:
@@ -569,14 +554,16 @@ class HUD:
             bar_c = C_DANGER
         _update_bar(self.shield_bar, hp, bar_c)
 
-        # Laser energy
-        disp = cooldown_pct if overheated else heat_pct
-        energy = 1.0 - disp
+        # Laser energy — même valeur que l'arc camembert : 1 - heat_pct
+        energy = 1.0 - heat_pct
         if overheated:
             blink = abs(math.sin(self.blink_timer * 6))
             self.overheat_text.setText("OVERHEAT")
             self.overheat_text.setFg(Vec4(1, 0.15, 0.05, 0.5 + 0.5 * blink))
             _update_bar(self.heat_bar, energy, C_DANGER)
+        elif heat_pct > 0.75:
+            _update_bar(self.heat_bar, energy, C_WARN)
+            self.overheat_text.setText("")
         else:
             self.overheat_text.setText("")
             _update_bar(self.heat_bar, energy, C_ORANGE)
@@ -699,7 +686,7 @@ class HUD:
         np.setRenderModeThickness(1.8)
         np.setTransparency(TransparencyAttrib.MAlpha)
 
-    def _update_torp_display(self, torpedo_count, max_torp, blink_timer):
+    def _update_torp_display(self, torpedo_count, max_torp, blink_timer, player_node=None):
         """Met à jour le chiffre torpilles bas + warnings near-ship."""
         if torpedo_count <= 3:
             pulse = abs(math.sin(blink_timer * 8))
@@ -711,85 +698,28 @@ class HUD:
         self.torpedo_count_text.setText(str(torpedo_count))
         self.torpedo_count_text['fg'] = fg
 
-        # Warning torpilles basses (≤ 1/3 du max)
-        if torpedo_count <= max_torp // 3 and torpedo_count > 0:
-            if torpedo_count <= 3:
-                pulse = abs(math.sin(blink_timer * 7))
-                self._warn_torp['fg'] = Vec4(1.0, 0.1+0.1*pulse, 0.0, 1.0)
-                self._warn_torp.setText("◆ TORP CRITIQUE ◆")
-            else:
-                self._warn_torp['fg'] = Vec4(1.0, 0.65, 0.1, 0.9)
-                self._warn_torp.setText("◆ TORP FAIBLES")
-        else:
-            self._warn_torp.setText("")
 
-    def _build_heat_bar_3d(self):
-        """Barre chaleur 3D — géométrie de 0 à BAR_W dans plan XZ.
-        Root positionné au bord gauche → setScale(pct) = remplissage gauche→droite."""
-        BAR_W = 1.6
-        BAR_H = 0.10
-        fmt = GeomVertexFormat.getV3c4()
+    def _update_heat_warnings(self, player_node, heat_pct, overheated, blink_timer):
+        """Texte WARN clignotant near-ship — en dessous du vaisseau, centré."""
+        warn_x, warn_z = 0.0, -0.15
+        if player_node and not player_node.isEmpty():
+            game = self.game
+            sp = player_node.getPos()
+            p_cam = game.camera.getRelativePoint(game.render, sp)
+            p2d = Point2()
+            if game.camLens.project(p_cam, p2d):
+                ar = game.getAspectRatio()
+                warn_x = p2d.getX() * ar
+                warn_z = p2d.getY() - 0.10
 
-        # Fond sombre (0 → BAR_W)
-        vd = GeomVertexData("hbg", fmt, Geom.UHStatic)
-        v = GeomVertexWriter(vd, "vertex"); c = GeomVertexWriter(vd, "color")
-        col_bg = Vec4(0.08, 0.04, 0.01, 0.65)
-        v.addData3(0,     0,      0); c.addData4(col_bg)
-        v.addData3(BAR_W, 0,      0); c.addData4(col_bg)
-        v.addData3(BAR_W, 0, BAR_H); c.addData4(col_bg)
-        v.addData3(0,     0, BAR_H); c.addData4(col_bg)
-        tris = GeomTriangles(Geom.UHStatic)
-        tris.addVertices(0,1,2); tris.addVertices(0,2,3)
-        g = Geom(vd); g.addPrimitive(tris)
-        gn = GeomNode("hbg"); gn.addGeom(g)
-        bg2 = NodePath(gn); bg2.reparentTo(self.heat_bar_root); bg2.setTransparency(TransparencyAttrib.MAlpha)
+        self._warn_overheat.setPos(warn_x, warn_z)
 
-        # Fill (0 → BAR_W) — setScale(pct,1,1) depuis l'origine = gauche→droite ✓
-        vd2 = GeomVertexData("hbf", fmt, Geom.UHStatic)
-        v2 = GeomVertexWriter(vd2, "vertex"); c2 = GeomVertexWriter(vd2, "color")
-        col_f = Vec4(0.4, 0.9, 0.2, 0.95)
-        v2.addData3(0,     0,      0); c2.addData4(col_f)
-        v2.addData3(BAR_W, 0,      0); c2.addData4(col_f)
-        v2.addData3(BAR_W, 0, BAR_H); c2.addData4(col_f)
-        v2.addData3(0,     0, BAR_H); c2.addData4(col_f)
-        tris2 = GeomTriangles(Geom.UHStatic)
-        tris2.addVertices(0,1,2); tris2.addVertices(0,2,3)
-        g2 = Geom(vd2); g2.addPrimitive(tris2)
-        gn2 = GeomNode("hbf"); gn2.addGeom(g2)
-        fill = NodePath(gn2)
-        fill.reparentTo(self.heat_bar_root)
-        fill.setTransparency(TransparencyAttrib.MAlpha)
-        self._heat_bar_fill = fill
-        self._heat_bar_w    = BAR_W
-
-    def _update_heat_bar_3d(self, player_node, heat_pct, overheated, blink_timer):
-        """Barre chaleur + warning overheat near-ship."""
-        if not player_node or player_node.isEmpty():
-            return
-        pos = player_node.getPos()
-        # Root au bord GAUCHE de la barre, centré sur le vaisseau
-        self.heat_bar_root.setPos(
-            pos.getX() - self._heat_bar_w / 2,
-            pos.getY(),
-            pos.getZ() + 0.85
-        )
-        # setScale sur le fill depuis son origine (0) → gauche→droite comme la barre du bas
-        pct = 1.0 if overheated else max(0.0, heat_pct)
-        self._heat_bar_fill.setScale(pct, 1, 1)
-
-        if overheated:
-            pulse = abs(math.sin(blink_timer * 10))
-            self._heat_bar_fill.setColorScale(1.0, 0.05 + 0.1*pulse, 0.0, 1.0)
-            self._warn_overheat['fg'] = Vec4(1.0, 0.1 + 0.15*pulse, 0.0, 1.0)
-            self._warn_overheat.setText("◆ LASER OVERHEAT ◆")
+        if overheated or heat_pct > 0.75:
+            pulse = abs(math.sin(blink_timer * 8))
+            self._warn_overheat['fg'] = Vec4(1.0, 0.3 + 0.15*pulse, 0.0, 0.5 + 0.5*pulse)
+            self._warn_overheat.setText("WARN")
         else:
             self._warn_overheat.setText("")
-            if heat_pct > 0.75:
-                self._heat_bar_fill.setColorScale(1.0, 0.25, 0.0, 1.0)
-            elif heat_pct > 0.45:
-                self._heat_bar_fill.setColorScale(1.0, 0.6, 0.05, 1.0)
-            else:
-                self._heat_bar_fill.setColorScale(0.4, 1.0, 0.2, 1.0)
 
     def _build_torp_pips(self, max_count):
         """Obsolète."""

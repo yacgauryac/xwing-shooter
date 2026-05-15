@@ -296,7 +296,7 @@ class Game(ShowBase):
 
         # Son de surchauffe
         if self.lasers.overheated and not self._was_overheated:
-            self.sounds.play("overheat")
+            pass  # self.sounds.play("overheat")  # désactivé (trop énervant)
         self._was_overheated = self.lasers.overheated
 
         # Collisions tirs ennemis -> joueur
@@ -316,15 +316,21 @@ class Game(ShowBase):
                     self.hud.show_game_over(self.spawner.score)
                     self._trigger_leaderboard()
 
-            # Collisions astéroïdes
-            asteroid_damage = self.environment.check_player_collision(player_pos)
-            if asteroid_damage > 0:
-                self.player_hp -= asteroid_damage
+            # Collisions décor (astéroïdes + bâtiments L2)
+            env_damage, push_x = self.environment.check_player_collision(player_pos)
+            if env_damage > 0:
+                self.player_hp -= env_damage
                 self.hud.show_damage_flash()
                 self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
                 self.screenshake.trigger(0.4, 0.25)
+                # Éjection latérale si collision bâtiment
+                if push_x != 0.0:
+                    cur = self.player.node.getPos()
+                    new_x = max(-self.player.BOUNDS_X, min(self.player.BOUNDS_X,
+                                                          cur.getX() + push_x))
+                    self.player.node.setX(new_x)
 
                 if self.player_hp <= 0:
                     self.player_hp = 0
@@ -508,6 +514,8 @@ class Game(ShowBase):
             s.destroy()
         for dg in self.environment.decor_groups:
             dg.destroy()
+        for bg in self.environment.base_groups:
+            bg.destroy()
 
         self.environment.asteroids      = []
         self.environment.planets        = []
@@ -518,6 +526,7 @@ class Game(ShowBase):
         self.environment.floor_panels   = []
         self.environment.surface_panels = []
         self.environment.decor_groups   = []
+        self.environment.base_groups    = []
         self.environment.asteroid_timer = 2.0
         self.environment.nebula_timer   = 15.0
         self.environment.debris_timer   = 4.0
