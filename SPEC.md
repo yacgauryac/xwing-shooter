@@ -42,6 +42,8 @@ main.py
 - Rotation visuelle : roll max 30°, pitch max 20°
 - **Barrel roll** : double-tap gauche/droite → 0.6s d'invincibilité, FOV zoom, flash, speed lines, traînées bleues spirale
 - **Crosshair** : spring-damper (pendule physique, inertie + overshoot)
+- **Visée FPS souris** : mode relatif (warp centre chaque frame), `mouse_aim_x/z` clampé ±1.2/±0.9, `MOUSE_SENS=0.004`
+- **Rectangle de visée 3D** : 4 segments UHDynamic en monde, dimensions hitbox, couleur viseur `(0.95,0.82,0.18)`, positionné à Y+60 devant le vaisseau
 - 4 lumières moteurs aux bouts des ailes (pulse rouge ↔ orange)
 - Boucliers : 10 HP max
 
@@ -97,7 +99,14 @@ main.py
 
 ### `src/environment.py` — Environnement (level-aware)
 - **`Environment(game, level=1)`** : décor adapté selon le niveau actif
+- **L99 (Debug)** : 10 astéroïdes/seconde, vitesse aléatoire ×0.5–2.0, visuels L1
 - **L1 (Astéroïdes)** : astéroïdes déformés + nébuleuses + débris + 2 planètes fixes
+- **Danger light astéroïdes** : 3 lumières scopées sur chaque astéroïde (`node.setLight`)
+  - `AmbientLight` teinté couleur viseur `(0.95,0.82,0.18)` — glow uniforme toute surface
+  - `Spotlight` teinté chaud — directionnel côté joueur, évite saturation blanche
+  - `PointLight` halo orange — collé à la surface côté joueur
+  - Intensité linéaire : max quand l'astéroïde est proche devant (`proximity = max(0, 1 - raw_dy/120)`), 0 quand derrière
+  - Extinction progressive sur `_danger_timer` à la désactivation
 - **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés)
 - **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
 - **L4 (Nébuleuse)** : nébuleuses denses × 2 + planète violette de fond
@@ -106,11 +115,11 @@ main.py
 - Tuilage : step exact = `TILE_DEPTH`, spawn runtime à `max_y + TILE_DEPTH` → 0 overlap, 0 Z-fighting
 
 ### `src/hud.py` — Interface
-- Bandeau supérieur semi-transparent : score, vague, hostiles restants
+- Bandeau supérieur semi-transparent : score, vague
 - Jauge shield en arc (vert → jaune → rouge)
 - Jauge heat en arc (orange → rouge, clignotement surchauffe)
 - Flash de dégât orange
-- Annonce "WAVE X INCOMING" avec fade
+- **Annonce wave** : "WAVE X" haut-gauche `(-1.20, 0.90)`, dezoom `0.065→0.040` + fade sur 2s
 - **Panneau radio boss** (bas d'écran) : rectangle + 2 demi-cercles procéduraux en GeomTriangles, fond sombre + bordure orange, barre HP couleur dynamique, texte nom + phase. Visible uniquement pendant le combat boss.
 - Screen flash blanc : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s
 - Texte combo : `show_combo(count)` — "xN COMBO!" orange pulsant 1.5s
@@ -127,8 +136,9 @@ main.py
 - Champs : nom, score, vague, kills, date
 
 ### `src/levels.py` — Niveaux
-- `LEVELS` dict : 4 niveaux avec `name`, `waves`, `intro_text`, `bg_color`, `description`
+- `LEVELS` dict : 4 niveaux + L99 debug, avec `name`, `waves`, `intro_text`, `bg_color`, `description`
 - L1 Asteroid Field → L2 Lunar Surface → L3 Death Star Trench → L4 Nebula
+- L99 DEBUG : astéroïdes only, 999 vagues, 100 HP
 - `LevelManager` : transitions entre niveaux (infrastructure, partiellement câblée)
 
 ### `src/menu.py` — Menu principal
@@ -454,6 +464,29 @@ main.py
 - **LunarTerrain** : courbure parabolique sphérique `z = -(x²+y²)/(2×380)` sur tous les vertices; bords Y (`j=0`, `j=segs_y`) déterministes (bump=0) → joints seamless entre dalles consécutives
 - Taux de cratères 3 niveaux : `bump < -0.18` → dark 0.72 / `bump < 0` → 0.88 / positif → 1.0
 - Toutes les surfaces décor : `setLightOff()` → couleurs vertex brutes sans teinte de l'éclairage scène
+
+### v0.21 — Debug mode, FPS aim, danger light astéroïdes, L99
+
+#### `src/game.py`
+- **Debug (key 2)** : labels Y jaune pastel, hitbox wireframe verte `(0.0,1.0,0.4,0.385)`, label X 3D billboard `setScale(0.408)` attaché à render
+- **Debug (key 3)** : mode squelette toggle — affiche les arêtes du modèle
+- `return_to_menu()` : cleanup complet terrain_tiles, wall_panels, floor_panels, surface_panels, decor_groups, base_groups, boss + `clearFog()` + reset background
+- `env_level = self.selected_level` (corrige L99 qui recevait toujours level=1)
+
+#### `src/player.py`
+- Visée FPS souris relative : delta centre → `mouse_aim_x/z` clampé ±1.2/±0.9, warp chaque frame
+- Rectangle de visée 3D UHDynamic 4 segments, couleur `(0.95,0.82,0.18,0.50)`
+- Spring crosshair : target = ship_pos + mouse_offset
+
+#### `src/hud.py`
+- Annonce wave : suppression "INCOMING", position haut-gauche, dezoom+fade 2s
+- Compteur hostiles supprimé
+
+#### `src/environment.py`
+- Danger light : `AmbientLight` + `Spotlight` + `PointLight` scopés par astéroïde
+- Couleur viseur `(0.95,0.82,0.18)` sur ambient et spot, orange sur halo
+- Intensité linéaire distance Y, extinction progressive
+- L99 : `_debug_asteroids=True` → interval 0.1s (10/s), vitesse ×0.5–2.0
 
 ### v0.14 — Bugfixes : keys / torpilles / fullscreen
 - **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)
