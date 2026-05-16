@@ -27,14 +27,14 @@ BOSS_BOLT_SPEED   = 58.0
 
 # ── Mouvement — orbite selon HP ───────────────────────────────────────────────
 # yo = décalage Y devant le joueur (boss reste proche pour rester visible et hittable)
-ORBIT_HIGH   = dict(rx=18.0, rz=8.0, spd=0.55, yo=60)   # HP > 65 %
-ORBIT_MID    = dict(rx=15.0, rz=7.0, spd=0.80, yo=45)   # HP 32-65 %
-ORBIT_LOW    = dict(rx=12.0, rz=6.0, spd=1.15, yo=32)   # HP < 32 % (erratique)
+ORBIT_HIGH   = dict(rx=18.0, rz=8.0, spd=0.55, yo=90)   # HP > 65 %
+ORBIT_MID    = dict(rx=15.0, rz=7.0, spd=0.80, yo=70)   # HP 32-65 %
+ORBIT_LOW    = dict(rx=12.0, rz=6.0, spd=1.15, yo=50)   # HP < 32 % (erratique)
 
 CHARGE_SPEED    = 38.0
 CHARGE_DURATION = 1.2
 STRAFE_RADIUS   = 11.0
-RETREAT_Y       = 55.0   # Retraite longue — boss prend de la distance
+RETREAT_Y       = 90.0   # Retraite longue — boss prend de la distance
 LERP_NORMAL     = 2.5    # Lerp mouvement normal
 LERP_CHARGE     = 8.0    # Lerp pendant la charge
 
@@ -61,8 +61,8 @@ class BossTIEAdvanced:
         self.hit_radius = BOSS_HIT_RADIUS
 
         # Mouvement
-        self.pos             = Vec3(0, 80, 5)
-        self.smoothed_target = Vec3(0, 80, 5)  # Buffer de lissage — absorbe les sauts
+        self.pos             = Vec3(0, 130, 5)
+        self.smoothed_target = Vec3(0, 130, 5)  # Buffer de lissage — absorbe les sauts
         self.move_timer      = 0.0
 
         # État charge

@@ -215,57 +215,50 @@ class LockIndicator:
         self.timer = 0.0
 
     def _make_diamond(self):
-        """Losange/bracket autour de la cible."""
+        """Losange/bracket orange — style original."""
         from panda3d.core import GeomLines
         fmt = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("lock", fmt, Geom.UHStatic)
         v = GeomVertexWriter(vdata, "vertex")
         c = GeomVertexWriter(vdata, "color")
-
-        s = 1.2
+        s   = 1.2
         col = Vec4(1.0, 0.6, 0.1, 0.9)
-
-        # 4 coins du losange (brackets)
-        # Top
-        v.addData3(-s*0.3, 0, s); c.addData4(col)
-        v.addData3(0, 0, s*1.2); c.addData4(col)
-        v.addData3(s*0.3, 0, s); c.addData4(col)
-        # Right
-        v.addData3(s, 0, s*0.3); c.addData4(col)
-        v.addData3(s*1.2, 0, 0); c.addData4(col)
-        v.addData3(s, 0, -s*0.3); c.addData4(col)
-        # Bottom
-        v.addData3(s*0.3, 0, -s); c.addData4(col)
-        v.addData3(0, 0, -s*1.2); c.addData4(col)
-        v.addData3(-s*0.3, 0, -s); c.addData4(col)
-        # Left
-        v.addData3(-s, 0, -s*0.3); c.addData4(col)
-        v.addData3(-s*1.2, 0, 0); c.addData4(col)
-        v.addData3(-s, 0, s*0.3); c.addData4(col)
-
+        # 4 coins (top, right, bottom, left) — 3 pts chacun
+        v.addData3(-s*0.3, 0,  s);    c.addData4(col)
+        v.addData3( 0,     0,  s*1.2);c.addData4(col)
+        v.addData3( s*0.3, 0,  s);    c.addData4(col)
+        v.addData3( s,     0,  s*0.3);c.addData4(col)
+        v.addData3( s*1.2, 0,  0);    c.addData4(col)
+        v.addData3( s,     0, -s*0.3);c.addData4(col)
+        v.addData3( s*0.3, 0, -s);    c.addData4(col)
+        v.addData3( 0,     0, -s*1.2);c.addData4(col)
+        v.addData3(-s*0.3, 0, -s);    c.addData4(col)
+        v.addData3(-s,     0, -s*0.3);c.addData4(col)
+        v.addData3(-s*1.2, 0,  0);    c.addData4(col)
+        v.addData3(-s,     0,  s*0.3);c.addData4(col)
         lines = GeomLines(Geom.UHStatic)
         for i in range(4):
-            base = i * 3
-            lines.addVertices(base, base + 1)
-            lines.addVertices(base + 1, base + 2)
-
-        geom = Geom(vdata)
-        geom.addPrimitive(lines)
-        node = GeomNode("lock_indicator")
-        node.addGeom(geom)
-        np = NodePath(node)
+            b = i * 3
+            lines.addVertices(b, b+1); lines.addVertices(b+1, b+2)
+        geom = Geom(vdata); geom.addPrimitive(lines)
+        gn   = GeomNode("lock_indicator"); gn.addGeom(geom)
+        np   = NodePath(gn)
         np.setRenderModeThickness(2.0)
         return np
 
-    def update(self, dt, target_pos):
+    def update(self, dt, target_pos, target_dist=None):
         self.timer += dt
         if target_pos:
             self.node.show()
             self.node.setPos(target_pos)
             self.node.lookAt(self.game.camera)
-            # Pulse
             pulse = 0.9 + 0.2 * math.sin(self.timer * 8.0)
-            self.node.setScale(pulse)
+            # Plus grand quand la cible est proche
+            if target_dist is not None:
+                dist_scale = max(0.8, min(1.8, 1.8 - (target_dist - 5) / 55))
+            else:
+                dist_scale = 1.0
+            self.node.setScale(pulse * dist_scale)
             self.node.setColorScale(1, 1, 1, 0.7 + 0.3 * math.sin(self.timer * 6.0))
         else:
             self.node.hide()
@@ -356,10 +349,15 @@ class TorpedoSystem:
         self.update_lock(crosshair_x, crosshair_z, enemies)
 
         # Lock indicator
-        lock_pos = None
+        lock_pos  = None
+        lock_dist = None
         if self.locked_target and self.locked_target.alive:
             lock_pos = self.locked_target.get_pos()
-        self.lock_indicator.update(dt, lock_pos)
+            if lock_pos:
+                from panda3d.core import Point3
+                ppos = Point3(crosshair_x, 20 + 60, crosshair_z)
+                lock_dist = (lock_pos - ppos).length()
+        self.lock_indicator.update(dt, lock_pos, lock_dist)
 
         # Update torpilles
         for torp in self.torpedoes:

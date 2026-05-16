@@ -43,6 +43,13 @@ LEVELS = {
         "bg_color": (0.03, 0.01, 0.05),
         "description": "All enemies — maximum difficulty",
     },
+    99: {
+        "name": "DEBUG — ASTEROIDS",
+        "waves": 999,
+        "intro_text": "DEBUG MODE",
+        "bg_color": (0.0, 0.0, 0.0),
+        "description": "Asteroids only — no enemies — 100 HP",
+    },
 }
 
 

@@ -10,6 +10,8 @@ from panda3d.core import (
     Geom, GeomTriangles, GeomNode,
     NodePath, TransparencyAttrib,
     Fog, Texture, TextureStage, PNMImage,
+    AmbientLight, PointLight, Spotlight,
+    PerspectiveLens,
 )
 import random
 import math
@@ -106,6 +108,31 @@ class Asteroid:
         self.node.reparentTo(parent)
         self.node.setPos(pos)
 
+        # ── AmbientLight jaune — glow uniforme sur toute la surface ──
+        self._glow    = AmbientLight("ast_glow")
+        self._glow.setColor(Vec4(0.0, 0.0, 0.0, 1.0))
+        self._glow_np = parent.attachNewNode(self._glow)
+        self.node.setLight(self._glow_np)
+
+        # ── Spotlight directionnel — vient du côté joueur ──
+        self._spot    = Spotlight("ast_spot")
+        self._spot.setColor(Vec4(0.0, 0.0, 0.0, 1.0))
+        lens = PerspectiveLens()
+        lens.setFov(55)
+        self._spot.setLens(lens)
+        self._spot_np = parent.attachNewNode(self._spot)
+        self.node.setLight(self._spot_np)
+
+        # ── PointLight halo — collé à la surface côté joueur ──
+        self._halo    = PointLight("ast_halo")
+        self._halo.setColor(Vec4(0.0, 0.0, 0.0, 1.0))
+        self._halo_np = parent.attachNewNode(self._halo)
+        self.node.setLight(self._halo_np)
+
+        self._danger_active = False
+        self._danger_timer  = 0.0
+        self._player_pos    = None
+
     def _make_deformed_sphere(self, size):
         """Crée une sphère UV déformée aléatoirement — chaque astéroïde est unique."""
         root = NodePath("asteroid")
@@ -197,6 +224,15 @@ class Asteroid:
 
         return root
 
+    def set_danger_light(self, active, player_pos=None):
+        """Active/désactive les lumières danger. player_pos mis à jour chaque frame."""
+        self._danger_active = active
+        self._player_pos    = player_pos
+        if not active:
+            self._glow.setColor(Vec4(0.0, 0.0, 0.0, 1.0))
+            self._spot.setColor(Vec4(0.0, 0.0, 0.0, 1.0))
+            self._halo.setColor(Vec4(0.0, 0.0, 0.0, 1.0))
+
     def update(self, dt):
         if not self.alive:
             return
@@ -211,6 +247,53 @@ class Asteroid:
             r + self.rot_speed.getZ() * dt,
         )
 
+        # Lumières danger — intensité proportionnelle à la proximité
+        if self._danger_active and self._player_pos is not None:
+            self._danger_timer += dt
+
+            ax = self.node.getX()
+            ay = self.node.getY()
+            az = self.node.getZ()
+            dx = self._player_pos.getX() - ax
+            dy = self._player_pos.getY() - ay
+            dz = self._player_pos.getZ() - az
+            length = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+            if length > 0.01:
+                nx, ny, nz = dx/length, dy/length, dz/length
+                SPOT_DIST = 8.0
+                self._spot_np.setPos(ax + nx * SPOT_DIST,
+                                     ay + ny * SPOT_DIST,
+                                     az + nz * SPOT_DIST)
+                self._spot_np.lookAt(self.node)
+                HALO_DIST = self.hit_radius * 1.05
+                self._halo_np.setPos(ax + nx * HALO_DIST,
+                                     ay + ny * HALO_DIST,
+                                     az + nz * HALO_DIST)
+
+            # Intensité : max quand l'astéroïde est juste devant, 0 quand derrière
+            raw_dy = ay - self._player_pos.getY()
+            proximity = max(0.0, 1.0 - raw_dy / 120.0)
+            # AmbientLight — couleur viseur (0.95, 0.82, 0.18)
+            g = proximity * 0.64
+            self._glow.setColor(Vec4(g * 0.95, g * 0.82, g * 0.18, 1.0))
+            # Spotlight teinté chaud — évite la saturation blanche sur astéroïdes clairs
+            spot_i = proximity * 0.64
+            self._spot.setColor(Vec4(spot_i * 0.95, spot_i * 0.82, spot_i * 0.18, 1.0))
+            # PointLight halo orange
+            halo_i = proximity * 1.6
+            self._halo.setColor(Vec4(halo_i * 0.9, halo_i * 0.55, halo_i * 0.05, 1.0))
+
+        elif not self._danger_active:
+            # Extinction progressive
+            if self._danger_timer > 0:
+                self._danger_timer = max(0.0, self._danger_timer - dt * 4.0)
+                g = self._danger_timer * 0.224
+                self._glow.setColor(Vec4(g * 0.95, g * 0.82, g * 0.18, 1.0))
+                f = self._danger_timer * 0.28
+                self._spot.setColor(Vec4(f * 0.95, f * 0.82, f * 0.18, 1.0))
+                self._halo.setColor(Vec4(f * 0.9, f * 0.55, f * 0.05, 1.0))
+
         if self.node.getY() < -20:
             self.destroy()
 
@@ -222,7 +305,16 @@ class Asteroid:
     def destroy(self):
         self.alive = False
         if not self.node.isEmpty():
+            self.node.clearLight(self._glow_np)
+            self.node.clearLight(self._spot_np)
+            self.node.clearLight(self._halo_np)
             self.node.removeNode()
+        if not self._glow_np.isEmpty():
+            self._glow_np.removeNode()
+        if not self._spot_np.isEmpty():
+            self._spot_np.removeNode()
+        if not self._halo_np.isEmpty():
+            self._halo_np.removeNode()
 
 
 class DistantPlanet:
@@ -1755,10 +1847,13 @@ class Environment:
         self.surface_panels = []   # L3 surface Death Star (au-dessus des murs)
         self.decor_groups   = []   # L3 décorations 3D sur les murs
 
-        # Timers
-        self.asteroid_timer = 2.0
+        # Timers — niveau 99 (debug) : 3× plus d'astéroïdes, vitesses aléatoires
+        self._debug_asteroids = (level == 99)
+        debug = self._debug_asteroids
+        self.asteroid_timer = 0.1 if debug else 2.0
         self.nebula_timer   = 15.0
         self.debris_timer   = 4.0
+        self._asteroid_interval = 0.1 if debug else self.ASTEROID_INTERVAL   # L99 : 10/s
 
         self.star_destroyer = None
 
@@ -1771,8 +1866,8 @@ class Environment:
             Vec4(0.9, 0.6, 0.1, 1),
         ]
 
-        # Init selon le niveau
-        if level == 1:
+        # Init selon le niveau (L99 = visuels L1)
+        if level in (1, 99):
             self._spawn_fixed_planets()
         elif level == 2:
             self._init_lunar()
@@ -1862,7 +1957,7 @@ class Environment:
     # ----------------------------------------------------------
 
     def update(self, dt, scroll_speed):
-        if self.level == 1:
+        if self.level in (1, 99):
             self._update_l1(dt, scroll_speed)
         elif self.level == 2:
             self._update_l2(dt, scroll_speed)
@@ -1893,7 +1988,10 @@ class Environment:
         self.asteroid_timer -= dt
         if self.asteroid_timer <= 0:
             self._spawn_asteroid(scroll_speed)
-            self.asteroid_timer = self.ASTEROID_INTERVAL / speed_factor
+            if self._debug_asteroids:
+                self.asteroid_timer = self._asteroid_interval   # fixe 0.1s en L99
+            else:
+                self.asteroid_timer = self._asteroid_interval / speed_factor
 
         for a in self.asteroids:
             a.update(dt)
@@ -2047,7 +2145,10 @@ class Environment:
         z = random.uniform(-self.FIELD_HEIGHT, self.FIELD_HEIGHT)
         y = self.SPAWN_DEPTH + random.uniform(0, 50)
         size = random.uniform(0.8, 3.0)
-        speed = scroll_speed * random.uniform(0.8, 1.2)
+        if getattr(self, '_debug_asteroids', False):
+            speed = scroll_speed * random.uniform(0.5, 2.0)   # L99 : vitesse aléatoire large
+        else:
+            speed = scroll_speed * random.uniform(0.8, 1.2)
         self.asteroids.append(Asteroid(self.game.render, Point3(x, y, z), size, speed))
 
     def _spawn_lunar_rock(self, scroll_speed):

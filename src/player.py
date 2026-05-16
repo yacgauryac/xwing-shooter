@@ -23,6 +23,11 @@ class Player:
     MOVE_SPEED = 12.0
     LERP_SPEED = 12.0
 
+    # Rectangle de visée (mode FPS)
+    AIM_W     = 1.2    # demi-largeur  (≈ hitbox X)
+    AIM_H     = 0.9    # demi-hauteur  (≈ hitbox Z)
+    MOUSE_SENS = 0.004  # pixels bruts → unités monde
+
     # Inclinaisons visuelles
     MAX_ROLL = 30.0    # Roulis quand on va à gauche/droite
     MAX_PITCH = 20.0   # Piqué/cabré quand on monte/descend
@@ -91,21 +96,32 @@ class Player:
         self.crosshair = self._create_crosshair()
         self.crosshair.reparentTo(game.render)
         self.crosshair.setLightOff()
+
+        # Rectangle de visée FPS
+        self._aim_rect_np, self._aim_rect_vd = self._create_aim_rect()
         self.crosshair_x = 0.0
         self.crosshair_z = 0.0
         self.crosshair_vx = 0.0  # Vitesse du réticule (inertie)
         self.crosshair_vz = 0.0
+
+        # Offset souris dans le rectangle de visée (FPS)
+        self.mouse_aim_x = 0.0
+        self.mouse_aim_z = 0.0
 
         # Paramètres physiques du réticule
         self.CH_SPRING = 15.0    # Force du ressort (rappel vers le vaisseau)
         self.CH_DAMPING = 6.0    # Amortissement (freine les oscillations)
         self.CH_DISTANCE = 60.0  # Distance devant le vaisseau
 
-        # Souris libre
+        # Souris — mode absolu + warp centre (FPS aim)
         props = WindowProperties()
-        props.setCursorHidden(False)
+        props.setCursorHidden(True)
         props.setMouseMode(WindowProperties.M_absolute)
         game.win.requestProperties(props)
+        # Warp initial au centre pour éviter un delta parasite au premier frame
+        cx = game.win.getXSize() // 2
+        cy = game.win.getYSize() // 2
+        game.win.movePointer(0, cx, cy)
 
         # Caméra derrière — vue légèrement du dessus
         game.camera.setPos(0, -4, 3.0)
@@ -446,86 +462,98 @@ class Player:
                 self.current_roll,
             )
 
-        # --- Réticule : spring-damper (pendule au bout d'une tige) ---
-        # Le réticule est "attaché" au vaisseau par un ressort.
-        # Quand le vaisseau bouge, le réticule résiste (inertie),
-        # puis dépasse (overshoot), puis revient (oscillation amortie).
+        # --- Réticule FPS : souris → offset dans rectangle → spring vers cible ---
         ship_x = new_pos.getX()
         ship_z = new_pos.getZ()
 
-        # Force du ressort : tire le réticule vers la position du vaisseau
-        spring_fx = (ship_x - self.crosshair_x) * self.CH_SPRING
-        spring_fz = (ship_z - self.crosshair_z) * self.CH_SPRING
+        # Lecture souris (delta depuis centre, warp chaque frame)
+        win = self.game.win
+        w, h = win.getXSize(), win.getYSize()
+        cx, cy = w // 2, h // 2
+        ptr = win.getPointer(0)
+        raw_dx = max(-50, min(50, ptr.getX() - cx))
+        raw_dy = max(-50, min(50, ptr.getY() - cy))
+        win.movePointer(0, cx, cy)
 
-        # Amortissement : freine la vitesse du réticule
-        damp_fx = -self.crosshair_vx * self.CH_DAMPING
-        damp_fz = -self.crosshair_vz * self.CH_DAMPING
+        self.mouse_aim_x = max(-self.AIM_W, min(self.AIM_W,
+                               self.mouse_aim_x + raw_dx * self.MOUSE_SENS))
+        self.mouse_aim_z = max(-self.AIM_H, min(self.AIM_H,
+                               self.mouse_aim_z - raw_dy * self.MOUSE_SENS))
 
-        # Accélération = ressort + amortissement
+        # Cible du spring = ship + offset souris
+        target_x = ship_x + self.mouse_aim_x
+        target_z = ship_z + self.mouse_aim_z
+
+        # Spring-damper vers la cible souris
+        spring_fx = (target_x - self.crosshair_x) * self.CH_SPRING
+        spring_fz = (target_z - self.crosshair_z) * self.CH_SPRING
+        damp_fx   = -self.crosshair_vx * self.CH_DAMPING
+        damp_fz   = -self.crosshair_vz * self.CH_DAMPING
         ax = spring_fx + damp_fx
         az = spring_fz + damp_fz
-
-        # Intègre la vitesse et la position
         self.crosshair_vx += ax * dt
         self.crosshair_vz += az * dt
-        self.crosshair_x += self.crosshair_vx * dt
-        self.crosshair_z += self.crosshair_vz * dt
+        self.crosshair_x  += self.crosshair_vx * dt
+        self.crosshair_z  += self.crosshair_vz * dt
 
         crosshair_y = new_pos.getY() + self.CH_DISTANCE
         self.crosshair.setPos(self.crosshair_x, crosshair_y, self.crosshair_z)
 
+        # Rectangle de visée (centré sur le vaisseau, suivi en XZ)
+        self._update_aim_rect(ship_x, crosshair_y, ship_z)
+
     def _create_crosshair(self):
-        """Crée un réticule de visée (carré avec croix, style Star Fox)."""
+        """Réticule — 2 brackets courbés (gauche/droit) style image de référence.
+        Chaque bracket = arc ~150° avec dégradé : transparent aux bouts, opaque au centre."""
         root = NodePath("crosshair")
+        root.reparentTo(self.game.render)
+        root.setLightOff()
+        root.setTransparency(TransparencyAttrib.MAlpha)
 
-        fmt = GeomVertexFormat.getV3c4()
+        fmt   = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("crosshair", fmt, Geom.UHStatic)
-        vertex = GeomVertexWriter(vdata, "vertex")
-        color = GeomVertexWriter(vdata, "color")
+        vw    = GeomVertexWriter(vdata, "vertex")
+        cw    = GeomVertexWriter(vdata, "color")
 
-        # Couleur : vert semi-transparent
-        c = Vec4(0.2, 1.0, 0.3, 0.6)
+        R    = 0.55    # rayon du bracket
+        SEGS = 18      # segments par arc — plus lisse
+        SPAN = 1.40    # demi-ouverture en radians (~80°) de chaque côté du centre
 
-        radius = 0.6
-        gap = 0.15  # Espace entre les arcs (en radians)
-        segments_per_arc = 8
-
-        # 4 arcs de cercle séparés (haut, droite, bas, gauche)
-        # Chaque arc couvre ~70° avec un gap de ~20° entre eux
-        arc_angles = [
-            (math.pi/2 + gap, math.pi - gap),      # Haut-gauche → haut-droit
-            (0 + gap, math.pi/2 - gap),             # Droite-bas → droite-haut
-            (-math.pi/2 + gap, 0 - gap),            # Bas-droite → bas-gauche (ajusté)
-            (math.pi + gap, math.pi * 1.5 - gap),   # Gauche-haut → gauche-bas
-        ]
+        # Bracket gauche : centré sur math.pi (←), bracket droit : centré sur 0 (→)
+        centers = [math.pi, 0.0]
 
         verts = []
-        for a_start, a_end in arc_angles:
-            for i in range(segments_per_arc + 1):
-                t = i / segments_per_arc
-                a = a_start + t * (a_end - a_start)
-                verts.append((math.cos(a) * radius, 0, math.sin(a) * radius))
+        for ca in centers:
+            a0 = ca - SPAN
+            a1 = ca + SPAN
+            for i in range(SEGS + 1):
+                t  = i / SEGS
+                a  = a0 + t * (a1 - a0)
+                # Dégradé : transparent aux extrémités, vif au centre
+                fade  = 1.0 - 2.0 * abs(t - 0.5)   # 0→1→0
+                alpha = fade ** 1.4                  # courbe douce
+                verts.append((math.cos(a) * R, 0, math.sin(a) * R,
+                              0.95, 0.82, 0.18, alpha))
 
-        for v in verts:
-            vertex.addData3(*v)
-            color.addData4(c)
+        for (x, y, z, r, g, b, a) in verts:
+            vw.addData3(x, y, z)
+            cw.addData4(r, g, b, a)
 
         lines = GeomLines(Geom.UHStatic)
-        # Arcs uniquement — pas de point/croix central
         idx = 0
-        for _ in range(4):
-            for i in range(segments_per_arc):
+        for _ in range(2):   # 2 brackets
+            for i in range(SEGS):
                 lines.addVertices(idx + i, idx + i + 1)
-            idx += segments_per_arc + 1
+            idx += SEGS + 1
 
-        geom = Geom(vdata)
-        geom.addPrimitive(lines)
-        node = GeomNode("crosshair_geom")
-        node.addGeom(geom)
-
-        np = NodePath(node)
+        geom = Geom(vdata); geom.addPrimitive(lines)
+        gn   = GeomNode("crosshair_geom"); gn.addGeom(geom)
+        np   = NodePath(gn)
         np.reparentTo(root)
-        np.setRenderModeThickness(2)
+        np.setRenderModeThickness(2.5)
+        np.setDepthWrite(False)
+        np.setDepthTest(False)
+        np.setBin("fixed", 55)
 
         return root
 
@@ -616,6 +644,42 @@ class Player:
     def show_shield_hit(self, impact_pos=None):
         """Flash rouge sur le vaisseau quand touché."""
         self.shield_flash_timer = 0.25
+
+    def _create_aim_rect(self):
+        """Rectangle de visée FPS — 4 lignes en 3D monde (UHDynamic)."""
+        fmt = GeomVertexFormat.getV3c4()
+        vd  = GeomVertexData("aim_rect", fmt, Geom.UHDynamic)
+        vw  = GeomVertexWriter(vd, "vertex")
+        cw  = GeomVertexWriter(vd, "color")
+        lns = GeomLines(Geom.UHDynamic)
+        col = Vec4(0.95, 0.82, 0.18, 0.50)   # jaune, semi-transparent
+        for _ in range(8):
+            vw.addData3(0, 0, 0); cw.addData4(col)
+        for k in range(0, 8, 2):
+            lns.addVertices(k, k+1)
+        geom = Geom(vd); geom.addPrimitive(lns)
+        gn   = GeomNode("aim_rect"); gn.addGeom(geom)
+        np   = NodePath(gn)
+        np.reparentTo(self.game.render)
+        np.setRenderModeThickness(1.5)
+        np.setLightOff()
+        np.setTransparency(TransparencyAttrib.MAlpha)
+        np.setDepthWrite(False)
+        np.setDepthTest(False)
+        return np, vd
+
+    def _update_aim_rect(self, cx, ry, cz):
+        """Met à jour les 4 coins du rectangle de visée."""
+        W, H = self.AIM_W, self.AIM_H
+        pts = [
+            (cx-W, ry, cz-H), (cx+W, ry, cz-H),   # bas
+            (cx+W, ry, cz-H), (cx+W, ry, cz+H),   # droite
+            (cx+W, ry, cz+H), (cx-W, ry, cz+H),   # haut
+            (cx-W, ry, cz+H), (cx-W, ry, cz-H),   # gauche
+        ]
+        vw = GeomVertexWriter(self._aim_rect_vd, "vertex")
+        for k, (x, y, z) in enumerate(pts):
+            vw.setRow(k); vw.setData3(x, y, z)
 
     def _add_engine_glows(self, model):
         """Ajoute des points rouges lumineux aux 4 réacteurs."""

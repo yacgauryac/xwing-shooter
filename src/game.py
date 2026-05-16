@@ -4,10 +4,14 @@ Phase 3 : explosions, tirs ennemis, sons, vie joueur.
 """
 
 from direct.showbase.ShowBase import ShowBase
+from direct.gui.OnscreenText import OnscreenText
 from panda3d.core import (
-    WindowProperties, Vec3, Vec4, Point3,
+    WindowProperties, Vec3, Vec4, Point2, Point3,
     AmbientLight, DirectionalLight,
-    AntialiasAttrib
+    AntialiasAttrib,
+    GeomVertexFormat, GeomVertexData, GeomVertexWriter,
+    Geom, GeomLines, GeomNode, NodePath, TransparencyAttrib,
+    TextNode,
 )
 
 from src.player import Player
@@ -64,6 +68,17 @@ class Game(ShowBase):
         self.accept("f1", self.toggle_fps)
         self.accept("f11", self.toggle_fullscreen)
 
+        # Fondu au noir — utilisé pour game over → menu
+        from direct.gui.DirectGui import DirectFrame
+        self._fade_overlay = DirectFrame(
+            frameColor=Vec4(0, 0, 0, 0),
+            frameSize=(-2, 2, -2, 2),
+            pos=(0, 0, 0), sortOrder=200,
+        )
+        self._fade_timer    = 0.0
+        self._fade_duration = 1.8
+        self._fading        = False
+
         # Menu principal
         self.menu = MainMenu(self)
         self.menu.show()
@@ -79,7 +94,8 @@ class Game(ShowBase):
             return
 
         self.game_started = True
-        self.selected_level = max(1, min(4, start_level))
+        self.selected_level = start_level if start_level in LEVELS else 1
+        self._debug_level   = (self.selected_level == 99)
 
         # Masque le curseur — doMethodLater évite le conflit avec le clic DirectGUI
         self.taskMgr.doMethodLater(0.05, self._hide_cursor_task, "hide_cursor")
@@ -89,7 +105,9 @@ class Game(ShowBase):
         self.setBackgroundColor(bg[0], bg[1], bg[2], 1)
 
         # Systèmes de jeu
-        self.environment = Environment(self, level=self.selected_level)
+        # L99 passe tel quel à Environment (gère visuels L1 + spawn debug)
+        env_level = self.selected_level if self._debug_level else self.selected_level
+        self.environment = Environment(self, level=env_level)
         self.player = Player(self)
         self.lasers = LaserSystem(self)
         self.spawner = EnemySpawner(self, level=self.selected_level)
@@ -102,20 +120,22 @@ class Game(ShowBase):
         self.lasers.set_enemies(self.spawner)
 
         # État du jeu
-        self.player_hp = self.PLAYER_MAX_HP
+        self.player_hp = 100 if self._debug_level else self.PLAYER_MAX_HP
         self.game_over = False
         self.scroll_speed = 40.0
         self.last_wave = 1
         self.last_score = 0
         self.total_kills = 0
         self.torpedo_count = 3
-        self.lb_state = None
-        self.lb_rank = None
         self._was_overheated = False
         self.locking = False
         self.boss = None
         self.boss_phase = None       # None, "active", "destroying", "done"
         self._boss_phase_label = ""  # Suivi transitions de phase boss
+
+        # Mode debug : pas d'ennemis
+        if self._debug_level:
+            self.spawner.stop_spawning()
 
         # VFX — screenshake + slow-mo combo
         self.screenshake   = Screenshake(self)
@@ -130,9 +150,18 @@ class Game(ShowBase):
         self.accept("escape", self._game_escape)
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
-        self.accept("mouse2",    self.toggle_force)       # Molette — Force toggle
-        self.accept("mouse3",    self.fire_torpedo)        # Clic droit — fire torpille
-        self.accept("enter", self._lb_key, ["enter"])
+        self.accept("mouse2",    self.toggle_force)
+        self.accept("mouse3",    self.fire_torpedo)
+        self.accept("2", self._toggle_debug)
+        self.accept("3", self._toggle_skeleton)
+
+        # Mode debug
+        self.debug_mode       = False
+        self._debug_node      = None
+        self._skeleton_mode   = False
+        self._debug_skel_vd   = None
+        self._debug_skel_node = None
+        self._debug_x_label   = None
 
     def setup_window(self):
         props = WindowProperties()
@@ -190,6 +219,16 @@ class Game(ShowBase):
     def update(self, task):
         """Boucle de jeu principale."""
         dt = globalClock.getDt()
+
+        # ── Fondu au noir game over → menu ──
+        if self._fading:
+            self._fade_timer += dt
+            t = min(1.0, self._fade_timer / self._fade_duration)
+            self._fade_overlay["frameColor"] = Vec4(0, 0, 0, t)
+            if t >= 1.0:
+                self._fading = False
+                self.return_to_menu()
+            return task.cont
 
         if self.game_over:
             return task.cont
@@ -299,12 +338,16 @@ class Game(ShowBase):
             pass  # self.sounds.play("overheat")  # désactivé (trop énervant)
         self._was_overheated = self.lasers.overheated
 
+        # Warning astéroïdes proches
+        self._check_asteroid_warning(player_pos)
+
         # Collisions tirs ennemis -> joueur
         if not self.player.invincible:
             damage, hit_positions = self.spawner.check_player_hit(player_pos)
             if damage > 0:
                 self.player_hp -= damage
-                self.hud.show_damage_flash()
+                hp_pct = self.player_hp / self.PLAYER_MAX_HP
+                self.hud.show_damage_flash(hp_pct)
                 self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
@@ -320,7 +363,8 @@ class Game(ShowBase):
             env_damage, push_x = self.environment.check_player_collision(player_pos)
             if env_damage > 0:
                 self.player_hp -= env_damage
-                self.hud.show_damage_flash()
+                hp_pct = self.player_hp / self.PLAYER_MAX_HP
+                self.hud.show_damage_flash(hp_pct)
                 self.hud.show_shield_flash()
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
@@ -429,18 +473,16 @@ class Game(ShowBase):
             player_node=self.player.node,
         )
 
+        # Debug ruler labels
+        if self.debug_mode:
+            self._update_debug_labels()
+
         return task.cont
 
     def reset_game(self):
         """Recommence une partie."""
         if not self.game_over:
             return
-
-        # Nettoie leaderboard screens
-        self.hud._clear_leaderboard()
-        self._lb_unbind_keys()
-        self.lb_state = None
-        self.lb_rank = None
 
         # Nettoie tout
         for enemy in self.spawner.enemies:
@@ -556,9 +598,34 @@ class Game(ShowBase):
         # Restaure les touches de mouvement (z/q/s/d écrasées par le leaderboard)
         self.player.setup_controls()
 
-        # Reset HUD
-        self.hud.game_over_text.setText("")
-        self.hud.game_over_sub.setText("")
+        # Reset HUD complet
+        self.hud.reset()
+
+        # Reset debug
+        if getattr(self, '_skeleton_mode', False):
+            try: self.player.model_node.show()
+            except Exception: pass
+        self._skeleton_mode   = False
+        self._debug_skel_vd   = None
+        self._debug_skel_node = None
+
+        if self._debug_node and not self._debug_node.isEmpty():
+            self._debug_node.removeNode()
+        self._debug_node      = None
+        self._debug_cursor_vd = None
+        self._debug_hitbox_vd = None
+        self.debug_mode       = False
+
+        if hasattr(self, '_debug_label_nodes'):
+            for lbl in self._debug_label_nodes:
+                try: lbl.destroy()
+                except Exception: pass
+            self._debug_label_nodes = []
+
+        if hasattr(self, '_debug_x_label') and self._debug_x_label:
+            try: self._debug_x_label.removeNode()
+            except Exception: pass
+            self._debug_x_label = None
 
     def fire_torpedo(self):
         if self.game_over:
@@ -584,44 +651,22 @@ class Game(ShowBase):
                     self.lasers.cooldown_timer = 0
 
     def _trigger_leaderboard(self):
-        """Appelé au game over — lance le flow leaderboard."""
-        score = self.spawner.score
-        if self.leaderboard.is_high_score(score):
-            self.lb_state = "name_entry"
-            self.hud.show_name_entry()
-            # Active les touches de saisie (lettres A-Z + backspace)
-            for c in "abcdefghijklmnopqrstuvwxyz":
-                self.accept(c, self._lb_key, [c])
-            self.accept("backspace", self._lb_key, ["backspace"])
-        else:
-            self.lb_state = "showing"
-            self.hud.show_leaderboard(self.leaderboard.entries)
+        """Game over — démarre le fondu au noir vers le menu."""
+        self._start_fade_to_menu()
+
+    def _start_fade_to_menu(self):
+        """Lance le fondu au noir (1.8s) puis retourne au menu."""
+        self._fading     = True
+        self._fade_timer = 0.0
+        self._fade_overlay["frameColor"] = Vec4(0, 0, 0, 0)
+
+        # Cache immédiatement tout le HUD
+        if hasattr(self, 'hud'):
+            self.hud.hide_all()
 
     def _lb_unbind_keys(self):
-        """Désactive les touches de saisie du leaderboard."""
-        for c in "abcdefghijklmnopqrstuvwxyz":
-            self.ignore(c)
-        self.ignore("backspace")
-        # Restaure les bindings jeu écrasés par A-Z
-        if self.game_started:
-            self.accept("m", self.sounds.toggle)
-            self.accept("r", self.reset_game)
-
-    def _lb_key(self, key):
-        """Gère les touches pour la saisie du nom."""
-        if self.lb_state != "name_entry":
-            return
-
-        result = self.hud.update_name_entry(key)
-        if result:
-            self._lb_unbind_keys()
-            rank = self.leaderboard.add_score(
-                result, self.spawner.score,
-                self.spawner.wave, self.total_kills
-            )
-            self.lb_rank = rank
-            self.lb_state = "showing"
-            self.hud.show_leaderboard(self.leaderboard.entries, highlight_rank=rank)
+        """Stub de compatibilité (leaderboard supprimé)."""
+        pass
 
     # ------------------------------------------------------------------
     # Combo / slow-motion
@@ -691,18 +736,39 @@ class Game(ShowBase):
                 n.destroy()
             for d in self.environment.debris:
                 d.destroy()
+            for t in self.environment.terrain_tiles:
+                t.destroy()
+            for w in self.environment.wall_panels:
+                w.destroy()
+            for f in self.environment.floor_panels:
+                f.destroy()
+            for s in self.environment.surface_panels:
+                s.destroy()
+            for dg in self.environment.decor_groups:
+                dg.destroy()
+            for bg in self.environment.base_groups:
+                bg.destroy()
+            self.render.clearFog()
+
+        if hasattr(self, 'boss') and self.boss is not None:
+            try: self.boss.cleanup()
+            except Exception: pass
+            self.boss = None
+        self.boss_phase = None
+
         if hasattr(self, 'player'):
             self.player.node.removeNode()
-        if hasattr(self, 'hud'):
-            self.hud._clear_leaderboard()
         if hasattr(self, 'powerups'):
             self.powerups.reset()
         if hasattr(self, 'torpedoes'):
             self.torpedoes.reset()
 
         self.game_started = False
-        self.game_over = False
-        self._set_cursor(True)    # Restaure le curseur au menu
+        self.game_over    = False
+        self._fading      = False
+        self._fade_overlay["frameColor"] = Vec4(0, 0, 0, 0)
+        self.setBackgroundColor(0, 0, 0, 1)   # fond noir au menu
+        self._set_cursor(True)
 
         # Réaffiche le menu
         self.menu.show()
@@ -734,3 +800,380 @@ class Game(ShowBase):
         if h > 0:
             self.camLens.setAspectRatio(w / h)
         return task.done
+
+    # ── Warning astéroïdes ────────────────────────────────────────────────────
+
+    def _check_asteroid_warning(self, player_pos):
+        """Allume la lumière rouge sur les astéroïdes dans la zone de danger."""
+        WARN_DIST_Y = 100.0
+        for ast in self.environment.asteroids:
+            if not ast.alive:
+                continue
+            apos = ast.get_pos()
+            if apos is None:
+                continue
+            dy = apos.getY() - player_pos.getY()
+            dx = abs(apos.getX() - player_pos.getX())
+            dz = abs(apos.getZ() - player_pos.getZ())
+            # Seuil XZ variable selon la distance en Y
+            if dy < 30.0:
+                WARN_DIST_XZ = 8.0   # zone proche — déclenchement large
+            elif dy < 60.0:
+                WARN_DIST_XZ = 6.0   # zone intermédiaire — inchangé
+            else:
+                WARN_DIST_XZ = 5.0   # zone lointaine — déclenchement resserré
+            in_danger = (-15.0 <= dy <= WARN_DIST_Y and dx < WARN_DIST_XZ and dz < WARN_DIST_XZ)
+            ast.set_danger_light(in_danger, player_pos)
+
+    # ── Mode debug ────────────────────────────────────────────────────────────
+
+    def _toggle_debug(self):
+        """Touche 2 — affiche/masque la règle de distance au sol."""
+        self.debug_mode = not self.debug_mode
+        if self.debug_mode:
+            self._build_debug_ruler()
+        else:
+            # Restaure le modèle si squelette actif
+            if getattr(self, '_skeleton_mode', False):
+                try: self.player.model_node.show()
+                except Exception: pass
+            self._skeleton_mode   = False
+            self._debug_skel_vd   = None
+            self._debug_skel_node = None
+
+            if self._debug_node and not self._debug_node.isEmpty():
+                self._debug_node.removeNode()   # supprime tout le sous-arbre (hitbox incluse)
+            self._debug_node      = None
+            self._debug_cursor_vd = None
+            self._debug_hitbox_vd = None
+
+            if hasattr(self, '_debug_label_nodes'):
+                for lbl in self._debug_label_nodes:
+                    try: lbl.removeNode()
+                    except Exception: pass
+                self._debug_label_nodes = []
+
+            if hasattr(self, '_debug_x_label') and self._debug_x_label:
+                try: self._debug_x_label.removeNode()
+                except Exception: pass
+                self._debug_x_label = None
+
+    def _build_debug_ruler(self):
+        """
+        Repère orthonormé debug :
+          Axe Y (vert)  — ligne au sol (Z=FLOOR_Z), X=0 fixe, de Y=0 à Y=200
+          Axe Z (bleu)  — ligne verticale, X=0 Y=15 fixe, de Z=FLOOR_Z à Z=+8
+        Les graduations et labels sont fixes dans le monde — ne bougent pas avec le joueur.
+        Deux curseurs mobiles (lignes courtes) indiquent la position du joueur sur chaque axe.
+        """
+
+        if self._debug_node and not self._debug_node.isEmpty():
+            self._debug_node.removeNode()
+        # Nettoie anciens labels texte 3D
+        if hasattr(self, '_debug_label_nodes'):
+            for lbl in self._debug_label_nodes:
+                try: lbl.removeNode()
+                except Exception: pass
+        self._debug_label_nodes = []
+
+        FLOOR_Z = -8.0
+        CEIL_Z  =  8.0
+        Y_MAX   = 200.0
+        AXIS_X  =  0.0    # les axes sont à X=0, fixes
+        AXIS_Y  = 15.0    # position Y de l'axe altitude (proche du départ)
+
+        C_Y    = Vec4(1.0, 0.95, 0.55, 0.85)  # jaune pastel — axe profondeur
+        C_Z    = Vec4(0.3, 0.6, 1.0, 0.90)   # bleu — axe altitude
+        C_TICK = Vec4(0.7, 0.7, 0.7, 0.45)   # gris — petits repères
+
+        root = self.render.attachNewNode("debug_ruler")
+        root.setLightOff()
+        root.setTransparency(TransparencyAttrib.MAlpha)
+
+        fmt = GeomVertexFormat.getV3c4()
+        vd  = GeomVertexData("ruler", fmt, Geom.UHStatic)
+        vw  = GeomVertexWriter(vd, "vertex")
+        cw  = GeomVertexWriter(vd, "color")
+        lns = GeomLines(Geom.UHStatic)
+        i   = [0]
+
+        def seg(p0, p1, col):
+            vw.addData3(*p0); cw.addData4(col)
+            vw.addData3(*p1); cw.addData4(col)
+            lns.addVertices(i[0], i[0]+1); i[0] += 2
+
+        # ── Axe Y (profondeur) — trait horizontal au sol ──
+        seg((AXIS_X, 0, FLOOR_Z), (AXIS_X, Y_MAX, FLOOR_Z), C_Y)
+        # Graduations Y (petites, grises seulement)
+        for y in range(0, int(Y_MAX)+1, 5):
+            is_main = (y % 10 == 0)
+            if is_main:
+                continue   # skip les barres principales
+            tw = 1.0
+            col = C_TICK
+            seg((AXIS_X - tw, y, FLOOR_Z), (AXIS_X + tw, y, FLOOR_Z), col)
+
+        # ── Axe Z (altitude) — trait vertical fixe ──
+        seg((AXIS_X, AXIS_Y, FLOOR_Z), (AXIS_X, AXIS_Y, CEIL_Z), C_Z)
+        # Graduations Z
+        for z in range(int(FLOOR_Z), int(CEIL_Z)+1, 2):
+            is_main = (z % 4 == 0)
+            tw = 2.5 if is_main else 1.0
+            col = C_Z if is_main else C_TICK
+            seg((AXIS_X - tw, AXIS_Y, z), (AXIS_X + tw, AXIS_Y, z), col)
+
+        geom = Geom(vd); geom.addPrimitive(lns)
+        gn = GeomNode("ruler_static"); gn.addGeom(geom)
+        np_static = NodePath(gn)
+        np_static.reparentTo(root)
+        np_static.setRenderModeThickness(1.5)
+
+        # ── Labels 3D fixes (Text3D via DirectLabel à plat) ──
+        # On utilise des TextNode attachés au render pour qu'ils restent fixes
+        from panda3d.core import TextNode as TN
+        def make_label_3d(text, pos, color):
+            tn = TN("dbg_lbl")
+            tn.setText(text)
+            tn.setTextColor(color)
+            tn.setAlign(TN.ALeft)
+            tn.setCardColor(0, 0, 0, 0)
+            np = root.attachNewNode(tn)
+            np.setPos(*pos)
+            np.setScale(0.8)
+            np.setBillboardAxis()   # toujours face caméra
+            np.setLightOff()
+            return np
+
+        # Labels Y (tous les 10u)
+        for y in range(0, int(Y_MAX)+1, 10):
+            lbl = make_label_3d(f"Y{y}", (AXIS_X + 3.5, y, FLOOR_Z + 0.5), C_Y)
+            self._debug_label_nodes.append(lbl)
+
+        # Labels Z (tous les 4u)
+        for z in range(int(FLOOR_Z), int(CEIL_Z)+1, 4):
+            lbl = make_label_3d(f"Z{z:+d}", (AXIS_X + 3.0, AXIS_Y, z), C_Z)
+            self._debug_label_nodes.append(lbl)
+
+        # ── Géométrie dynamique pour curseurs joueur ──
+        vd2  = GeomVertexData("ruler_dyn", fmt, Geom.UHDynamic)
+        vw2  = GeomVertexWriter(vd2, "vertex")
+        cw2  = GeomVertexWriter(vd2, "color")
+        lns2 = GeomLines(Geom.UHDynamic)
+        C_CUR = Vec4(1.0, 0.9, 0.1, 1.0)   # jaune vif — curseurs joueur
+        # 6 segments × 2 vertices = 12 vertices (init à 0)
+        for _ in range(12):
+            vw2.addData3(0, 0, 0); cw2.addData4(C_CUR)
+        for k in range(0, 12, 2):
+            lns2.addVertices(k, k+1)
+        geom2 = Geom(vd2); geom2.addPrimitive(lns2)
+        gn2 = GeomNode("ruler_cursors"); gn2.addGeom(geom2)
+        np_cur = NodePath(gn2)
+        np_cur.reparentTo(root)
+        np_cur.setRenderModeThickness(2.5)
+
+        # ── Hitbox wireframe — boîte autour du joueur (12 arêtes = 24 vertices) ──
+        vd3  = GeomVertexData("hitbox", fmt, Geom.UHDynamic)
+        vw3  = GeomVertexWriter(vd3, "vertex")
+        cw3  = GeomVertexWriter(vd3, "color")
+        lns3 = GeomLines(Geom.UHDynamic)
+        C_HBX = Vec4(0.0, 1.0, 0.4, 0.385)  # vert clair, transparence -23%
+        for _ in range(24):
+            vw3.addData3(0, 0, 0); cw3.addData4(C_HBX)
+        for k in range(0, 24, 2):
+            lns3.addVertices(k, k+1)
+        geom3 = Geom(vd3); geom3.addPrimitive(lns3)
+        gn3 = GeomNode("hitbox"); gn3.addGeom(geom3)
+        np_hbx = NodePath(gn3)
+        np_hbx.reparentTo(root)
+        np_hbx.setRenderModeThickness(1.5)
+
+        # ── Label X en 3D (position du joueur) ──
+        from panda3d.core import TextNode as TN
+        tn_x = TN("debug_x_label")
+        tn_x.setText("X=+0.0")
+        tn_x.setTextColor(Vec4(1.0, 0.95, 0.55, 0.92))
+        tn_x.setAlign(TN.ARight)
+        tn_x.setCardColor(0, 0, 0, 0)
+        np_x = root.attachNewNode(tn_x)
+        np_x.setScale(0.408)  # -20% supplémentaire
+        np_x.setBillboardAxis()
+        np_x.setLightOff()
+        self._debug_x_label = np_x
+
+        # ── Squelette (géométrie créée par _toggle_skeleton) ──
+        self._skeleton_mode   = False
+        self._debug_skel_vd   = None
+        self._debug_skel_node = None
+
+        self._debug_node      = root
+        self._debug_cursor_vd = vd2
+        self._debug_hitbox_vd = vd3
+        self._debug_axis_x    = AXIS_X
+        self._debug_axis_y    = AXIS_Y
+        self._debug_floor_z   = FLOOR_Z
+
+    def _update_debug_labels(self):
+        """Met à jour uniquement les curseurs joueur (les labels sont fixes)."""
+        if not self.debug_mode or not self._debug_node:
+            return
+        if not hasattr(self, '_debug_cursor_vd') or self._debug_cursor_vd is None:
+            return
+
+        px = self.player.node.getX()
+        py = self.player.node.getY()
+        pz = self.player.node.getZ()
+        ax = self._debug_axis_x
+        ay = self._debug_axis_y
+        fz = self._debug_floor_z
+        TW = 3.5   # demi-largeur des curseurs
+
+        # 6 segments curseurs :
+        # seg 0 : tick sur axe Y (sol) — montre la profondeur du joueur
+        # seg 1 : ligne verticale sur axe Y — sol→joueur
+        # seg 2 : tick sur axe Z — montre l'altitude du joueur
+        # seg 3 : ligne horizontale axe Z → joueur (montre son X)
+        # seg 4 : ligne verticale tombante depuis le joueur jusqu'au sol (à sa vraie position XY)
+        # seg 5 : tick X au sol sous le joueur
+        pts = [
+            # seg 0 — tick profondeur sur axe Y
+            (ax - TW, py, fz),   (ax + TW, py, fz),
+            # seg 1 — ligne verticale axe Y : sol → altitude joueur
+            (ax, py, fz),         (ax, py, pz),
+            # seg 2 — tick altitude sur axe Z
+            (ax - TW, ay, pz),   (ax + TW, ay, pz),
+            # seg 3 — ligne horizontale axe Z → X joueur
+            (ax, ay, pz),         (px, ay, pz),
+            # seg 4 — ligne verticale tombante depuis le joueur jusqu'au sol
+            (px, py, pz),         (px, py, fz),
+            # seg 5 — tick X au sol sous le joueur
+            (px - TW, py, fz),   (px + TW, py, fz),
+        ]
+
+        vw = GeomVertexWriter(self._debug_cursor_vd, "vertex")
+        for k, (x, y, z) in enumerate(pts):
+            vw.setRow(k)
+            vw.setData3(x, y, z)
+
+        # ── Hitbox wireframe ──
+        if hasattr(self, '_debug_hitbox_vd') and self._debug_hitbox_vd is not None:
+            HX, HY, HZ = 1.2, 0.55, 0.90   # demi-dimensions de la boîte
+            corners = [
+                (px-HX, py-HY, pz-HZ), (px+HX, py-HY, pz-HZ),
+                (px+HX, py+HY, pz-HZ), (px-HX, py+HY, pz-HZ),
+                (px-HX, py-HY, pz+HZ), (px+HX, py-HY, pz+HZ),
+                (px+HX, py+HY, pz+HZ), (px-HX, py+HY, pz+HZ),
+            ]
+            edges = [(0,1),(1,2),(2,3),(3,0),
+                     (4,5),(5,6),(6,7),(7,4),
+                     (0,4),(1,5),(2,6),(3,7)]
+            hbx_pts = []
+            for a, b in edges:
+                hbx_pts.append(corners[a])
+                hbx_pts.append(corners[b])
+            vw_h = GeomVertexWriter(self._debug_hitbox_vd, "vertex")
+            for k, (x, y, z) in enumerate(hbx_pts):
+                vw_h.setRow(k); vw_h.setData3(x, y, z)
+
+        # ── Label X en 3D (positionnement) ──
+        if hasattr(self, '_debug_x_label') and self._debug_x_label:
+            # Positionne juste à gauche du vaisseau
+            label_pos = Point3(px - 1.8, py + 0.5, pz + 0.6)
+            self._debug_x_label.setPos(label_pos)
+            # Update texte
+            tn = self._debug_x_label.node()
+            tn.setText(f"X={px:+.1f}")
+
+        # ── Squelette ──
+        if getattr(self, '_skeleton_mode', False) and self._debug_skel_vd is not None:
+            self._update_skeleton_geom()
+
+    # ── Squelette debug ──────────────────────────────────────────────────────
+
+    def _toggle_skeleton(self):
+        """Touche 3 — cache le modèle 3D et affiche le squelette clé du vaisseau."""
+        if not self.debug_mode or not hasattr(self, 'player'):
+            return
+        self._skeleton_mode = not self._skeleton_mode
+        if self._skeleton_mode:
+            self.player.model_node.hide()
+            self._build_skeleton_geom()
+        else:
+            self.player.model_node.show()
+            if self._debug_skel_node and not self._debug_skel_node.isEmpty():
+                self._debug_skel_node.removeNode()
+            self._debug_skel_node = None
+            self._debug_skel_vd   = None
+
+    def _build_skeleton_geom(self):
+        """Crée la géométrie UHDynamic du squelette (80 vertices pré-alloués)."""
+        if not self._debug_node:
+            return
+        fmt = GeomVertexFormat.getV3c4()
+        vd  = GeomVertexData("skel", fmt, Geom.UHDynamic)
+        vw  = GeomVertexWriter(vd, "vertex")
+        cw  = GeomVertexWriter(vd, "color")
+        lns = GeomLines(Geom.UHDynamic)
+
+        C_SKEL = Vec4(0.0, 0.9, 1.0, 1.0)   # cyan
+        for _ in range(80):
+            vw.addData3(0, 0, 0); cw.addData4(C_SKEL)
+        for k in range(0, 80, 2):
+            lns.addVertices(k, k+1)
+        geom = Geom(vd); geom.addPrimitive(lns)
+        gn   = GeomNode("skeleton"); gn.addGeom(geom)
+        np   = NodePath(gn)
+        np.reparentTo(self._debug_node)
+        np.setRenderModeThickness(2.0)
+        np.setLightOff()
+
+        self._debug_skel_node = np
+        self._debug_skel_vd   = vd
+
+    def _update_skeleton_geom(self):
+        """Met à jour les positions du squelette à partir du modèle en cours."""
+        # Points clés en espace local du model_node
+        SKEL_LOCAL = [
+            Point3(0,    1.2,  0.25),   # 0  cockpit
+            Point3(2.5,  0,    0),       # 1  aile G
+            Point3(-2.5, 0,    0),       # 2  aile D
+            Point3(0.9,  0.5,  0.3),    # 3  moteur FL
+            Point3(-0.9, 0.5,  0.3),    # 4  moteur FR
+            Point3(0.9,  0.5, -0.3),    # 5  moteur RL
+            Point3(-0.9, 0.5, -0.3),    # 6  moteur RR
+            Point3(1.0,  1.5,  0.03),   # 7  canon G
+            Point3(-1.0, 1.5,  0.03),   # 8  canon D
+            Point3(0,    0,    0),       # 9  centre
+        ]
+        # Transforme en coordonnées monde
+        wpts = [self.render.getRelativePoint(self.player.model_node, p)
+                for p in SKEL_LOCAL]
+
+        def w(i): return (wpts[i].getX(), wpts[i].getY(), wpts[i].getZ())
+
+        CR = 0.22   # demi-longueur des croix
+        segs = []
+
+        # Croix 3D à chaque point clé
+        for wp in wpts:
+            x, y, z = wp.getX(), wp.getY(), wp.getZ()
+            segs += [(x-CR,y,z),(x+CR,y,z),
+                     (x,y-CR,z),(x,y+CR,z),
+                     (x,y,z-CR),(x,y,z+CR)]   # 6 vertices par point
+
+        # Lignes structurelles
+        segs += [w(1), w(2)]    # envergure ailes
+        segs += [w(0), w(9)]    # cockpit → centre
+        segs += [w(9), w(3)]    # centre → moteur FL
+        segs += [w(9), w(4)]    # centre → moteur FR
+        segs += [w(9), w(5)]    # centre → moteur RL
+        segs += [w(9), w(6)]    # centre → moteur RR
+        segs += [w(0), w(7)]    # cockpit → canon G
+        segs += [w(0), w(8)]    # cockpit → canon D
+
+        # Padding jusqu'à 80 vertices
+        while len(segs) < 80:
+            segs.append((0.0, 0.0, 0.0))
+
+        vw = GeomVertexWriter(self._debug_skel_vd, "vertex")
+        for k, (x, y, z) in enumerate(segs[:80]):
+            vw.setRow(k); vw.setData3(x, y, z)

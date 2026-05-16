@@ -194,6 +194,8 @@ def _make_panel_border(parent, cx, cz, hw, hh, color, segs=16, thickness=1.5):
     return np
 
 
+
+
 class HUD:
     def __init__(self, game):
         self.game = game
@@ -238,17 +240,16 @@ class HUD:
             shadow=(0, 0, 0, 0.8),
         )
 
-        # ===== HOSTILES (haut droit) =====
+        # ===== HOSTILES (masqué) =====
         self.hostiles_label = OnscreenText(
-            text="HOSTILES", pos=(1.2, 0.90), scale=0.028,
-            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ARight,
+            text="", pos=(1.2, 0.90), scale=0.028,
+            fg=Vec4(0.9, 0.55, 0.15, 0.0), align=TextNode.ARight,
             mayChange=False, sort=50,
         )
         self.hostiles_text = OnscreenText(
-            text="0", pos=(1.05, 0.90), scale=0.04,
+            text="", pos=(1.05, 0.90), scale=0.04,
             fg=C_DANGER, align=TextNode.ARight,
             mayChange=True, sort=50,
-            shadow=(0, 0, 0, 0.8),
         )
 
         # ===== BARRES EN BAS (sous la ligne inférieure de l'overlay) =====
@@ -305,28 +306,22 @@ class HUD:
         )
         self._warn_torp_shown = False
 
-        # ===== ANNONCE / FLASH / GAME OVER =====
+        # ===== ANNONCE WAVE — dezoom vers le label permanent =====
         self.wave_announce = OnscreenText(
-            text="", pos=(-1.15, 0.35), scale=0.05,
-            fg=C_BRIGHT, align=TextNode.ALeft, mayChange=True, sort=50,
-            shadow=(0, 0, 0, 0.5),
+            text="", pos=(-1.20, 0.90), scale=0.065,
+            fg=C_BRIGHT, align=TextNode.ALeft, mayChange=True, sort=51,
+            shadow=(0, 0, 0, 0.7),
         )
-        self.announce_timer = 0.0
+        self.announce_timer    = 0.0
+        self._announce_total   = 2.0   # durée totale de l'animation
 
-        self.damage_flash = DirectFrame(
-            frameColor=Vec4(1, 0.3, 0, 0),
-            frameSize=(-2, 2, -2, 2),
-            pos=(0, 0, 0), sortOrder=100,
-        )
-        self.flash_timer = 0.0
-
-        # Shield flash bleu (bords d'écran)
-        self.shield_flash = DirectFrame(
-            frameColor=Vec4(0.8, 0.1, 0.0, 0),
-            frameSize=(-2, 2, -2, 2),
-            pos=(0, 0, 0), sortOrder=99,
-        )
-        self.shield_flash_timer = 0.0
+        # ── Trapèzes dégâts style HL2 — géométrie custom avec dégradé ──
+        self._dmg_left_np  = self._make_damage_trapeze(game, side='left')
+        self._dmg_right_np = self._make_damage_trapeze(game, side='right')
+        self._dmg_timer    = 0.0    # durée restante
+        self._dmg_max      = 2.4    # durée totale fade
+        self._dmg_peak     = 0.0    # intensité au déclenchement (0..1)
+        self._dmg_intensity = 0.0   # intensité courante appliquée aux vertices
 
         self.game_over_text = OnscreenText(
             text="", pos=(0, 0.08), scale=0.1,
@@ -451,9 +446,22 @@ class HUD:
         # ===== VISEUR CENTRE =====
         self.crosshair = self._make_crosshair(game)
 
+        # ===== WARNING ASTÉROÏDES =====
+        self._ast_warn_l = OnscreenText(
+            text="", pos=(-1.30, 0.0), scale=0.055,
+            fg=Vec4(1.0, 0.15, 0.05, 0.0), align=TextNode.ACenter,
+            mayChange=True, sort=80, shadow=(0,0,0,0.6),
+        )
+        self._ast_warn_r = OnscreenText(
+            text="", pos=( 1.30, 0.0), scale=0.055,
+            fg=Vec4(1.0, 0.15, 0.05, 0.0), align=TextNode.ACenter,
+            mayChange=True, sort=80, shadow=(0,0,0,0.6),
+        )
+        self._ast_warn_timer = 0.0
+
     def _make_crosshair(self, game):
-        """Viseur fixe : croix simple 4 branches avec gap central, vert."""
-        c = Vec4(0.2, 1.0, 0.3, 0.75)
+        """Viseur fixe : croix simple 4 branches avec gap central, jaune."""
+        c = Vec4(0.95, 0.82, 0.18, 0.80)
 
         # Nœud racine positionné chaque frame par _update_crosshair_static()
         root = game.aspect2d.attachNewNode("crosshair_static")
@@ -540,9 +548,8 @@ class HUD:
         else:
             self.force_overlay["frameColor"] = Vec4(0.1, 0.15, 0.4, 0)
 
-        # Wave + hostiles
+        # Wave
         self.wave_text.setText(f"{wave}")
-        self.hostiles_text.setText(f"{enemy_count}")
 
         # Shield
         hp = max(0, health / max_health)
@@ -571,30 +578,42 @@ class HUD:
         # Attitude — désactivé
         # self._update_attitude(roll, pitch)
 
-        # Annonce
+        # Annonce wave — dezoom + fade
         if self.announce_timer > 0:
             self.announce_timer -= dt
-            a = min(1.0, self.announce_timer / 0.5)
-            self.wave_announce.setFg(Vec4(C_BRIGHT.getX(), C_BRIGHT.getY(), C_BRIGHT.getZ(), a))
+            progress = max(0.0, self.announce_timer / self._announce_total)  # 1 → 0
+            # dezoom : 0.065 → 0.040 (taille du label permanent)
+            scale = 0.040 + 0.025 * progress
+            self.wave_announce.setScale(scale)
+            # fade : visible la première moitié, disparaît en seconde moitié
+            alpha = min(1.0, progress * 2.0)
+            self.wave_announce.setFg(Vec4(C_BRIGHT.getX(), C_BRIGHT.getY(), C_BRIGHT.getZ(), alpha))
             if self.announce_timer <= 0:
                 self.wave_announce.setText("")
 
-        # Flash dégâts orange
-        if self.flash_timer > 0:
-            self.flash_timer -= dt
-            a = max(0, self.flash_timer / 0.3) * 0.2
-            self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, a)
-            if self.flash_timer <= 0:
-                self.damage_flash["frameColor"] = Vec4(1, 0.4, 0, 0)
+        # ── Trapèzes dégâts style HL2 ──
+        if self._dmg_timer > 0:
+            self._dmg_timer -= dt
+            t = max(0.0, self._dmg_timer / self._dmg_max)
+            a = self._dmg_peak * (t ** 0.55)
+            self._dmg_intensity = a
+            self._set_trapeze_alpha(self._dmg_left_np,  a, 'left')
+            self._set_trapeze_alpha(self._dmg_right_np, a, 'right')
+        elif self._dmg_intensity > 0.0:
+            self._dmg_intensity = 0.0
+            self._set_trapeze_alpha(self._dmg_left_np,  0.0, 'left')
+            self._set_trapeze_alpha(self._dmg_right_np, 0.0, 'right')
 
-        # Flash bouclier bleu
-        if self.shield_flash_timer > 0:
-            self.shield_flash_timer -= dt
-            progress = self.shield_flash_timer / 0.3
-            a = progress * 0.35
-            self.shield_flash["frameColor"] = Vec4(0.9, 0.15, 0.0, a)
-            if self.shield_flash_timer <= 0:
-                self.shield_flash["frameColor"] = Vec4(0.8, 0.1, 0.0, 0)
+        # ── Warning astéroïdes ──
+        if self._ast_warn_timer > 0:
+            self._ast_warn_timer -= dt
+            a = min(1.0, self._ast_warn_timer / 0.25) * 0.95
+            blink = 0.6 + 0.4 * abs(math.sin(self.blink_timer * 14))
+            self._ast_warn_l.setFg(Vec4(1.0, 0.15, 0.05, a * blink))
+            self._ast_warn_r.setFg(Vec4(1.0, 0.15, 0.05, a * blink))
+        else:
+            self._ast_warn_l.setFg(Vec4(1.0, 0.15, 0.05, 0.0))
+            self._ast_warn_r.setFg(Vec4(1.0, 0.15, 0.05, 0.0))
 
         # Pickup text fade
         if self.pickup_timer > 0:
@@ -698,6 +717,54 @@ class HUD:
         self.torpedo_count_text.setText(str(torpedo_count))
         self.torpedo_count_text['fg'] = fg
 
+
+    def _make_damage_trapeze(self, game, side):
+        """Trapèze dégâts — géométrie vertex colors, gradient outer→inner.
+        Outer alpha=1 baked, inner alpha=0. Visibilité via setAlphaScale."""
+        AR        =  1.78
+        OUTER_TOP =  0.82
+        OUTER_BOT = -0.82
+        INNER_TOP =  0.40
+        INNER_BOT = -0.40
+        WIDTH     =  0.50
+
+        if side == 'left':
+            ox = -AR
+            ix = -AR + WIDTH
+        else:
+            ox =  AR
+            ix =  AR - WIDTH
+
+        C_OUTER = (0.70, 0.0, 0.0, 1.0)
+        C_INNER = (0.40, 0.0, 0.0, 0.0)
+
+        fmt = GeomVertexFormat.getV3c4()
+        vd  = GeomVertexData("dmg_trap", fmt, Geom.UHStatic)
+        vw  = GeomVertexWriter(vd, "vertex")
+        cw  = GeomVertexWriter(vd, "color")
+
+        vw.addData3(ox, 0, OUTER_BOT); cw.addData4(*C_OUTER)
+        vw.addData3(ox, 0, OUTER_TOP); cw.addData4(*C_OUTER)
+        vw.addData3(ix, 0, INNER_TOP); cw.addData4(*C_INNER)
+        vw.addData3(ix, 0, INNER_BOT); cw.addData4(*C_INNER)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        tris.addVertices(0, 1, 2)
+        tris.addVertices(0, 2, 3)
+
+        geom = Geom(vd); geom.addPrimitive(tris)
+        gn   = GeomNode(f"dmg_{side}"); gn.addGeom(geom)
+
+        np = game.aspect2d.attachNewNode(gn)
+        np.setTransparency(TransparencyAttrib.MAlpha)
+        np.setDepthTest(False)
+        np.setDepthWrite(False)
+        # PAS de setBin — c'est ce qui cassait setAlphaScale
+        np.setAlphaScale(0.0)   # invisible au départ
+        return np
+
+    def _set_trapeze_alpha(self, np, alpha, side=None):
+        np.setAlphaScale(max(0.0, min(1.0, alpha)))
 
     def _update_heat_warnings(self, player_node, heat_pct, overheated, blink_timer):
         """Texte WARN clignotant near-ship — en dessous du vaisseau, centré."""
@@ -882,15 +949,100 @@ class HUD:
     # ------------------------------------------------------------------
 
     def announce_wave(self, wave_num):
-        self.wave_announce.setText(f"WAVE {wave_num} INCOMING")
-        self.announce_timer = 2.5
+        self.wave_announce.setText(f"WAVE {wave_num}")
+        self.wave_announce.setScale(0.065)
+        self.wave_announce.setFg(Vec4(C_BRIGHT.getX(), C_BRIGHT.getY(), C_BRIGHT.getZ(), 1.0))
+        self.announce_timer = self._announce_total
 
-    def show_damage_flash(self):
-        self.flash_timer = 0.3
+    def show_damage_flash(self, hp_pct=0.5):
+        """Trapèzes rouges latéraux style HL2 — intensité fixe."""
+        self._dmg_peak  = 0.88
+        self._dmg_timer = self._dmg_max
 
     def show_shield_flash(self):
-        """Flash bleu-blanc sur les bords de l'écran."""
-        self.shield_flash_timer = 0.3
+        """Conservé pour compatibilité — ne fait plus rien de visible."""
+        pass
+
+    def show_asteroid_warning(self, side='both'):
+        """Déclenche le warning astéroïde — ◄ à gauche et/ou ► à droite."""
+        self._ast_warn_timer = 0.55
+        txt = "◄ ! ►" if side == 'both' else ("◄ !" if side == 'left' else "! ►")
+        self._ast_warn_l.setText("◄ !")
+        self._ast_warn_r.setText("! ►")
+
+    def hide_all(self):
+        """Cache immédiatement TOUT le HUD — appelé au début du fondu game over."""
+        # Trapèzes
+        self._dmg_timer     = 0.0
+        self._dmg_peak      = 0.0
+        self._dmg_intensity = 0.0
+        self._set_trapeze_alpha(self._dmg_left_np,  0.0)
+        self._set_trapeze_alpha(self._dmg_right_np, 0.0)
+
+        # Flash blanc
+        self.screen_flash_timer = 0.0
+        self.screen_flash["frameColor"] = Vec4(1, 1, 1, 0)
+
+        # Force overlay
+        self.force_overlay["frameColor"] = Vec4(0, 0, 0, 0)
+
+        # Boss bar + textes boss
+        self.hide_boss_bar()
+
+        # Tous les textes HUD
+        self.game_over_text.setText("")
+        self.game_over_sub.setText("")
+        self.wave_announce.setText("")
+        self.pickup_text.setText("")
+        self._warn_overheat.setText("")
+        self.combo_text.setText("")
+        self.overheat_text.setText("")
+        self.force_ready_text.setText("")
+
+        # Warnings astéroïdes
+        self._ast_warn_timer = 0.0
+        self._ast_warn_l.setFg(Vec4(1, 0, 0, 0))
+        self._ast_warn_r.setFg(Vec4(1, 0, 0, 0))
+
+        # Cache les barres + overlay complet
+        self.bar_root.hide()
+        if self.overlay:
+            self.overlay.hide()
+
+    def reset(self):
+        """Remet tous les états transitoires à zéro — appelé au restart."""
+        self._dmg_timer     = 0.0
+        self._dmg_peak      = 0.0
+        self._dmg_intensity = 0.0
+        self._set_trapeze_alpha(self._dmg_left_np,  0.0)
+        self._set_trapeze_alpha(self._dmg_right_np, 0.0)
+
+        self.screen_flash_timer = 0.0
+        self.screen_flash["frameColor"] = Vec4(1, 1, 1, 0)
+        self.force_overlay["frameColor"] = Vec4(0, 0, 0, 0)
+
+        self.blink_timer    = 0.0
+        self.announce_timer = 0.0
+        self.pickup_timer   = 0.0
+
+        self.wave_announce.setText("")
+        self.pickup_text.setText("")
+        self.game_over_text.setText("")
+        self.game_over_sub.setText("")
+        self._warn_overheat.setText("")
+        self.combo_text.setText("")
+        self.overheat_text.setText("")
+
+        self.hide_boss_bar()
+
+        self._ast_warn_timer = 0.0
+        self._ast_warn_l.setFg(Vec4(1, 0, 0, 0))
+        self._ast_warn_r.setFg(Vec4(1, 0, 0, 0))
+
+        # Réaffiche les barres et overlay si cachés
+        self.bar_root.show()
+        if self.overlay:
+            self.overlay.show()
 
     def show_pickup(self, text):
         """Affiche un texte de pickup qui fade."""
