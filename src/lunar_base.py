@@ -182,6 +182,130 @@ def _c(color, alpha):
     return Vec4(color.getX(), color.getY(), color.getZ(), alpha)
 
 
+# ─────────────────────────────────────────────────────────────
+# NeonLineBatch — accumule TOUS les neons d'un groupe en 2 NodePaths
+# BeaconBatch   — accumule toutes les balises en 1 NodePath
+# Résultat : ~60 draw calls transparents → 3 par groupe
+# ─────────────────────────────────────────────────────────────
+
+class _NeonLineBatch:
+    """Accumule les lignes néon de tous les bâtiments d'un groupe.
+    Émet core (fin, opaque) + glow (épais, additif) = 2 draw calls."""
+
+    def __init__(self):
+        fmt       = GeomVertexFormat.getV3c4()
+        self._vc  = GeomVertexData("neon_core", fmt, Geom.UHStatic)
+        self._wvc = GeomVertexWriter(self._vc, "vertex")
+        self._cwc = GeomVertexWriter(self._vc, "color")
+        self._lnc = GeomLines(Geom.UHStatic)
+        self._ic  = 0
+        self._vg  = GeomVertexData("neon_glow", fmt, Geom.UHStatic)
+        self._wvg = GeomVertexWriter(self._vg, "vertex")
+        self._cwg = GeomVertexWriter(self._vg, "color")
+        self._lng = GeomLines(Geom.UHStatic)
+        self._ig  = 0
+
+    def _sc(self, p0, p1, col):
+        self._wvc.addData3(*p0); self._cwc.addData4(col)
+        self._wvc.addData3(*p1); self._cwc.addData4(col)
+        self._lnc.addVertices(self._ic, self._ic + 1); self._ic += 2
+
+    def _sg(self, p0, p1, col):
+        self._wvg.addData3(*p0); self._cwg.addData4(col)
+        self._wvg.addData3(*p1); self._cwg.addData4(col)
+        self._lng.addVertices(self._ig, self._ig + 1); self._ig += 2
+
+    def box_rings(self, ox, oy, oz, hw, hd, z_list, color):
+        """Anneaux horizontaux — oz=centre bâtiment, z_list relatif à oz."""
+        co = Vec4(color.getX(), color.getY(), color.getZ(), 1.00)
+        cg = Vec4(color.getX(), color.getY(), color.getZ(), 0.22)
+        for z in z_list:
+            wz = oz + z
+            self._sc((ox-hw,       oy-hd-0.025, wz), (ox+hw,       oy-hd-0.025, wz), co)
+            self._sc((ox+hw,       oy+hd+0.025, wz), (ox-hw,       oy+hd+0.025, wz), co)
+            self._sc((ox+hw+0.025, oy-hd,       wz), (ox+hw+0.025, oy+hd,       wz), co)
+            self._sc((ox-hw-0.025, oy+hd,       wz), (ox-hw-0.025, oy-hd,       wz), co)
+            self._sg((ox-hw,       oy-hd-0.07,  wz), (ox+hw,       oy-hd-0.07,  wz), cg)
+            self._sg((ox+hw,       oy+hd+0.07,  wz), (ox-hw,       oy+hd+0.07,  wz), cg)
+            self._sg((ox+hw+0.07,  oy-hd,       wz), (ox+hw+0.07,  oy+hd,       wz), cg)
+            self._sg((ox-hw-0.07,  oy+hd,       wz), (ox-hw-0.07,  oy-hd,       wz), cg)
+
+    def cyl_ring(self, ox, oy, oz, r, z_off, color, sides=12):
+        """Anneau circulaire — z_off relatif à oz."""
+        co = Vec4(color.getX(), color.getY(), color.getZ(), 1.00)
+        cg = Vec4(color.getX(), color.getY(), color.getZ(), 0.22)
+        wz = oz + z_off; rc = r + 0.030; rg = r + 0.085
+        for i in range(sides):
+            a0 = 2*math.pi*i/sides; a1 = 2*math.pi*(i+1)/sides
+            self._sc((ox+math.cos(a0)*rc, oy+math.sin(a0)*rc, wz),
+                     (ox+math.cos(a1)*rc, oy+math.sin(a1)*rc, wz), co)
+            self._sg((ox+math.cos(a0)*rg, oy+math.sin(a0)*rg, wz),
+                     (ox+math.cos(a1)*rg, oy+math.sin(a1)*rg, wz), cg)
+
+    def rect_frame(self, ox, oy_face, oz, hw, hh, color):
+        """Cadre XZ à oy_face — oz=centre Z du cadre."""
+        co = Vec4(color.getX(), color.getY(), color.getZ(), 1.00)
+        cg = Vec4(color.getX(), color.getY(), color.getZ(), 0.22)
+        cc = [(ox-hw-0.025, oy_face, oz-hh-0.025), (ox+hw+0.025, oy_face, oz-hh-0.025),
+              (ox+hw+0.025, oy_face, oz+hh+0.025), (ox-hw-0.025, oy_face, oz+hh+0.025)]
+        gc = [(ox-hw-0.07,  oy_face, oz-hh-0.07),  (ox+hw+0.07,  oy_face, oz-hh-0.07),
+              (ox+hw+0.07,  oy_face, oz+hh+0.07),  (ox-hw-0.07,  oy_face, oz+hh+0.07)]
+        for i in range(4):
+            self._sc(cc[i], cc[(i+1)%4], co)
+            self._sg(gc[i], gc[(i+1)%4], cg)
+
+    def emit(self, parent):
+        """Émet core + glow dans parent — 2 draw calls transparents."""
+        for vd, lns, cnt, name, thick, additive in [
+            (self._vc, self._lnc, self._ic, "neon_core", 2.5, False),
+            (self._vg, self._lng, self._ig, "neon_glow", 8.0, True),
+        ]:
+            if cnt == 0:
+                continue
+            geom = Geom(vd); geom.addPrimitive(lns)
+            gn   = GeomNode(name); gn.addGeom(geom)
+            np   = NodePath(gn)
+            np.setRenderModeThickness(thick)
+            np.setLightOff()
+            np.setDepthWrite(False)
+            np.setDepthOffset(-1)
+            np.setTransparency(TransparencyAttrib.MAlpha)
+            if additive:
+                np.setAttrib(ColorBlendAttrib.make(
+                    ColorBlendAttrib.MAdd,
+                    ColorBlendAttrib.OIncomingAlpha,
+                    ColorBlendAttrib.OOne,
+                ))
+            np.reparentTo(parent)
+
+
+class _BeaconBatch:
+    """Accumule les balises lumineuses d'un groupe — 1 draw call."""
+
+    def __init__(self):
+        fmt       = GeomVertexFormat.getV3c4()
+        self._vd  = GeomVertexData("bcn_bat", fmt, Geom.UHStatic)
+        self._vw  = GeomVertexWriter(self._vd, "vertex")
+        self._cw  = GeomVertexWriter(self._vd, "color")
+        self._pts = GeomPoints(Geom.UHStatic)
+        self._vi  = 0
+
+    def add(self, x, y, z, color):
+        self._vw.addData3(x, y, z); self._cw.addData4(color)
+        self._pts.addVertex(self._vi); self._vi += 1
+
+    def emit(self, parent, size=5.0):
+        if self._vi == 0:
+            return
+        geom = Geom(self._vd); geom.addPrimitive(self._pts)
+        gn   = GeomNode("beacons"); gn.addGeom(geom)
+        np   = NodePath(gn)
+        np.setRenderModeThickness(size)
+        np.setTransparency(TransparencyAttrib.MAlpha)
+        np.setLightOff()
+        np.reparentTo(parent)
+
+
 def _neon_box_rings(hw, hd, hh, z_list, color, thick=2.5):
     """Anneau néon avec 2 couches (core + glow). Bloom supprimé — perf."""
     root = NodePath("neon_box_grp")
@@ -274,7 +398,7 @@ def _beacon(x, y, z, color, size=4.0):
 # Fabricants de bâtiments
 # ─────────────────────────────────────────────────────────────
 
-def _make_tower(hw, hd, h, rng):
+def _make_tower(hw, hd, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Tour de contrôle — 1 draw call opaque (batch corps+antenne)."""
     root = NodePath("tower")
     b    = 0.28 + rng.uniform(0, 0.08)
@@ -293,17 +417,22 @@ def _make_tower(hw, hd, h, rng):
     bat.cylinder(0, 0, h/2 + ant_h/2, 0.06, ant_h/2,
                  Vec4(0.18,0.18,0.17,1), Vec4(0.15,0.15,0.14,1), sides=4)
     bat.emit("tower_body").reparentTo(root)
-    _beacon(0, 0, h/2 + ant_h + 0.15, Vec4(1.0, 0.1, 0.1, 1.0), 6).reparentTo(root)
-    _neon_box_rings(hw, hd, h/2,
-                    [-h/2 + h*0.28, -h/2 + h*0.52, -h/2 + h*0.78],
-                    _NEON_ORANGE).reparentTo(root)
+    z_list = [-h/2 + h*0.28, -h/2 + h*0.52, -h/2 + h*0.78]
+    if bb is not None:
+        bb.add(ox, oy, oz + h/2 + ant_h + 0.15, Vec4(1.0, 0.1, 0.1, 1.0))
+    else:
+        _beacon(0, 0, h/2 + ant_h + 0.15, Vec4(1.0, 0.1, 0.1, 1.0), 6).reparentTo(root)
+    if nc is not None:
+        nc.box_rings(ox, oy, oz, hw, hd, z_list, _NEON_ORANGE)
+    else:
+        _neon_box_rings(hw, hd, h/2, z_list, _NEON_ORANGE).reparentTo(root)
     lbl = _imperial_label(rng.choice(_CODES_TOWER))
     lbl.reparentTo(root); lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.12)
     root.setLightOff()
     return root
 
 
-def _make_hangar(hw, hd, h, rng):
+def _make_hangar(hw, hd, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Hangar — 1 draw call opaque (batch corps+faîtage)."""
     root    = NodePath("hangar")
     b       = 0.26 + rng.uniform(0, 0.06)
@@ -325,17 +454,22 @@ def _make_hangar(hw, hd, h, rng):
         tri.addVertices(base, base+2, base+1); tri.addVertices(base+1, base+2, base+3)
     bat._vi += 8
     bat.emit("hangar_body").reparentTo(root)
-    _neon_box_rings(hw, hd, h/2, [h/2 - 0.12], _NEON_ORANGE, thick=3.0).reparentTo(root)
-    _neon_box_rings(hw, hd, h/2, [-h/2 + h*0.42], _NEON_BLUE, thick=2.0).reparentTo(root)
-    door_frame = _neon_rect_frame(hw * 0.75, h * 0.42, _NEON_BLUE, thick=2.5)
-    door_frame.reparentTo(root); door_frame.setPos(0, -hd - 0.04, -h/2 + h * 0.42)
+    if nc is not None:
+        nc.box_rings(ox, oy, oz, hw, hd, [h/2 - 0.12],         _NEON_ORANGE)
+        nc.box_rings(ox, oy, oz, hw, hd, [-h/2 + h*0.42],      _NEON_BLUE)
+        nc.rect_frame(ox, oy - hd - 0.04, oz + (-h/2 + h*0.42), hw*0.75, h*0.42, _NEON_BLUE)
+    else:
+        _neon_box_rings(hw, hd, h/2, [h/2 - 0.12], _NEON_ORANGE, thick=3.0).reparentTo(root)
+        _neon_box_rings(hw, hd, h/2, [-h/2 + h*0.42], _NEON_BLUE, thick=2.0).reparentTo(root)
+        door_frame = _neon_rect_frame(hw * 0.75, h * 0.42, _NEON_BLUE, thick=2.5)
+        door_frame.reparentTo(root); door_frame.setPos(0, -hd - 0.04, -h/2 + h * 0.42)
     lbl = _imperial_label(rng.choice(_CODES_HANGAR), size=0.38)
     lbl.reparentTo(root); lbl.setPos(0, -hd - 0.08, -h/2 + h * 0.72)
     root.setLightOff()
     return root
 
 
-def _make_silo(r, h, rng):
+def _make_silo(r, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Réservoir cylindrique — 1 draw call opaque (batch corps+bandes)."""
     root = NodePath("silo")
     b    = 0.30 + rng.uniform(0, 0.06)
@@ -350,14 +484,21 @@ def _make_silo(r, h, rng):
                  Vec4(0.45, 0.28, 0.10, 0.8),
                  Vec4(0.45, 0.28, 0.10, 0.8), sides=10)
     bat.emit("silo_body").reparentTo(root)
-    _beacon(0, 0, h/2+0.15, Vec4(1.0, 0.65, 0.1, 1.0), 5).reparentTo(root)
-    _neon_cyl_ring(r * 1.02, h/2 - 0.10, _NEON_ORANGE, thick=3.0).reparentTo(root)
-    _neon_cyl_ring(r * 1.02, -h * 0.08,  _NEON_RED,    thick=2.0).reparentTo(root)
+    if bb is not None:
+        bb.add(ox, oy, oz + h/2 + 0.15, Vec4(1.0, 0.65, 0.1, 1.0))
+    else:
+        _beacon(0, 0, h/2+0.15, Vec4(1.0, 0.65, 0.1, 1.0), 5).reparentTo(root)
+    if nc is not None:
+        nc.cyl_ring(ox, oy, oz, r * 1.02,  h/2 - 0.10, _NEON_ORANGE)
+        nc.cyl_ring(ox, oy, oz, r * 1.02, -h * 0.08,   _NEON_RED)
+    else:
+        _neon_cyl_ring(r * 1.02, h/2 - 0.10, _NEON_ORANGE, thick=3.0).reparentTo(root)
+        _neon_cyl_ring(r * 1.02, -h * 0.08,  _NEON_RED,    thick=2.0).reparentTo(root)
     root.setLightOff()
     return root
 
 
-def _make_bunker(hw, hd, h, rng):
+def _make_bunker(hw, hd, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Bunker massif — 1 draw call opaque (batch corps+fente+tourelle)."""
     root = NodePath("bunker")
     b    = 0.22 + rng.uniform(0, 0.05)
@@ -373,16 +514,21 @@ def _make_bunker(hw, hd, h, rng):
                      Vec4(b*0.55, b*0.54, b*0.52, 1),
                      Vec4(b*0.45, b*0.44, b*0.42, 1), sides=6)
     bat.emit("bunker_body").reparentTo(root)
-    slit_frame = _neon_rect_frame(hw * 0.55, h * 0.12, _NEON_RED, thick=2.5)
-    slit_frame.reparentTo(root); slit_frame.setPos(0, hd + 0.08, 0)
-    _neon_box_rings(hw, hd, h/2, [h/2 - 0.08], _NEON_ORANGE, thick=2.5).reparentTo(root)
+    if nc is not None:
+        # fente facade arrière (hd+0.08) ; cadre centré sur oz
+        nc.rect_frame(ox, oy + hd + 0.08, oz, hw*0.55, h*0.12, _NEON_RED)
+        nc.box_rings(ox, oy, oz, hw, hd, [h/2 - 0.08], _NEON_ORANGE)
+    else:
+        slit_frame = _neon_rect_frame(hw * 0.55, h * 0.12, _NEON_RED, thick=2.5)
+        slit_frame.reparentTo(root); slit_frame.setPos(0, hd + 0.08, 0)
+        _neon_box_rings(hw, hd, h/2, [h/2 - 0.08], _NEON_ORANGE, thick=2.5).reparentTo(root)
     lbl = _imperial_label(rng.choice(_CODES_BUNKER))
     lbl.reparentTo(root); lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.65)
     root.setLightOff()
     return root
 
 
-def _make_antenna_mast(r, h, rng):
+def _make_antenna_mast(r, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Mât d'antenne — mât en batch, bras gardés en NodePaths (rotation HPR)."""
     root    = NodePath("antenna")
     bat     = _GeomBatch()
@@ -414,12 +560,15 @@ def _make_antenna_mast(r, h, rng):
         arm_np = NodePath(gn)
         arm_np.reparentTo(root); arm_np.setHpr(angle, 90, 0)
         arm_np.setPos(0, 0, h/2 * frac); arm_np.setLightOff()
-    _beacon(0, 0, h/2+0.12, Vec4(1.0, 0.15, 0.15, 1.0), 4).reparentTo(root)
+    if bb is not None:
+        bb.add(ox, oy, oz + h/2 + 0.12, Vec4(1.0, 0.15, 0.15, 1.0))
+    else:
+        _beacon(0, 0, h/2+0.12, Vec4(1.0, 0.15, 0.15, 1.0), 4).reparentTo(root)
     root.setLightOff()
     return root
 
 
-def _make_landing_pad(r, rng):
+def _make_landing_pad(r, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Plate-forme hexagonale surélevée avec balises."""
     root  = NodePath("pad")
     SIDES = 6
@@ -453,7 +602,10 @@ def _make_landing_pad(r, rng):
         a = 2*math.pi*i/SIDES + math.pi/6
         cx, cy = math.cos(a)*r, math.sin(a)*r
         col = Vec4(0.1, 0.4, 1.0, 0.95) if i%2==0 else Vec4(1.0, 0.88, 0.1, 0.9)
-        _beacon(cx, cy, h_plat+0.15, col, 3).reparentTo(root)
+        if bb is not None:
+            bb.add(ox + cx, oy + cy, oz + h_plat + 0.15, col)
+        else:
+            _beacon(cx, cy, h_plat+0.15, col, 3).reparentTo(root)
 
     # Croix centrale
     fmt2  = GeomVertexFormat.getV3c4()
@@ -478,7 +630,7 @@ def _make_landing_pad(r, rng):
     return root
 
 
-def _make_relay_tower(r, h, rng):
+def _make_relay_tower(r, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     """Tour relais — 1 draw call opaque (corps+disque, rotation disque ignorée)."""
     root = NodePath("relay")
     b    = 0.25 + rng.uniform(0, 0.05)
@@ -490,9 +642,16 @@ def _make_relay_tower(r, h, rng):
                  Vec4(0.30, 0.28, 0.25, 0.9),
                  Vec4(0.38, 0.36, 0.33, 0.9), sides=12)
     bat.emit("relay_body").reparentTo(root)
-    _beacon(0, 0, h/2+h*0.14, Vec4(1.0, 0.85, 0.1, 1.0), 5).reparentTo(root)
-    _neon_cyl_ring(r*3.5, h/2 + h*0.07, _NEON_ORANGE, thick=2.5, sides=14).reparentTo(root)
-    _neon_cyl_ring(r,    -h * 0.12,      _NEON_WHITE,  thick=2.0, sides=8).reparentTo(root)
+    if bb is not None:
+        bb.add(ox, oy, oz + h/2 + h*0.14, Vec4(1.0, 0.85, 0.1, 1.0))
+    else:
+        _beacon(0, 0, h/2+h*0.14, Vec4(1.0, 0.85, 0.1, 1.0), 5).reparentTo(root)
+    if nc is not None:
+        nc.cyl_ring(ox, oy, oz, r*3.5,  h/2 + h*0.07, _NEON_ORANGE, sides=14)
+        nc.cyl_ring(ox, oy, oz, r,      -h * 0.12,     _NEON_WHITE,  sides=8)
+    else:
+        _neon_cyl_ring(r*3.5, h/2 + h*0.07, _NEON_ORANGE, thick=2.5, sides=14).reparentTo(root)
+        _neon_cyl_ring(r,    -h * 0.12,      _NEON_WHITE,  thick=2.0, sides=8).reparentTo(root)
     root.setLightOff()
     return root
 
@@ -686,12 +845,18 @@ class LunarBaseGroup:
         rng    = random.Random(seed)
         layout = self._pick_layout(rng, LUNAR.get("enabled_layouts"))
         mark   = _pick_mark_style(rng)
+
+        # Batches créés AVANT layout — les bâtiments y accumulent neons + balises
+        # Résultat : ~60 draw calls transparents → 3 (core + glow + beacons)
+        self._neon_bat   = _NeonLineBatch()
+        self._beacon_bat = _BeaconBatch()
+
         _make_ground_markings(self.node, rng, mark)
         getattr(self, f'_layout_{layout}')(rng)
 
-        # LOD neons — collecte après construction
-        self._neon_nodes  = self.node.findAllMatches("**/neon_*")
-        self._neon_lod_on = True   # état courant (True = visibles)
+        # Émet les batches dans le groupe
+        self._neon_bat.emit(self.node)
+        self._beacon_bat.emit(self.node)
 
     # ── Sélection anti-répétition ─────────────────────────────
 
@@ -723,19 +888,21 @@ class LunarBaseGroup:
         if style not in PARAMS:
             return
         hw, hd, h = PARAMS[style]
+        bz = GROUND_Z + h / 2
+        nc = self._neon_bat; bb = self._beacon_bat
 
         MAKERS = {
-            'tower':   lambda: _make_tower(hw, hd, h, rng),
-            'hangar':  lambda: _make_hangar(hw, hd, h, rng),
-            'silo':    lambda: _make_silo(hw, h, rng),
-            'bunker':  lambda: _make_bunker(hw, hd, h, rng),
-            'antenna': lambda: _make_antenna_mast(hw, h, rng),
-            'pad':     lambda: _make_landing_pad(hw, rng),
-            'relay':   lambda: _make_relay_tower(hw, h, rng),
+            'tower':   lambda: _make_tower(hw, hd, h, rng, nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            'hangar':  lambda: _make_hangar(hw, hd, h, rng, nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            'silo':    lambda: _make_silo(hw, h, rng,        nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            'bunker':  lambda: _make_bunker(hw, hd, h, rng,  nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            'antenna': lambda: _make_antenna_mast(hw, h, rng, nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            'pad':     lambda: _make_landing_pad(hw, rng,     nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            'relay':   lambda: _make_relay_tower(hw, h, rng,  nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
         }
         mesh = MAKERS[style]()
         mesh.reparentTo(self.node)
-        mesh.setPos(lx, ly, GROUND_Z + h/2)
+        mesh.setPos(lx, ly, bz)
 
         self._hitboxes.append({'lx': lx, 'ly': ly, 'hw': hw, 'hd': hd, 'height': h})
 
@@ -802,16 +969,18 @@ class LunarBaseGroup:
         hd = rng.uniform(*btdef["hd"]) * scale
         h  = rng.uniform(*btdef["h"])  * scale
         hb = btdef.get("hb_scale", 1.0)
+        bz = GROUND_Z + h / 2
+        nc = self._neon_bat; bb = self._beacon_bat
 
         mesh_name = btdef["mesh"]
         MAKERS = {
-            "tower":   lambda: _make_tower(hw, hd, h, rng),
-            "hangar":  lambda: _make_hangar(hw, hd, h, rng),
-            "silo":    lambda: _make_silo(hw, h, rng),
-            "bunker":  lambda: _make_bunker(hw, hd, h, rng),
-            "antenna": lambda: _make_antenna_mast(hw, h, rng),
-            "pad":     lambda: _make_landing_pad(hw, rng),
-            "relay":   lambda: _make_relay_tower(hw, h, rng),
+            "tower":   lambda: _make_tower(hw, hd, h, rng,  nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            "hangar":  lambda: _make_hangar(hw, hd, h, rng, nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            "silo":    lambda: _make_silo(hw, h, rng,        nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            "bunker":  lambda: _make_bunker(hw, hd, h, rng,  nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            "antenna": lambda: _make_antenna_mast(hw, h, rng, nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            "pad":     lambda: _make_landing_pad(hw, rng,     nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
+            "relay":   lambda: _make_relay_tower(hw, h, rng,  nc=nc, bb=bb, ox=lx, oy=ly, oz=bz),
         }
         maker = MAKERS.get(mesh_name)
         if not maker:
@@ -819,7 +988,7 @@ class LunarBaseGroup:
 
         mesh = maker()
         mesh.reparentTo(self.node)
-        mesh.setPos(lx, ly, GROUND_Z + h / 2)
+        mesh.setPos(lx, ly, bz)
 
         # Hitbox corps (hb_scale réduit les cylindres)
         self._hitboxes.append({
