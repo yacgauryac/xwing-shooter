@@ -2473,21 +2473,20 @@ class Environment:
             if not bg.node.isEmpty():
                 bg_y   = bg.node.getY()
                 behind = player_y - bg_y
-                if behind > 18.0:
+                if behind > 22.0:
                     # Loin derrière — caché, zéro draw call
                     bg.node.hide()
-                elif behind > 3.0:
-                    # Fade vers noir — reste dans le bucket OPAQUE (pas de tri transparent)
-                    # Sur fond noir spatial, fade RGB = identique à fade alpha visuellement
-                    t = max(0.0, 1.0 - (behind - 3.0) / 15.0)
+                elif behind > 8.0:
+                    # Fade transparent — démarre tardivement, dure ~0.35s à 40u/s
+                    alpha = max(0.0, 1.0 - (behind - 8.0) / 14.0)
                     bg.node.show()
-                    bg.node.clearTransparency()
-                    bg.node.setColorScale(t, t, t, 1)
-                elif bg_y - player_y > 105.0:
-                    # Trop loin devant — dans le fog, rien à rendre
+                    bg.node.setTransparency(TransparencyAttrib.MAlpha)
+                    bg.node.setColorScale(1, 1, 1, alpha)
+                elif bg_y - player_y > 85.0:
+                    # Trop loin devant — fog opaque, inutile de rendre
                     bg.node.hide()
                 else:
-                    # Zone visible — opaque, couleurs normales
+                    # Zone visible — opaque, pas de tri transparence
                     bg.node.show()
                     bg.node.clearTransparency()
                     bg.node.setColorScale(1, 1, 1, 1)

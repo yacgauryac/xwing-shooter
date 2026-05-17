@@ -258,7 +258,7 @@ class _NeonLineBatch:
         """Émet core + glow dans parent — 2 draw calls transparents."""
         for vd, lns, cnt, name, thick, additive in [
             (self._vc, self._lnc, self._ic, "neon_core", 2.5, False),
-            (self._vg, self._lng, self._ig, "neon_glow", 8.0, True),
+            (self._vg, self._lng, self._ig, "neon_glow", 3.0, True),
         ]:
             if cnt == 0:
                 continue
