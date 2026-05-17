@@ -2473,14 +2473,21 @@ class Environment:
             if not bg.node.isEmpty():
                 bg_y   = bg.node.getY()
                 behind = player_y - bg_y
-                if behind > 5.0:
-                    # Derrière le joueur — caché immédiatement, zéro draw call
+                if behind > 18.0:
+                    # Loin derrière — caché, zéro draw call
                     bg.node.hide()
+                elif behind > 3.0:
+                    # Fade vers noir — reste dans le bucket OPAQUE (pas de tri transparent)
+                    # Sur fond noir spatial, fade RGB = identique à fade alpha visuellement
+                    t = max(0.0, 1.0 - (behind - 3.0) / 15.0)
+                    bg.node.show()
+                    bg.node.clearTransparency()
+                    bg.node.setColorScale(t, t, t, 1)
                 elif bg_y - player_y > 105.0:
                     # Trop loin devant — dans le fog, rien à rendre
                     bg.node.hide()
                 else:
-                    # Zone visible — opaque, pas de tri transparence
+                    # Zone visible — opaque, couleurs normales
                     bg.node.show()
                     bg.node.clearTransparency()
                     bg.node.setColorScale(1, 1, 1, 1)
