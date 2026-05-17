@@ -183,12 +183,11 @@ def _c(color, alpha):
 
 
 def _neon_box_rings(hw, hd, hh, z_list, color, thick=2.5):
-    """Anneau néon avec 3 couches (core + glow + bloom)."""
+    """Anneau néon avec 2 couches (core + glow). Bloom supprimé — perf."""
     root = NodePath("neon_box_grp")
     layers = [
         (0.025, thick,       1.00, False),
-        (0.060, thick * 3.0, 0.28, True),
-        (0.130, thick * 7.0, 0.09, True),
+        (0.070, thick * 3.5, 0.22, True),
     ]
     for off, t, a, add in layers:
         np = _build_box_lines(hw, hd, hh, z_list, _c(color, a), off)
@@ -198,12 +197,11 @@ def _neon_box_rings(hw, hd, hh, z_list, color, thick=2.5):
 
 
 def _neon_cyl_ring(r, z, color, thick=2.5, sides=12):
-    """Anneau cylindrique néon avec 3 couches (core + glow + bloom)."""
+    """Anneau cylindrique néon avec 2 couches (core + glow). Bloom supprimé — perf."""
     root = NodePath("neon_cyl_grp")
     layers = [
         (0.030, thick,       1.00, False),
-        (0.075, thick * 3.0, 0.28, True),
-        (0.150, thick * 7.0, 0.09, True),
+        (0.085, thick * 3.5, 0.22, True),
     ]
     for off, t, a, add in layers:
         np = _build_cyl_lines(r, z, _c(color, a), off, sides)
@@ -213,12 +211,11 @@ def _neon_cyl_ring(r, z, color, thick=2.5, sides=12):
 
 
 def _neon_rect_frame(hw, hh, color, thick=2.5):
-    """Cadre rectangulaire néon avec 3 couches (core + glow + bloom)."""
+    """Cadre rectangulaire néon avec 2 couches (core + glow). Bloom supprimé — perf."""
     root = NodePath("neon_rect_grp")
     layers = [
         (0.025, thick,       1.00, False),
-        (0.060, thick * 3.0, 0.28, True),
-        (0.130, thick * 7.0, 0.09, True),
+        (0.070, thick * 3.5, 0.22, True),
     ]
     for off, t, a, add in layers:
         np = _build_rect_lines(hw, hh, _c(color, a), off)
@@ -695,6 +692,11 @@ class LunarBaseGroup:
         _make_ground_markings(self.node, rng, mark)
         getattr(self, f'_layout_{layout}')(rng)
 
+        # Fusionne tous les GeomNodes compatibles par render-state.
+        # Réduit ~200-300 draw calls → ~15-20. Bake les transforms enfants
+        # dans les vertices ; self.node peut toujours être déplacé via setY().
+        self.node.flattenStrong()
+
     # ── Sélection anti-répétition ─────────────────────────────
 
     def _pick_layout(self, rng, enabled=None):
@@ -1021,6 +1023,8 @@ class LunarBorderMountain:
 
         rng = random.Random(seed)
         self._build(rng, y_start, y_end)
+        # Des dizaines de pyramides séparées → ~2 draw calls après fusion.
+        self.node.flattenStrong()
 
     def _pyramid(self, cx, cy, h, base, col):
         """Crée une pyramide simple, posée sur GROUND_Z."""
