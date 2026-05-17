@@ -694,7 +694,12 @@ class LunarBaseGroup:
         _make_ground_markings(self.node, rng, mark)
         getattr(self, f'_layout_{layout}')(rng)
 
-        # LOD neons — collecte après construction (findAllMatches parcourt le sous-arbre)
+        # Fusionne uniquement les nodes à états identiques (boîtes opaques).
+        # flattenMedium ≠ flattenStrong : ne touche pas aux neons (états différents :
+        # transparency, depthWrite=False, blend additif → restent des nodes séparés).
+        self.node.flattenMedium()
+
+        # LOD neons — collecte après flatten (les neon_* survivent intacts)
         self._neon_nodes  = self.node.findAllMatches("**/neon_*")
         self._neon_lod_on = True   # état courant (True = visibles)
 
