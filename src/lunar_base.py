@@ -694,6 +694,10 @@ class LunarBaseGroup:
         _make_ground_markings(self.node, rng, mark)
         getattr(self, f'_layout_{layout}')(rng)
 
+        # LOD neons — collecte après construction (findAllMatches parcourt le sous-arbre)
+        self._neon_nodes  = self.node.findAllMatches("**/neon_*")
+        self._neon_lod_on = True   # état courant (True = visibles)
+
     # ── Sélection anti-répétition ─────────────────────────────
 
     def _pick_layout(self, rng, enabled=None):

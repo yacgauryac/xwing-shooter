@@ -2490,6 +2490,12 @@ class Environment:
                     bg.node.show()
                     bg.node.clearTransparency()
                     bg.node.setColorScale(1, 1, 1, 1)
+                    # LOD neons : visibles seulement dans les 40 premiers units
+                    neon_on = (bg_y - player_y) <= 40.0
+                    if neon_on != bg._neon_lod_on:
+                        bg._neon_lod_on = neon_on
+                        for nn in bg._neon_nodes:
+                            nn.show() if neon_on else nn.hide()
         self.base_groups = [bg for bg in self.base_groups if bg.alive]
         # Spawn de nouveaux groupes
         if self.base_groups:
