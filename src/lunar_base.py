@@ -683,7 +683,9 @@ class LunarBaseGroup:
         self.node = NodePath("lunar_base")
         self.node.reparentTo(game.render)
         self.node.setPos(0, y_pos, 0)
-        self.node.setTransparency(TransparencyAttrib.MAlpha)
+        # PAS de setTransparency sur le root — ça classerait TOUT le sous-arbre
+        # dans le bucket transparent (tri par distance chaque frame = énorme coût).
+        # Chaque enfant qui en a besoin (neons, balises, marquages) le déclare lui-même.
         self.node.setLightOff()
 
         rng    = random.Random(seed)

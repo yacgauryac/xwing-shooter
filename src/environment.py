@@ -2472,10 +2472,19 @@ class Environment:
             bg.update(dt, scroll_speed)
             if not bg.node.isEmpty():
                 behind = player_y - bg.node.getY()
-                if behind > 6.0:
-                    alpha = max(0.0, 1.0 - (behind - 6.0) / 9.0)
+                if behind > 20.0:
+                    # Loin derrière — caché, zéro draw call
+                    bg.node.hide()
+                elif behind > 5.0:
+                    # Zone de fade — transparence activée sur CE groupe seulement
+                    alpha = max(0.0, 1.0 - (behind - 5.0) / 15.0)
+                    bg.node.show()
+                    bg.node.setTransparency(TransparencyAttrib.MAlpha)
                     bg.node.setColorScale(1, 1, 1, alpha)
                 else:
+                    # Devant le joueur — opaque, pas de tri transparence
+                    bg.node.show()
+                    bg.node.clearTransparency()
                     bg.node.setColorScale(1, 1, 1, 1)
         self.base_groups = [bg for bg in self.base_groups if bg.alive]
         # Spawn de nouveaux groupes
