@@ -76,7 +76,9 @@ class _GeomBatch:
         """Émet un NodePath avec 1 seul GeomNode — 1 draw call."""
         geom = Geom(self._vd); geom.addPrimitive(self._tri)
         gn   = GeomNode(name); gn.addGeom(geom)
-        np   = NodePath(gn);   np.setLightOff()
+        np   = NodePath(gn)
+        np.setLightOff()
+        np.setBin("opaque", 0)   # reste dans bucket opaque même si parent a setTransparency
         return np
 
 
@@ -265,7 +267,7 @@ class _NeonLineBatch:
             np.setLightOff()
             np.setDepthWrite(False)
             np.setDepthOffset(-1)
-            # Pas de setTransparency → reste dans le bucket OPAQUE
+            np.setBin("opaque", 1)   # explicite : résiste au setTransparency du parent
             np.reparentTo(parent)
         # ── Glow : additif, bin "fixed" → rendu sans tri par distance
         if self._ig > 0:
@@ -568,6 +570,7 @@ def _make_antenna_mast(r, h, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
         arm_np = NodePath(gn)
         arm_np.reparentTo(root); arm_np.setHpr(angle, 90, 0)
         arm_np.setPos(0, 0, h/2 * frac); arm_np.setLightOff()
+        arm_np.setBin("opaque", 0)
     if bb is not None:
         bb.add(ox, oy, oz + h/2 + 0.12, Vec4(1.0, 0.15, 0.15, 1.0))
     else:
@@ -604,7 +607,8 @@ def _make_landing_pad(r, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
 
     geom = Geom(vd); geom.addPrimitive(tris)
     gn   = GeomNode("pad_mesh"); gn.addGeom(geom)
-    NodePath(gn).reparentTo(root)
+    pad_np = NodePath(gn); pad_np.reparentTo(root)
+    pad_np.setLightOff(); pad_np.setBin("opaque", 0)
 
     for i in range(SIDES):
         a = 2*math.pi*i/SIDES + math.pi/6
