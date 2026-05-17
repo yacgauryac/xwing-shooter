@@ -2471,7 +2471,8 @@ class Environment:
         for bg in self.base_groups:
             bg.update(dt, scroll_speed)
             if not bg.node.isEmpty():
-                behind = player_y - bg.node.getY()
+                bg_y   = bg.node.getY()
+                behind = player_y - bg_y
                 if behind > 20.0:
                     # Loin derrière — caché, zéro draw call
                     bg.node.hide()
