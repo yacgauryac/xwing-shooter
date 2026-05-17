@@ -2144,7 +2144,7 @@ class Environment:
         if level == 1:
             color, onset, opaque = (0.0, 0.0, 0.0), 150.0, 230.0
         elif level in (2, 0):
-            color, onset, opaque = (0.04, 0.04, 0.05), 130.0, 210.0
+            color, onset, opaque = (0.04, 0.04, 0.05), 55.0, 95.0
         elif level == 4:
             color, onset, opaque = (0.03, 0.01, 0.05), 100.0, 190.0
         else:
@@ -2222,10 +2222,10 @@ class Environment:
             by += random.uniform(48, 70)
             seed += 97
 
-        # Montagnes de bord — une bande continue de Y=15 à SPAWN_DEPTH
-        self.border_mountains.append(
-            LunarBorderMountain(self.game.render, 15.0, self.SPAWN_DEPTH + 30.0, seed=42)
-        )
+        # Montagnes de bord — désactivées temporairement (test perf)
+        # self.border_mountains.append(
+        #     LunarBorderMountain(self.game.render, 15.0, self.SPAWN_DEPTH + 30.0, seed=42)
+        # )
 
         # Routes horizontales — 2-3 positions fixes espacées dans le niveau initial
         road_ys = [random.uniform(40, 60), random.uniform(90, 120), random.uniform(155, 185)]
@@ -2482,8 +2482,8 @@ class Environment:
                     bg.node.show()
                     bg.node.setTransparency(TransparencyAttrib.MAlpha)
                     bg.node.setColorScale(1, 1, 1, alpha)
-                elif bg_y - player_y > 120.0:
-                    # Trop loin devant — caché jusqu'à l'approche
+                elif bg_y - player_y > 90.0:
+                    # Trop loin devant — dans le fog, rien à rendre
                     bg.node.hide()
                 else:
                     # Zone visible devant — opaque, pas de tri transparence
@@ -2501,19 +2501,16 @@ class Environment:
             seed   = int(abs(new_y) * 17 + len(self.base_groups) * 53) & 0xFFFF
             self.base_groups.append(LunarBaseGroup(self.game, new_y, seed))
 
-        # Montagnes de bord
+        # Montagnes de bord — désactivées temporairement (test perf)
         for m in self.border_mountains:
             m.update(dt, scroll_speed)
-        # Spawn une nouvelle bande quand la plus récente a scrollé de ~160 unités
-        # (node.Y va de 0 → -250, on respawn vers -160 pour qu'il y ait toujours
-        #  des montagnes loin devant grâce à la géométrie baked à ~SPAWN_DEPTH+80)
-        alive_mtns = [m for m in self.border_mountains if m.alive]
-        if not alive_mtns or max(m.node.getY() for m in alive_mtns) < -160:
-            seed_m = int(abs(len(self.border_mountains) * 31 + random.random() * 1000)) & 0xFFFF
-            self.border_mountains.append(
-                LunarBorderMountain(self.game.render, 15.0,
-                                    self.SPAWN_DEPTH + 30.0, seed=seed_m)
-            )
+        # alive_mtns = [m for m in self.border_mountains if m.alive]
+        # if not alive_mtns or max(m.node.getY() for m in alive_mtns) < -160:
+        #     seed_m = int(abs(len(self.border_mountains) * 31 + random.random() * 1000)) & 0xFFFF
+        #     self.border_mountains.append(
+        #         LunarBorderMountain(self.game.render, 15.0,
+        #                             self.SPAWN_DEPTH + 30.0, seed=seed_m)
+        #     )
 
         # Routes — update + respawn quand le batch courant est trop avancé
         for r in self.roads:
