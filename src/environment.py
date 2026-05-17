@@ -679,9 +679,9 @@ class LunarTerrain:
         vertex = GeomVertexWriter(vdata, "vertex")
         col = GeomVertexWriter(vdata, "color")
 
-        # Densité réduite sur X (w grand) pour rester performant
-        segs_x = max(16, int(w / 8))
-        segs_y = max(8, int(d / 2))
+        # Low-poly : courbe sphérique visible, bumps lisibles, perf prioritaire
+        segs_x = 12   # était max(16, w/8) = 30 — 90% de géométrie en moins
+        segs_y = 6    # était max(8, d/2)  = 22
         R = self.SPHERE_R
 
         for i in range(segs_x + 1):
@@ -767,6 +767,7 @@ class LunarTerrain:
         grid_np.reparentTo(root)
         grid_np.setRenderModeThickness(1.2)
         grid_np.setTransparency(TransparencyAttrib.MAlpha)
+        grid_np.setBin("fixed", 40)   # pas de depth-sort — grille sol = ordre indépendant
         grid_np.setLightOff()
         grid_np.setDepthWrite(False)
 
@@ -2456,9 +2457,17 @@ class Environment:
     def _update_l2(self, dt, scroll_speed, player_y=0.0):
         """L2 — Surface lunaire : terrain continu + bâtiments spaceport (pas de rochers)."""
 
-        # Terrain sol — spawn basé sur la position Y (pas de timer)
+        # Terrain sol — spawn + culling fog
         for t in self.terrain_tiles:
             t.update(dt, scroll_speed)
+            if not t.node.isEmpty():
+                ty     = t.node.getY()
+                ahead  = ty - player_y
+                behind = player_y - ty
+                if ahead > 90.0 or behind > self.TILE_DEPTH:
+                    t.node.hide()   # dans le fog ou derrière — inutile de rendre
+                else:
+                    t.node.show()
 
         alive_tiles = [t for t in self.terrain_tiles if t.alive and not t.node.isEmpty()]
         max_tile_y = max((t.node.getY() for t in alive_tiles), default=0)
