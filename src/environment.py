@@ -2473,20 +2473,14 @@ class Environment:
             if not bg.node.isEmpty():
                 bg_y   = bg.node.getY()
                 behind = player_y - bg_y
-                if behind > 20.0:
-                    # Loin derrière — caché, zéro draw call
+                if behind > 5.0:
+                    # Derrière le joueur — caché immédiatement, zéro draw call
                     bg.node.hide()
-                elif behind > 5.0:
-                    # Zone de fade — transparence activée sur CE groupe seulement
-                    alpha = max(0.0, 1.0 - (behind - 5.0) / 15.0)
-                    bg.node.show()
-                    bg.node.setTransparency(TransparencyAttrib.MAlpha)
-                    bg.node.setColorScale(1, 1, 1, alpha)
                 elif bg_y - player_y > 105.0:
                     # Trop loin devant — dans le fog, rien à rendre
                     bg.node.hide()
                 else:
-                    # Zone visible devant — opaque, neons batch toujours actifs
+                    # Zone visible — opaque, pas de tri transparence
                     bg.node.show()
                     bg.node.clearTransparency()
                     bg.node.setColorScale(1, 1, 1, 1)
