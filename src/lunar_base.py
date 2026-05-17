@@ -22,62 +22,62 @@ _last_marks  = []   # suivi global des 2 derniers styles utilisés
 
 
 # ─────────────────────────────────────────────────────────────
-# Helpers géométriques bas-niveau
+# GeomBatch — accumule boîtes + cylindres dans 1 seul GeomNode
 # ─────────────────────────────────────────────────────────────
 
-def _box_geom(hw, hd, hh, col_top, col_side, col_dark):
-    """Boîte 5 faces (sans fond) centrée à l'origine."""
-    fmt  = GeomVertexFormat.getV3c4()
-    vd   = GeomVertexData("box", fmt, Geom.UHStatic)
-    vw   = GeomVertexWriter(vd, "vertex")
-    cw   = GeomVertexWriter(vd, "color")
-    tris = GeomTriangles(Geom.UHStatic)
-    idx  = [0]
+class _GeomBatch:
+    """Accumule de la géométrie opaque et émet 1 seul NodePath.
+    Chaque bâtiment utilise 1 instance → 1 draw call au lieu de 3-5."""
 
-    def quad(pts, col):
-        for p in pts:
-            vw.addData3(*p); cw.addData4(col)
-        b = idx[0]
-        tris.addVertices(b, b+1, b+2); tris.addVertices(b, b+2, b+3)
-        idx[0] += 4
+    def __init__(self):
+        fmt       = GeomVertexFormat.getV3c4()
+        self._vd  = GeomVertexData("batch", fmt, Geom.UHStatic)
+        self._vw  = GeomVertexWriter(self._vd, "vertex")
+        self._cw  = GeomVertexWriter(self._vd, "color")
+        self._tri = GeomTriangles(Geom.UHStatic)
+        self._vi  = 0
 
-    quad([(-hw,-hd, hh),( hw,-hd, hh),( hw, hd, hh),(-hw, hd, hh)], col_top)
-    quad([(-hw, hd,-hh),( hw, hd,-hh),( hw, hd, hh),(-hw, hd, hh)], col_side)
-    quad([( hw,-hd,-hh),(-hw,-hd,-hh),(-hw,-hd, hh),( hw,-hd, hh)], col_dark)
-    quad([( hw,-hd,-hh),( hw, hd,-hh),( hw, hd, hh),( hw,-hd, hh)], col_side)
-    quad([(-hw, hd,-hh),(-hw,-hd,-hh),(-hw,-hd, hh),(-hw, hd, hh)], col_dark)
+    def box(self, ox, oy, oz, hw, hd, hh, col_top, col_side, col_dark):
+        """Boîte 5 faces (sans fond) centrée en (ox,oy,oz)."""
+        def quad(pts, col):
+            for p in pts:
+                self._vw.addData3(ox+p[0], oy+p[1], oz+p[2])
+                self._cw.addData4(col)
+            b = self._vi
+            self._tri.addVertices(b,b+1,b+2); self._tri.addVertices(b,b+2,b+3)
+            self._vi += 4
+        quad([(-hw,-hd,hh),(hw,-hd,hh),(hw,hd,hh),(-hw,hd,hh)],   col_top)
+        quad([(-hw,hd,-hh),(hw,hd,-hh),(hw,hd,hh),(-hw,hd,hh)],   col_side)
+        quad([(hw,-hd,-hh),(-hw,-hd,-hh),(-hw,-hd,hh),(hw,-hd,hh)], col_dark)
+        quad([(hw,-hd,-hh),(hw,hd,-hh),(hw,hd,hh),(hw,-hd,hh)],   col_side)
+        quad([(-hw,hd,-hh),(-hw,-hd,-hh),(-hw,-hd,hh),(-hw,hd,hh)], col_dark)
 
-    geom = Geom(vd); geom.addPrimitive(tris)
-    gn   = GeomNode("box"); gn.addGeom(geom)
-    return NodePath(gn)
+    def cylinder(self, ox, oy, oz, r, hh, col_side, col_top, sides=8):
+        """Cylindre centré en (ox,oy,oz)."""
+        base = self._vi
+        self._vw.addData3(ox, oy, oz+hh); self._cw.addData4(col_top)
+        for i in range(sides):
+            a = 2*math.pi*i/sides
+            self._vw.addData3(ox+math.cos(a)*r, oy+math.sin(a)*r, oz+hh)
+            self._cw.addData4(col_side)
+        for i in range(sides):
+            a = 2*math.pi*i/sides
+            self._vw.addData3(ox+math.cos(a)*r, oy+math.sin(a)*r, oz-hh)
+            self._cw.addData4(col_side)
+        for i in range(sides):
+            self._tri.addVertices(base, base+1+i, base+1+(i+1)%sides)
+        for i in range(sides):
+            b0=base+1+sides+i; b1=base+1+sides+(i+1)%sides
+            t0=base+1+i;       t1=base+1+(i+1)%sides
+            self._tri.addVertices(b0,t0,b1); self._tri.addVertices(b1,t0,t1)
+        self._vi += 1 + 2*sides
 
-
-def _cylinder_geom(r, hh, col_side, col_top, sides=8):
-    """Cylindre centré en Z."""
-    fmt  = GeomVertexFormat.getV3c4()
-    vd   = GeomVertexData("cyl", fmt, Geom.UHStatic)
-    vw   = GeomVertexWriter(vd, "vertex")
-    cw   = GeomVertexWriter(vd, "color")
-    tris = GeomTriangles(Geom.UHStatic)
-
-    vw.addData3(0, 0, hh); cw.addData4(col_top)
-    for i in range(sides):
-        a = 2*math.pi * i / sides
-        vw.addData3(math.cos(a)*r, math.sin(a)*r,  hh); cw.addData4(col_side)
-    for i in range(sides):
-        a = 2*math.pi * i / sides
-        vw.addData3(math.cos(a)*r, math.sin(a)*r, -hh); cw.addData4(col_side)
-
-    for i in range(sides):
-        tris.addVertices(0, 1+i, 1+(i+1)%sides)
-    for i in range(sides):
-        b0 = 1+sides+i;  b1 = 1+sides+(i+1)%sides
-        t0 = 1+i;        t1 = 1+(i+1)%sides
-        tris.addVertices(b0, t0, b1); tris.addVertices(b1, t0, t1)
-
-    geom = Geom(vd); geom.addPrimitive(tris)
-    gn   = GeomNode("cyl"); gn.addGeom(geom)
-    return NodePath(gn)
+    def emit(self, name="body"):
+        """Émet un NodePath avec 1 seul GeomNode — 1 draw call."""
+        geom = Geom(self._vd); geom.addPrimitive(self._tri)
+        gn   = GeomNode(name); gn.addGeom(geom)
+        np   = NodePath(gn);   np.setLightOff()
+        return np
 
 
 # ─────────────────────────────────────────────────────────────
@@ -275,98 +275,82 @@ def _beacon(x, y, z, color, size=4.0):
 # ─────────────────────────────────────────────────────────────
 
 def _make_tower(hw, hd, h, rng):
-    """Tour de contrôle — fine, très haute, beacon rouge."""
+    """Tour de contrôle — 1 draw call opaque (batch corps+antenne)."""
     root = NodePath("tower")
-    b  = 0.28 + rng.uniform(0, 0.08)
-    np = _box_geom(hw, hd, h/2,
-                   Vec4(b,       b*0.98, b*0.95, 1),
-                   Vec4(b*0.75,  b*0.74, b*0.72, 1),
-                   Vec4(b*0.45,  b*0.44, b*0.43, 1))
-    np.reparentTo(root)
-    # Étage intermédiaire
+    b    = 0.28 + rng.uniform(0, 0.08)
+    bat  = _GeomBatch()
+    bat.box(0, 0, 0, hw, hd, h/2,
+            Vec4(b, b*0.98, b*0.95, 1),
+            Vec4(b*0.75, b*0.74, b*0.72, 1),
+            Vec4(b*0.45, b*0.44, b*0.43, 1))
     if h > 8:
         mid_h = h * 0.35
-        mid = _box_geom(hw*1.6, hd*1.6, mid_h/2,
-                        Vec4(b*0.88, b*0.86, b*0.83, 1),
-                        Vec4(b*0.68, b*0.67, b*0.65, 1),
-                        Vec4(b*0.40, b*0.39, b*0.38, 1))
-        mid.reparentTo(root); mid.setPos(0, 0, mid_h/2 - mid_h*0.6)
+        bat.box(0, 0, mid_h/2 - mid_h*0.6, hw*1.6, hd*1.6, mid_h/2,
+                Vec4(b*0.88, b*0.86, b*0.83, 1),
+                Vec4(b*0.68, b*0.67, b*0.65, 1),
+                Vec4(b*0.40, b*0.39, b*0.38, 1))
     ant_h = h * 0.55
-    ant   = _cylinder_geom(0.06, ant_h/2, Vec4(0.18,0.18,0.17,1), Vec4(0.15,0.15,0.14,1), sides=4)
-    ant.reparentTo(root); ant.setPos(0, 0, h/2 + ant_h/2)
+    bat.cylinder(0, 0, h/2 + ant_h/2, 0.06, ant_h/2,
+                 Vec4(0.18,0.18,0.17,1), Vec4(0.15,0.15,0.14,1), sides=4)
+    bat.emit("tower_body").reparentTo(root)
     _beacon(0, 0, h/2 + ant_h + 0.15, Vec4(1.0, 0.1, 0.1, 1.0), 6).reparentTo(root)
-    # Néons — 3 anneaux oranges à 28 / 52 / 78 % de la hauteur
     _neon_box_rings(hw, hd, h/2,
                     [-h/2 + h*0.28, -h/2 + h*0.52, -h/2 + h*0.78],
                     _NEON_ORANGE).reparentTo(root)
-    # Label impérial
     lbl = _imperial_label(rng.choice(_CODES_TOWER))
-    lbl.reparentTo(root)
-    lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.12)
+    lbl.reparentTo(root); lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.12)
     root.setLightOff()
     return root
 
 
 def _make_hangar(hw, hd, h, rng):
-    """Hangar — large, haut, toit en double pente."""
-    root = NodePath("hangar")
-    b  = 0.26 + rng.uniform(0, 0.06)
-    np = _box_geom(hw, hd, h/2,
-                   Vec4(b*1.05, b,       b*0.96, 1),
-                   Vec4(b*0.80, b*0.78,  b*0.75, 1),
-                   Vec4(b*0.48, b*0.47,  b*0.45, 1))
-    np.reparentTo(root)
+    """Hangar — 1 draw call opaque (batch corps+faîtage)."""
+    root    = NodePath("hangar")
+    b       = 0.26 + rng.uniform(0, 0.06)
     ridge_h = h * 0.25
-    rc = Vec4(b*0.60, b*0.58, b*0.56, 1)
-    fmt  = GeomVertexFormat.getV3c4()
-    vd   = GeomVertexData("ridge", fmt, Geom.UHStatic)
-    vw   = GeomVertexWriter(vd, "vertex"); cw = GeomVertexWriter(vd, "color")
-    tris = GeomTriangles(Geom.UHStatic)
+    rc      = Vec4(b*0.60, b*0.58, b*0.56, 1)
+    bat     = _GeomBatch()
+    bat.box(0, 0, 0, hw, hd, h/2,
+            Vec4(b*1.05, b, b*0.96, 1),
+            Vec4(b*0.80, b*0.78, b*0.75, 1),
+            Vec4(b*0.48, b*0.47, b*0.45, 1))
+    # Faîtage (ridge) ajouté manuellement au batch
+    vw, cw, tri = bat._vw, bat._cw, bat._tri
     for sx in [-1, 1]:
-        vw.addData3(sx*hw, -hd, h/2); cw.addData4(rc)
-        vw.addData3(sx*hw,  hd, h/2); cw.addData4(rc)
+        vw.addData3(sx*hw, -hd, h/2);       cw.addData4(rc)
+        vw.addData3(sx*hw,  hd, h/2);       cw.addData4(rc)
         vw.addData3(0,     -hd, h/2+ridge_h); cw.addData4(rc)
         vw.addData3(0,      hd, h/2+ridge_h); cw.addData4(rc)
-    for base in [0, 4]:
-        tris.addVertices(base, base+2, base+1); tris.addVertices(base+1, base+2, base+3)
-    geom2 = Geom(vd); geom2.addPrimitive(tris)
-    gn2   = GeomNode("ridge"); gn2.addGeom(geom2)
-    NodePath(gn2).reparentTo(root)
-    # Néon orange en haut des murs
+    for base in [bat._vi, bat._vi + 4]:
+        tri.addVertices(base, base+2, base+1); tri.addVertices(base+1, base+2, base+3)
+    bat._vi += 8
+    bat.emit("hangar_body").reparentTo(root)
     _neon_box_rings(hw, hd, h/2, [h/2 - 0.12], _NEON_ORANGE, thick=3.0).reparentTo(root)
-    # Néon bleu à mi-hauteur — zone porte
     _neon_box_rings(hw, hd, h/2, [-h/2 + h*0.42], _NEON_BLUE, thick=2.0).reparentTo(root)
-    # Cadre de porte bleu sur face avant (-Y)
     door_frame = _neon_rect_frame(hw * 0.75, h * 0.42, _NEON_BLUE, thick=2.5)
-    door_frame.reparentTo(root)
-    door_frame.setPos(0, -hd - 0.04, -h/2 + h * 0.42)
-    # Label BAY
+    door_frame.reparentTo(root); door_frame.setPos(0, -hd - 0.04, -h/2 + h * 0.42)
     lbl = _imperial_label(rng.choice(_CODES_HANGAR), size=0.38)
-    lbl.reparentTo(root)
-    lbl.setPos(0, -hd - 0.08, -h/2 + h * 0.72)
+    lbl.reparentTo(root); lbl.setPos(0, -hd - 0.08, -h/2 + h * 0.72)
     root.setLightOff()
     return root
 
 
 def _make_silo(r, h, rng):
-    """Réservoir cylindrique avec bande orange + beacon."""
+    """Réservoir cylindrique — 1 draw call opaque (batch corps+bandes)."""
     root = NodePath("silo")
     b    = 0.30 + rng.uniform(0, 0.06)
-    body = _cylinder_geom(r, h/2,
-                          Vec4(b*0.82, b*0.80, b*0.78, 1),
-                          Vec4(b,      b*0.98, b*0.95, 1), sides=10)
-    body.reparentTo(root)
-    band = _cylinder_geom(r*1.02, h*0.06,
-                          Vec4(0.55, 0.35, 0.12, 0.9),
-                          Vec4(0.55, 0.35, 0.12, 0.9), sides=10)
-    band.reparentTo(root); band.setPos(0, 0, -h*0.1)
-    # Deuxième bande haute
-    band2 = _cylinder_geom(r*1.01, h*0.04,
-                           Vec4(0.45, 0.28, 0.10, 0.8),
-                           Vec4(0.45, 0.28, 0.10, 0.8), sides=10)
-    band2.reparentTo(root); band2.setPos(0, 0, h*0.25)
+    bat  = _GeomBatch()
+    bat.cylinder(0, 0, 0, r, h/2,
+                 Vec4(b*0.82, b*0.80, b*0.78, 1),
+                 Vec4(b, b*0.98, b*0.95, 1), sides=10)
+    bat.cylinder(0, 0, -h*0.1, r*1.02, h*0.06,
+                 Vec4(0.55, 0.35, 0.12, 0.9),
+                 Vec4(0.55, 0.35, 0.12, 0.9), sides=10)
+    bat.cylinder(0, 0, h*0.25, r*1.01, h*0.04,
+                 Vec4(0.45, 0.28, 0.10, 0.8),
+                 Vec4(0.45, 0.28, 0.10, 0.8), sides=10)
+    bat.emit("silo_body").reparentTo(root)
     _beacon(0, 0, h/2+0.15, Vec4(1.0, 0.65, 0.1, 1.0), 5).reparentTo(root)
-    # Anneau néon orange au sommet + rouge à mi-corps
     _neon_cyl_ring(r * 1.02, h/2 - 0.10, _NEON_ORANGE, thick=3.0).reparentTo(root)
     _neon_cyl_ring(r * 1.02, -h * 0.08,  _NEON_RED,    thick=2.0).reparentTo(root)
     root.setLightOff()
@@ -374,48 +358,62 @@ def _make_silo(r, h, rng):
 
 
 def _make_bunker(hw, hd, h, rng):
-    """Bunker massif, fente de tir + tourelle si très haut."""
+    """Bunker massif — 1 draw call opaque (batch corps+fente+tourelle)."""
     root = NodePath("bunker")
-    b  = 0.22 + rng.uniform(0, 0.05)
-    np = _box_geom(hw, hd, h/2,
-                   Vec4(b,      b*0.99, b*0.95, 1),
-                   Vec4(b*0.70, b*0.69, b*0.67, 1),
-                   Vec4(b*0.42, b*0.41, b*0.40, 1))
-    np.reparentTo(root)
-    slot = _box_geom(hw*0.55, 0.06, h*0.12,
-                     Vec4(0.04,0.04,0.04,1), Vec4(0.04,0.04,0.04,1), Vec4(0.04,0.04,0.04,1))
-    slot.reparentTo(root); slot.setPos(0, hd+0.02, 0)
-    # Tourelle au sommet si assez grand
+    b    = 0.22 + rng.uniform(0, 0.05)
+    bat  = _GeomBatch()
+    bat.box(0, 0, 0, hw, hd, h/2,
+            Vec4(b, b*0.99, b*0.95, 1),
+            Vec4(b*0.70, b*0.69, b*0.67, 1),
+            Vec4(b*0.42, b*0.41, b*0.40, 1))
+    bat.box(0, hd+0.02, 0, hw*0.55, 0.06, h*0.12,
+            Vec4(0.04,0.04,0.04,1), Vec4(0.04,0.04,0.04,1), Vec4(0.04,0.04,0.04,1))
     if h > 3.5:
-        turret = _cylinder_geom(hw*0.35, h*0.12,
-                                Vec4(b*0.55, b*0.54, b*0.52, 1),
-                                Vec4(b*0.45, b*0.44, b*0.42, 1), sides=6)
-        turret.reparentTo(root); turret.setPos(0, 0, h/2 + h*0.12)
-    # Cadre néon rouge autour de la fente de tir (face +Y)
+        bat.cylinder(0, 0, h/2 + h*0.12, hw*0.35, h*0.12,
+                     Vec4(b*0.55, b*0.54, b*0.52, 1),
+                     Vec4(b*0.45, b*0.44, b*0.42, 1), sides=6)
+    bat.emit("bunker_body").reparentTo(root)
     slit_frame = _neon_rect_frame(hw * 0.55, h * 0.12, _NEON_RED, thick=2.5)
-    slit_frame.reparentTo(root)
-    slit_frame.setPos(0, hd + 0.08, 0)
-    # Anneau orange en haut
+    slit_frame.reparentTo(root); slit_frame.setPos(0, hd + 0.08, 0)
     _neon_box_rings(hw, hd, h/2, [h/2 - 0.08], _NEON_ORANGE, thick=2.5).reparentTo(root)
-    # Label SEC
     lbl = _imperial_label(rng.choice(_CODES_BUNKER))
-    lbl.reparentTo(root)
-    lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.65)
+    lbl.reparentTo(root); lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.65)
     root.setLightOff()
     return root
 
 
 def _make_antenna_mast(r, h, rng):
-    """Mât d'antenne fin avec bras horizontaux multiples."""
-    root = NodePath("antenna")
-    mast = _cylinder_geom(r, h/2, Vec4(0.20,0.20,0.19,1), Vec4(0.18,0.18,0.17,1), sides=4)
-    mast.reparentTo(root)
+    """Mât d'antenne — mât en batch, bras gardés en NodePaths (rotation HPR)."""
+    root    = NodePath("antenna")
+    bat     = _GeomBatch()
+    bat.cylinder(0, 0, 0, r, h/2, Vec4(0.20,0.20,0.19,1), Vec4(0.18,0.18,0.17,1), sides=4)
+    bat.emit("antenna_mast").reparentTo(root)
     arm_len = r * 18
     for frac, angle in [(0.55, 0), (0.70, 45), (0.82, -30), (0.92, 15)]:
-        arm = _cylinder_geom(r*0.6, arm_len/2, Vec4(0.18,0.18,0.17,1), Vec4(0.16,0.16,0.15,1), sides=4)
-        arm.reparentTo(root)
-        arm.setHpr(angle, 90, 0)
-        arm.setPos(0, 0, h/2 * frac)
+        # Bras avec rotation — NodePath séparé (pas de rotation dans _GeomBatch)
+        fmt = GeomVertexFormat.getV3c4()
+        vd  = GeomVertexData("arm", fmt, Geom.UHStatic)
+        vw  = GeomVertexWriter(vd, "vertex"); cw = GeomVertexWriter(vd, "color")
+        tri = GeomTriangles(Geom.UHStatic)
+        ar  = r * 0.6; ahl = arm_len / 2; sides = 4
+        cs  = Vec4(0.18,0.18,0.17,1); ct = Vec4(0.16,0.16,0.15,1)
+        vw.addData3(0, 0, ahl); cw.addData4(ct)
+        for i in range(sides):
+            a = 2*math.pi*i/sides
+            vw.addData3(math.cos(a)*ar, math.sin(a)*ar, ahl); cw.addData4(cs)
+        for i in range(sides):
+            a = 2*math.pi*i/sides
+            vw.addData3(math.cos(a)*ar, math.sin(a)*ar, -ahl); cw.addData4(cs)
+        for i in range(sides):
+            tri.addVertices(0, 1+i, 1+(i+1)%sides)
+        for i in range(sides):
+            b0=1+sides+i; b1=1+sides+(i+1)%sides; t0=1+i; t1=1+(i+1)%sides
+            tri.addVertices(b0,t0,b1); tri.addVertices(b1,t0,t1)
+        geom = Geom(vd); geom.addPrimitive(tri)
+        gn   = GeomNode("arm"); gn.addGeom(geom)
+        arm_np = NodePath(gn)
+        arm_np.reparentTo(root); arm_np.setHpr(angle, 90, 0)
+        arm_np.setPos(0, 0, h/2 * frac); arm_np.setLightOff()
     _beacon(0, 0, h/2+0.12, Vec4(1.0, 0.15, 0.15, 1.0), 4).reparentTo(root)
     root.setLightOff()
     return root
@@ -481,21 +479,18 @@ def _make_landing_pad(r, rng):
 
 
 def _make_relay_tower(r, h, rng):
-    """Tour relais cylindrique haute avec disque parabolique au sommet."""
+    """Tour relais — 1 draw call opaque (corps+disque, rotation disque ignorée)."""
     root = NodePath("relay")
     b    = 0.25 + rng.uniform(0, 0.05)
-    body = _cylinder_geom(r, h/2,
-                          Vec4(b*0.80, b*0.79, b*0.77, 1),
-                          Vec4(b,      b*0.99, b*0.97, 1), sides=6)
-    body.reparentTo(root)
-    # Disque = cylindre très plat
-    dish = _cylinder_geom(r*3.5, h*0.04,
-                          Vec4(0.30, 0.28, 0.25, 0.9),
-                          Vec4(0.38, 0.36, 0.33, 0.9), sides=12)
-    dish.reparentTo(root); dish.setPos(0, 0, h/2 + h*0.06)
-    dish.setHpr(rng.uniform(0,360), 0, 0)
+    bat  = _GeomBatch()
+    bat.cylinder(0, 0, 0, r, h/2,
+                 Vec4(b*0.80, b*0.79, b*0.77, 1),
+                 Vec4(b, b*0.99, b*0.97, 1), sides=6)
+    bat.cylinder(0, 0, h/2 + h*0.06, r*3.5, h*0.04,
+                 Vec4(0.30, 0.28, 0.25, 0.9),
+                 Vec4(0.38, 0.36, 0.33, 0.9), sides=12)
+    bat.emit("relay_body").reparentTo(root)
     _beacon(0, 0, h/2+h*0.14, Vec4(1.0, 0.85, 0.1, 1.0), 5).reparentTo(root)
-    # Anneau néon orange sur le bord du plat + blanc sur le corps
     _neon_cyl_ring(r*3.5, h/2 + h*0.07, _NEON_ORANGE, thick=2.5, sides=14).reparentTo(root)
     _neon_cyl_ring(r,    -h * 0.12,      _NEON_WHITE,  thick=2.0, sides=8).reparentTo(root)
     root.setLightOff()
