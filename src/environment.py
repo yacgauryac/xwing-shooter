@@ -2060,7 +2060,7 @@ class Environment:
     FIELD_WIDTH = 25.0
     FIELD_HEIGHT = 15.0
 
-    TILE_DEPTH = 22.0   # Profondeur d'une dalle/panneau (L2 + L3)
+    TILE_DEPTH = 44.0   # Profondeur d'une dalle/panneau (L2 + L3) — 22→44 : 11 tiles → 6
 
     def __init__(self, game, level=1):
         self.game = game
@@ -2481,8 +2481,11 @@ class Environment:
                     bg.node.show()
                     bg.node.setTransparency(TransparencyAttrib.MAlpha)
                     bg.node.setColorScale(1, 1, 1, alpha)
+                elif bg_y - player_y > 120.0:
+                    # Trop loin devant — caché jusqu'à l'approche
+                    bg.node.hide()
                 else:
-                    # Devant le joueur — opaque, pas de tri transparence
+                    # Zone visible devant — opaque, pas de tri transparence
                     bg.node.show()
                     bg.node.clearTransparency()
                     bg.node.setColorScale(1, 1, 1, 1)

@@ -1021,55 +1021,50 @@ class LunarBorderMountain:
         rng = random.Random(seed)
         self._build(rng, y_start, y_end)
 
-    def _pyramid(self, cx, cy, h, base, col):
-        """Crée une pyramide simple, posée sur GROUND_Z."""
-        r = base / 2.0
-        bz = GROUND_Z
-        tz = GROUND_Z + h
-        verts = [
-            (cx - r, cy - r, bz),  # 0 base avant-gauche
-            (cx + r, cy - r, bz),  # 1 base avant-droit
-            (cx + r, cy + r, bz),  # 2 base arrière-droit
-            (cx - r, cy + r, bz),  # 3 base arrière-gauche
-            (cx,     cy,     tz),  # 4 sommet
-        ]
-        faces = [
-            (0, 1, 4),  # face avant
-            (1, 2, 4),  # face droite
-            (2, 3, 4),  # face arrière
-            (3, 0, 4),  # face gauche
-        ]
-        c = Vec4(*col, 1.0)
-        c_dark = Vec4(col[0]*0.65, col[1]*0.63, col[2]*0.60, 1.0)
-
+    def _build(self, rng, y_start, y_end):
+        """Batch manuel : toutes les pyramides dans 1 seul GeomNode → 2 draw calls."""
         fmt  = GeomVertexFormat.getV3c4()
-        vd   = GeomVertexData("mtn", fmt, Geom.UHStatic)
+        vd   = GeomVertexData("mtns_batch", fmt, Geom.UHStatic)
         vw   = GeomVertexWriter(vd, "vertex")
         cw   = GeomVertexWriter(vd, "color")
         tris = GeomTriangles(Geom.UHStatic)
+        vi   = [0]   # indice de vertex courant
 
-        for i, (vi, vj, vk) in enumerate(faces):
-            shade = c if i in (0, 1) else c_dark
-            for idx in (vi, vj, vk):
-                vw.addData3(*verts[idx]); cw.addData4(shade)
-            base_i = i * 3
-            tris.addVertices(base_i, base_i + 1, base_i + 2)
+        def add_pyramid(cx, cy, h, base, col):
+            r = base / 2.0
+            bz = GROUND_Z
+            tz = GROUND_Z + h
+            verts = [
+                (cx - r, cy - r, bz),
+                (cx + r, cy - r, bz),
+                (cx + r, cy + r, bz),
+                (cx - r, cy + r, bz),
+                (cx,     cy,     tz),
+            ]
+            faces = [(0,1,4), (1,2,4), (2,3,4), (3,0,4)]
+            c = Vec4(*col, 1.0)
+            c_dark = Vec4(col[0]*0.65, col[1]*0.63, col[2]*0.60, 1.0)
+            for i, (a, b, c_idx) in enumerate(faces):
+                shade = c if i in (0, 1) else c_dark
+                for idx in (a, b, c_idx):
+                    vw.addData3(*verts[idx]); cw.addData4(shade)
+                base_i = vi[0]
+                tris.addVertices(base_i, base_i + 1, base_i + 2)
+                vi[0] += 3
 
-        geom = Geom(vd); geom.addPrimitive(tris)
-        gn   = GeomNode("mtn"); gn.addGeom(geom)
-        return NodePath(gn)
-
-    def _build(self, rng, y_start, y_end):
         y = y_start
         while y < y_end:
             for side in (-1, 1):
-                cx   = side * rng.uniform(18.0, 22.0)
-                h    = rng.uniform(2.0, 6.0)
+                cx  = side * rng.uniform(18.0, 22.0)
+                h   = rng.uniform(2.0, 6.0)
                 base = rng.uniform(3.0, 7.0)
-                col  = rng.choice(self._ROC_COLORS)
-                np   = self._pyramid(cx, y, h, base, col)
-                np.reparentTo(self.node)
+                col = rng.choice(self._ROC_COLORS)
+                add_pyramid(cx, y, h, base, col)
             y += rng.uniform(LUNAR["mountain_spacing_min"], LUNAR["mountain_spacing_max"])
+
+        geom = Geom(vd); geom.addPrimitive(tris)
+        gn   = GeomNode("mtns_batch"); gn.addGeom(geom)
+        NodePath(gn).reparentTo(self.node)
 
     def update(self, dt, scroll_speed):
         if not self.alive:
