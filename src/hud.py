@@ -227,68 +227,20 @@ class HUD:
             shadow=(0, 0, 0, 0.8),  # Faux gras via shadow
         )
 
-        # ===== WAVE (haut gauche) =====
-        self.wave_label = OnscreenText(
-            text="WAVE", pos=(-1.2, 0.90), scale=0.028,
-            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ALeft,
-            mayChange=False, sort=50,
-        )
+        # ===== WAVE (haut gauche) — texte unifié, aligne avec l'annonce =====
         self.wave_text = OnscreenText(
-            text="1", pos=(-1.05, 0.90), scale=0.04,
+            text="WAVE 1", pos=(-1.20, 0.90), scale=0.040,
             fg=C_BRIGHT, align=TextNode.ALeft,
             mayChange=True, sort=50,
             shadow=(0, 0, 0, 0.8),
         )
 
-        # ===== HOSTILES (masqué) =====
-        self.hostiles_label = OnscreenText(
-            text="", pos=(1.2, 0.90), scale=0.028,
-            fg=Vec4(0.9, 0.55, 0.15, 0.0), align=TextNode.ARight,
-            mayChange=False, sort=50,
-        )
-        self.hostiles_text = OnscreenText(
-            text="", pos=(1.05, 0.90), scale=0.04,
-            fg=C_DANGER, align=TextNode.ARight,
-            mayChange=True, sort=50,
-        )
-
-        # ===== BARRES EN BAS (sous la ligne inférieure de l'overlay) =====
+        # ===== BARRES EN BAS — uniquement Force =====
         self.bar_root = game.aspect2d.attachNewNode("bars")
         self.bar_root.setTransparency(TransparencyAttrib.MAlpha)
         self.bar_root.setBin("fixed", 45)
 
-        # Shield — bas gauche, ENTRE les lignes du cadre
-        self.shield_label = OnscreenText(
-            text="SHIELD", pos=(-0.75, -0.90), scale=0.025,
-            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ALeft,
-            mayChange=False, sort=50,
-        )
-        self.shield_bar = _make_bar(self.bar_root, -0.75, -0.95, 0.5, 0.025, segments=12)
-
-        # Laser Energy — bas droit, label en haut à droite de la barre
-        self.laser_label = OnscreenText(
-            text="LASER", pos=(0.76, -0.90), scale=0.025,
-            fg=Vec4(0.9, 0.55, 0.15, 0.7), align=TextNode.ARight,
-            mayChange=False, sort=50,
-        )
-        self.heat_bar = _make_bar(self.bar_root, 0.25, -0.95, 0.5, 0.025, segments=12)
-        self.overheat_text = OnscreenText(
-            text="", pos=(0.50, -0.90), scale=0.022,
-            fg=C_DANGER, align=TextNode.ACenter, mayChange=True, sort=50,
-        )
-
-        # Torpedo counter — losange + chiffre en bas
-        self.torpedo_label = OnscreenText(
-            text="TORP", pos=(0, -0.83), scale=0.020,
-            fg=Vec4(0.9, 0.55, 0.15, 0.5), align=TextNode.ACenter,
-            mayChange=False, sort=50,
-        )
-        self.torpedo_count_text = OnscreenText(
-            text="20", pos=(0, -0.935), scale=0.038,
-            fg=C_BRIGHT, align=TextNode.ACenter, mayChange=True, sort=52,
-            shadow=(0, 0, 0, 0.9),
-        )
-        # Losange bas-centre (20% plus petit : 0.07 → 0.056)
+        # Losange bas-centre (indicateur torpille)
         self._torp_diamond_root = game.aspect2d.attachNewNode("torp_diamond")
         self._torp_diamond_root.setBin("fixed", 50)
         self._torp_diamond_root.setDepthTest(False)
@@ -296,15 +248,50 @@ class HUD:
         self._torp_diamond_root.setTransparency(TransparencyAttrib.MAlpha)
         self._build_single_diamond(self._torp_diamond_root, 0, -0.93, 0.056)
         self._torp_diamonds = []
+        self._torp_count_text = OnscreenText(
+            text="6", pos=(0, -0.944), scale=0.032,
+            fg=Vec4(0.9, 0.6, 0.1, 0.88), align=TextNode.ACenter,
+            mayChange=True, sort=51,
+        )
 
         # ===== WARNINGS near-ship (overheat + torp low) =====
-        # Texte WARN clignotant near-ship
+        # Texte WARN clignotant near-ship — pré-alloué, repositionné chaque frame
         self._warn_overheat = OnscreenText(
             text="", pos=(0, 0), scale=0.022,
             fg=Vec4(1.0, 0.35, 0.0, 1.0), align=TextNode.ACenter,
             mayChange=True, sort=56, shadow=(0,0,0,0.7),
         )
+        # Warn near-ship (fuselage) — nœud persistant mis à jour chaque frame
+        self._ship_warn_text = OnscreenText(
+            text="", pos=(0, 0), scale=0.022,
+            fg=Vec4(1.0, 0.35, 0.0, 0.0), align=TextNode.ACenter,
+            mayChange=True, sort=56, shadow=(0,0,0,0.6),
+        )
         self._warn_torp_shown = False
+
+        # ===== MINI HUD near-ship — barres persistantes (repositionnées chaque frame) =====
+        _W, _H, _GAP = 0.11, 0.0060, 0.0090
+        self._sbar_W   = _W
+        self._sbar_H   = _H
+        self._sbar_GAP = _GAP
+
+        sbar = game.aspect2d.attachNewNode("ship_bars")
+        sbar.setBin("fixed", 47)
+        sbar.setDepthTest(False)
+        sbar.setDepthWrite(False)
+        sbar.setTransparency(TransparencyAttrib.MAlpha)
+        self._sbar_root = sbar
+
+        # Laser bar (z = 0 dans l'espace local de sbar)
+        _make_rect(sbar, 0, 0,  _W, _H, Vec4(0.12, 0.05, 0.02, 0.38))   # fond
+        self._sbar_laser_fill = _make_rect(sbar, 0, 0, _W, _H, C_ORANGE) # fill
+        _make_rect_outline(sbar, 0, 0, _W, _H, Vec4(1.0, 0.45, 0.1, 0.18))
+
+        # HP bar (z = -(H+GAP) dans l'espace local de sbar)
+        _z2 = -(_H + _GAP)
+        _make_rect(sbar, 0, _z2, _W, _H, Vec4(0.10, 0.09, 0.02, 0.38))  # fond
+        self._sbar_hp_fill = _make_rect(sbar, 0, _z2, _W, _H, C_BRIGHT)  # fill
+        _make_rect_outline(sbar, 0, _z2, _W, _H, Vec4(1.0, 0.88, 0.12, 0.18))
 
         # ===== ANNONCE WAVE — dezoom vers le label permanent =====
         self.wave_announce = OnscreenText(
@@ -515,9 +502,11 @@ class HUD:
         # Score
         self.score_text.setText(f"{score:,}".replace(",", " "))
 
-        # Torpilles + warnings
-        self._update_torp_display(torpedo_count, 20, self.blink_timer, player_node)
+        # Warnings near-ship (chaleur)
         self._update_heat_warnings(player_node, heat_pct, overheated, self.blink_timer)
+        self._update_ship_hud(player_node, heat_pct, overheated, torpedo_count,
+                              force_pct, force_active, health, max_health)
+        self._update_torp_display(torpedo_count, 20, self.blink_timer)
 
         # Force gauge — drain continu en usage, recharge aux kills
         if force_active:
@@ -548,32 +537,8 @@ class HUD:
         else:
             self.force_overlay["frameColor"] = Vec4(0.1, 0.15, 0.4, 0)
 
-        # Wave
-        self.wave_text.setText(f"{wave}")
-
-        # Shield
-        hp = max(0, health / max_health)
-        if hp > 0.5:
-            bar_c = C_ORANGE
-        elif hp > 0.25:
-            bar_c = C_WARN
-        else:
-            bar_c = C_DANGER
-        _update_bar(self.shield_bar, hp, bar_c)
-
-        # Laser energy — même valeur que l'arc camembert : 1 - heat_pct
-        energy = 1.0 - heat_pct
-        if overheated:
-            blink = abs(math.sin(self.blink_timer * 6))
-            self.overheat_text.setText("OVERHEAT")
-            self.overheat_text.setFg(Vec4(1, 0.15, 0.05, 0.5 + 0.5 * blink))
-            _update_bar(self.heat_bar, energy, C_DANGER)
-        elif heat_pct > 0.75:
-            _update_bar(self.heat_bar, energy, C_WARN)
-            self.overheat_text.setText("")
-        else:
-            self.overheat_text.setText("")
-            _update_bar(self.heat_bar, energy, C_ORANGE)
+        # Wave — texte unifié "WAVE X"
+        self.wave_text.setText(f"WAVE {wave}")
 
         # Attitude — désactivé
         # self._update_attitude(roll, pitch)
@@ -599,10 +564,15 @@ class HUD:
             self._dmg_intensity = a
             self._set_trapeze_alpha(self._dmg_left_np,  a, 'left')
             self._set_trapeze_alpha(self._dmg_right_np, a, 'right')
+            # Suit le roll du vaisseau — effet "peint sur la coque"
+            self._dmg_left_np.setR(-roll)
+            self._dmg_right_np.setR(-roll)
         elif self._dmg_intensity > 0.0:
             self._dmg_intensity = 0.0
             self._set_trapeze_alpha(self._dmg_left_np,  0.0, 'left')
             self._set_trapeze_alpha(self._dmg_right_np, 0.0, 'right')
+            self._dmg_left_np.setR(0)
+            self._dmg_right_np.setR(0)
 
         # ── Warning astéroïdes ──
         if self._ast_warn_timer > 0:
@@ -705,17 +675,17 @@ class HUD:
         np.setRenderModeThickness(1.8)
         np.setTransparency(TransparencyAttrib.MAlpha)
 
-    def _update_torp_display(self, torpedo_count, max_torp, blink_timer, player_node=None):
-        """Met à jour le chiffre torpilles bas + warnings near-ship."""
-        if torpedo_count <= 3:
-            pulse = abs(math.sin(blink_timer * 8))
-            fg = Vec4(1.0, 0.1 + 0.1*pulse, 0.0, 1.0)
-        elif torpedo_count <= max_torp // 3:
-            fg = Vec4(1.0, 0.65, 0.1, 1.0)
+    def _update_torp_display(self, torpedo_count, max_torp=20, blink_timer=0.0, player_node=None):
+        """Compteur torpilles dans le losange bas-centre."""
+        if torpedo_count <= 2:
+            col = Vec4(1.0, 0.25, 0.0, 0.90)
+            if torpedo_count == 0:
+                pulse = 0.55 + 0.45 * abs(math.sin(blink_timer * 7))
+                col = Vec4(1.0, 0.12, 0.0, pulse)
         else:
-            fg = Vec4(0.85, 0.95, 1.0, 1.0)
-        self.torpedo_count_text.setText(str(torpedo_count))
-        self.torpedo_count_text['fg'] = fg
+            col = Vec4(0.9, 0.6, 0.1, 0.88)
+        self._torp_count_text.setText(str(torpedo_count))
+        self._torp_count_text.setFg(col)
 
 
     def _make_damage_trapeze(self, game, side):
@@ -779,14 +749,93 @@ class HUD:
                 warn_x = p2d.getX() * ar
                 warn_z = p2d.getY() - 0.10
 
-        self._warn_overheat.setPos(warn_x, warn_z)
+        # WARN near-ship géré par le mini HUD — ce label bas est désactivé
+        self._warn_overheat.setText("")
 
-        if overheated or heat_pct > 0.75:
-            pulse = abs(math.sin(blink_timer * 8))
-            self._warn_overheat['fg'] = Vec4(1.0, 0.3 + 0.15*pulse, 0.0, 0.5 + 0.5*pulse)
-            self._warn_overheat.setText("WARN")
+    def _update_ship_hud(self, player_node, heat_pct, overheated,
+                         torpedo_count, force_pct, force_active,
+                         health=16, max_health=16):
+        """Mini HUD — barres persistantes repositionnées chaque frame."""
+        if player_node is None or player_node.isEmpty():
+            self._sbar_root.hide()
+            self._ship_warn_text.setText("")
+            return
+
+        game  = self.game
+        sp    = player_node.getPos()
+        p_cam = game.camera.getRelativePoint(game.render, sp)
+        p2d   = Point2()
+        if not game.camLens.project(p_cam, p2d):
+            self._sbar_root.hide()
+            return
+
+        ar = game.getAspectRatio()
+        sx = p2d.getX() * ar
+        sz = p2d.getY()
+
+        W   = self._sbar_W
+        H   = self._sbar_H
+
+        # Ancrage Y — moteurs bas
+        eng_world = game.render.getRelativePoint(player_node, Point3(0, -1.20, -0.17))
+        eng_cam   = game.camera.getRelativePoint(game.render, eng_world)
+        p2d_eng   = Point2()
+        if game.camLens.project(eng_cam, p2d_eng):
+            lz = p2d_eng.getY() - 0.008
         else:
-            self._warn_overheat.setText("")
+            lz = sz - 0.055
+
+        # Déplace le root persistant — toute la géométrie suit
+        self._sbar_root.setPos(sx - W / 2.0, 0, lz)
+        self._sbar_root.show()
+
+        bt = self.blink_timer
+
+        # ── Barre Laser ──────────────────────────────────────────────────────
+        if heat_pct > 0.002:
+            if overheated:
+                pulse = 0.65 + 0.35 * abs(math.sin(bt * 8))
+                hc = Vec4(1.0, 0.12 * pulse, 0.0, pulse)
+            elif heat_pct > 0.72:
+                hc = Vec4(1.0, 0.38, 0.05, 0.90)
+            else:
+                t  = heat_pct
+                hc = Vec4(0.85 + 0.15 * t, 0.65 - 0.45 * t, 0.10, 0.80)
+            self._sbar_laser_fill.setScale(min(heat_pct, 1.0), 1.0, 1.0)
+            self._sbar_laser_fill.setColorScale(hc)
+            self._sbar_laser_fill.show()
+        else:
+            self._sbar_laser_fill.hide()
+
+        # WARN / OVERHEAT (nœud persistant, repositionné)
+        if overheated:
+            pulse_w = 0.55 + 0.45 * abs(math.sin(bt * 6))
+            self._ship_warn_text.setText("OVERHEAT")
+            self._ship_warn_text.setPos(sx, sz + 0.018)
+            self._ship_warn_text.setFg(Vec4(1.0, 0.12, 0.0, pulse_w))
+        elif heat_pct > 0.65:
+            self._ship_warn_text.setText("WARN")
+            self._ship_warn_text.setPos(sx, sz + 0.018)
+            self._ship_warn_text.setFg(Vec4(1.0, 0.60, 0.10, 0.90))
+        else:
+            self._ship_warn_text.setText("")
+            self._ship_warn_text.setFg(Vec4(1.0, 0.35, 0.0, 0.0))
+
+        # ── Barre Vie ─────────────────────────────────────────────────────────
+        hp_pct = max(0.0, min(1.0, health / max(max_health, 1)))
+        if hp_pct > 0.0:
+            if hp_pct <= 0.25:
+                pulse = 0.65 + 0.35 * abs(math.sin(bt * 7))
+                vc = Vec4(1.0, 0.60 * pulse, 0.0, pulse)
+            elif hp_pct <= 0.50:
+                vc = Vec4(0.95, 0.80, 0.10, 0.88)
+            else:
+                vc = Vec4(0.88, 0.78, 0.12, 0.82)
+            self._sbar_hp_fill.setScale(hp_pct, 1.0, 1.0)
+            self._sbar_hp_fill.setColorScale(vc)
+            self._sbar_hp_fill.show()
+        else:
+            self._sbar_hp_fill.hide()
 
     def _build_torp_pips(self, max_count):
         """Obsolète."""
@@ -995,14 +1044,18 @@ class HUD:
         self.wave_announce.setText("")
         self.pickup_text.setText("")
         self._warn_overheat.setText("")
+        self._ship_warn_text.setText("")
+        self._ship_warn_text.setFg(Vec4(1.0, 0.35, 0.0, 0.0))
         self.combo_text.setText("")
-        self.overheat_text.setText("")
         self.force_ready_text.setText("")
 
         # Warnings astéroïdes
         self._ast_warn_timer = 0.0
         self._ast_warn_l.setFg(Vec4(1, 0, 0, 0))
         self._ast_warn_r.setFg(Vec4(1, 0, 0, 0))
+
+        # Mini HUD near-ship — barres persistantes
+        self._sbar_root.hide()
 
         # Cache les barres + overlay complet
         self.bar_root.hide()
@@ -1030,14 +1083,18 @@ class HUD:
         self.game_over_text.setText("")
         self.game_over_sub.setText("")
         self._warn_overheat.setText("")
+        self._ship_warn_text.setText("")
+        self._ship_warn_text.setFg(Vec4(1.0, 0.35, 0.0, 0.0))
         self.combo_text.setText("")
-        self.overheat_text.setText("")
 
         self.hide_boss_bar()
 
         self._ast_warn_timer = 0.0
         self._ast_warn_l.setFg(Vec4(1, 0, 0, 0))
         self._ast_warn_r.setFg(Vec4(1, 0, 0, 0))
+
+        # Mini HUD near-ship — barres persistantes
+        self._sbar_root.hide()
 
         # Réaffiche les barres et overlay si cachés
         self.bar_root.show()

@@ -15,8 +15,8 @@ import math
 class LaserBolt:
     """Un seul tir laser."""
 
-    SPEED = 90.0
-    MAX_DISTANCE = 200.0
+    SPEED = 115.0
+    MAX_DISTANCE = 380.0
     DAMAGE = 1
 
     def __init__(self, parent_node, start_pos, direction, color_back=None, color_front=None):
@@ -139,23 +139,22 @@ class LaserBolt:
 class LaserSystem:
     """Tir par paires alternées avec système de surchauffe."""
 
-    FIRE_RATE = 0.12          # Temps entre chaque paire (original)
+    FIRE_RATE = 0.12          # Temps entre chaque paire
 
     # Surchauffe
     MAX_HEAT = 100.0
-    HEAT_PER_SHOT = 8.0       # Moins de chaleur = ~2 salves de plus avant overheat
+    HEAT_PER_SHOT = 7.3       # Surchauffe en ~3.7s de tir continu
     HEAT_DECAY = 25.0         # Refroidissement par seconde (quand on tire pas)
     OVERHEAT_THRESHOLD = 100.0  # Seuil de surchauffe
     COOLDOWN_TIME = 2.5       # Durée du cooldown forcé (secondes)
 
     # Canons
     CANNON_PAIRS = [
-        [Point3( 1.0, 1.5,  0.03), Point3(-1.0, 1.5,  0.03)],
-        [Point3( 1.0, 1.5, -0.03), Point3(-1.0, 1.5, -0.03)],
+        [Point3( 1.0, 1.0,  0.03), Point3(-1.0, 1.0,  0.03)],
+        [Point3( 1.0, 1.0, -0.03), Point3(-1.0, 1.0, -0.03)],
     ]
 
-    AUTO_AIM_RANGE = 120.0
-    AUTO_AIM_STRENGTH = 0.15
+    AUTO_AIM_RANGE_FAR = 200.0      # Utilisé par les torpilles uniquement
 
     def __init__(self, game):
         self.game = game
@@ -202,10 +201,10 @@ class LaserSystem:
             if not self.firing or self.overheated:
                 self.heat = max(0, self.heat - self.HEAT_DECAY * dt)
             else:
-                self.heat = max(0, self.heat - self.HEAT_DECAY * 0.3 * dt)
+                self.heat = max(0, self.heat - self.HEAT_DECAY * 0.45 * dt)
 
-            # Débloque dès que la chaleur repasse sous 50% (pas besoin d'attendre 0)
-            if self.overheated and self.heat <= self.OVERHEAT_THRESHOLD * 0.25:
+            # Débloque dès que la chaleur repasse sous 50%
+            if self.overheated and self.heat <= self.OVERHEAT_THRESHOLD * 0.50:
                 self.overheated = False
 
             if self.firing and self.fire_timer <= 0 and not self.overheated:
@@ -249,23 +248,9 @@ class LaserSystem:
             c_back = Vec4(1.0, 0.25, 0.0, 1)
             c_front = Vec4(1.0, 0.7, 0.4, 1)
 
-        # Force → pas d'auto-aim (tir manuel pur)
-        aim_strength = 0.0 if force_active else self.AUTO_AIM_STRENGTH
-        aim_range = 0.0 if force_active else self.AUTO_AIM_RANGE
-
         for offset in pair:
             world_pos = self.game.render.getRelativePoint(player_node, offset)
-
-            base_dir = Vec3(0, 1, 0)
-            nearest = self.find_nearest_enemy(world_pos, max_range=aim_range)
-            if nearest:
-                epos = nearest.get_pos()
-                if epos:
-                    to_enemy = epos - world_pos
-                    to_enemy.normalize()
-                    aim_dir = base_dir * (1 - aim_strength) + to_enemy * aim_strength
-                    aim_dir.normalize()
-                    base_dir = aim_dir
+            base_dir  = Vec3(0, 1, 0)
 
             bolt = LaserBolt(self.game.render, world_pos, base_dir,
                             color_back=c_back, color_front=c_front)

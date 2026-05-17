@@ -37,7 +37,7 @@ main.py
 
 ### `src/player.py` — Joueur
 - Modèle X-Wing texturé (Daniel Andersson, Sketchfab CC-BY) avec auto-scale
-- Zone de jeu : ±11 X, ±6.5 Z
+- Zone de jeu : ±14 X (L1/L4), ±12 X (L2), ±11 X (L3) — dynamique via `set_bounds()`
 - Vitesse déplacement : 12 u/s avec lerp 12 u/s
 - Rotation visuelle : roll max 30°, pitch max 20°
 - **Barrel roll** : double-tap gauche/droite → 0.6s d'invincibilité, FOV zoom, flash, speed lines, traînées bleues spirale
@@ -45,7 +45,8 @@ main.py
 - **Visée FPS souris** : mode relatif (warp centre chaque frame), `mouse_aim_x/z` clampé ±1.2/±0.9, `MOUSE_SENS=0.004`
 - **Rectangle de visée 3D** : 4 segments UHDynamic en monde, dimensions hitbox, couleur viseur `(0.95,0.82,0.18)`, positionné à Y+60 devant le vaisseau
 - 4 lumières moteurs aux bouts des ailes (pulse rouge ↔ orange)
-- Boucliers : 10 HP max
+- **Hit flash** : lueur ambre `(1.5,0.28,0.06,0.055)` sur copie du modèle, 0.18s
+- **Bouclier** : désactivé — réservé V3 (vrai système énergétique)
 
 ### `src/enemies.py` — Ennemis
 - **TIEFighter** : 18 u/s, charge à 65 u/s, 2 HP, 2 bolts, équilibré
@@ -66,7 +67,9 @@ main.py
 - 2 bolts par salve (4 canons en 2 paires alternées)
 - Couleurs alternées : rouge/rose & orange/jaune, noyau blanc + halo
 - **Surchauffe** : ~20 salves → cooldown forcé 2.5s, jauge sur HUD
-- **Auto-aim** : correction douce 15% vers l'ennemi le plus proche
+- **Auto-aim supprimé** pour les lasers normaux — tir droit (`Vec3(0,1,0)`)
+- **Portée** : `MAX_DISTANCE=380u`, `SPEED=115 u/s`
+- Auto-aim conservé uniquement pour les torpilles homing
 
 ### `src/torpedoes.py` — Torpilles
 - Lock-on : clic droit maintenu, portée 120 u, cône 8 u
@@ -116,9 +119,10 @@ main.py
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague
-- Jauge shield en arc (vert → jaune → rouge)
-- Jauge heat en arc (orange → rouge, clignotement surchauffe)
-- Flash de dégât orange
+- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + vie (jaune). Géométrie créée une seule fois en `__init__`, `setScale`/`setColorScale` chaque frame (zéro allocation).
+- **WARN/OVERHEAT** : `OnscreenText` pré-alloué `_ship_warn_text`, `setPos` chaque frame au niveau fuselage
+- **Trapèzes dégâts** : flash rouge latéraux style HL2, suivent le roll du vaisseau (`setR(-roll)`)
+- **Torpilles** : losange bas-centre avec compteur, clignotement rouge si ≤2
 - **Annonce wave** : "WAVE X" haut-gauche `(-1.20, 0.90)`, dezoom `0.065→0.040` + fade sur 2s
 - **Panneau radio boss** (bas d'écran) : rectangle + 2 demi-cercles procéduraux en GeomTriangles, fond sombre + bordure orange, barre HP couleur dynamique, texte nom + phase. Visible uniquement pendant le combat boss.
 - Screen flash blanc : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s
@@ -136,10 +140,28 @@ main.py
 - Champs : nom, score, vague, kills, date
 
 ### `src/levels.py` — Niveaux
-- `LEVELS` dict : 4 niveaux + L99 debug, avec `name`, `waves`, `intro_text`, `bg_color`, `description`
+- `LEVELS` dict : 4 niveaux + L0 sandbox + L99 debug, avec `name`, `waves`, `intro_text`, `bg_color`, `ambient_color`, `description`
+- `ambient_color` par niveau (données prêtes, appel `_apply_ambient()` désactivé — design en attente) :
+  - L1 espace froid `(0.10,0.12,0.22)` | L2 lune ambre `(0.20,0.15,0.06)` | L3 acier `(0.13,0.12,0.13)` | L4 violet `(0.10,0.06,0.20)`
 - L1 Asteroid Field → L2 Lunar Surface → L3 Death Star Trench → L4 Nebula
 - L99 DEBUG : astéroïdes only, 999 vagues, 100 HP
 - `LevelManager` : transitions entre niveaux (infrastructure, partiellement câblée)
+
+### `src/game.py` — Caméra
+- **Vue normale** : `CAM_FAR_POS=(0,-8,3.5)` → `CAM_FAR_LOOK=(0,22,0)`
+- **Vue Force/ADS** : `CAM_CLOSE_POS=(0,3,1.8)` → `CAM_CLOSE_LOOK=(0,16,0)`
+- **Lerp fluide** : `CAM_LERP_SPEED=5.0` — transition ~0.2s
+- Force active → zoom avant automatique ; touche 5 → bascule manuelle
+- `_update_camera(dt)` exécuté **avant** `hud.update()` dans la boucle (projection synchronisée)
+
+### `src/building_viewer.py` — Viewer procédural
+- Launcher : `python viewer.py`
+- Catalogue 7 meshs : tower, hangar, silo, bunker, antenna, pad, relay
+- Touches **1-7** : jump direct au bâtiment | Tab/Shift-Tab : navigation séquentielle
+- Hitbox **cyan** `(0.0,0.95,0.85)` (non confondue avec néons orange)
+- **Néons 3 couches additifs** (core + glow ×3 alpha 0.28 + bloom ×7 alpha 0.09) sur tous les bâtiments
+- **Labels Star Jedi** font impériale billboards
+- Lancement **plein écran** natif
 
 ### `src/menu.py` — Menu principal
 - **Sélecteur de niveau** `"CHOISIR NIVEAU"` : sous-menu dynamique généré depuis `LEVELS`

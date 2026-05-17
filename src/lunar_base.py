@@ -7,10 +7,11 @@ from panda3d.core import (
     Vec4,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomLines, GeomPoints, GeomNode,
-    NodePath, TransparencyAttrib,
+    NodePath, TransparencyAttrib, ColorBlendAttrib, TextNode,
 )
 import random
 import math
+from src.settings import LUNAR, BUILDING_TYPES, LAYOUTS
 
 GROUND_Z = -7.8   # niveau du sol lunaire (== LunarTerrain.GROUND_Z)
 
@@ -79,6 +80,183 @@ def _cylinder_geom(r, hh, col_side, col_top, sides=8):
     return NodePath(gn)
 
 
+# ─────────────────────────────────────────────────────────────
+# Couleurs néon impériales
+# ─────────────────────────────────────────────────────────────
+_NEON_ORANGE = Vec4(0.95, 0.45, 0.05, 1.0)
+_NEON_RED    = Vec4(0.95, 0.10, 0.08, 1.0)
+_NEON_BLUE   = Vec4(0.25, 0.65, 1.00, 0.90)
+_NEON_WHITE  = Vec4(0.85, 0.92, 1.00, 0.75)
+
+# Codes d'identification impériaux
+_CODES_TOWER  = [f"TW-{i:02d}"  for i in range(1, 30)]
+_CODES_HANGAR = ([f"BAY {i}"    for i in range(1, 10)] +
+                 [f"HGR-{i:02d}" for i in range(10, 20)])
+_CODES_BUNKER = ([f"SEC-{i:02d}" for i in range(1, 20)] +
+                 [f"POST {i}"   for i in range(1, 8)])
+
+
+def _neon_attrib(np, thick, alpha, additive=False):
+    """Applique épaisseur + transparence + blending additif optionnel."""
+    np.setRenderModeThickness(thick)
+    np.setLightOff()
+    np.setDepthWrite(False)
+    np.setDepthOffset(-1)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    if additive:
+        np.setAttrib(ColorBlendAttrib.make(
+            ColorBlendAttrib.MAdd,
+            ColorBlendAttrib.OIncomingAlpha,
+            ColorBlendAttrib.OOne,
+        ))
+
+
+def _build_box_lines(hw, hd, hh, z_list, color, off):
+    """Géométrie brute des 4 segments horizontaux autour d'une boîte."""
+    fmt  = GeomVertexFormat.getV3c4()
+    vd   = GeomVertexData("neon", fmt, Geom.UHStatic)
+    vw   = GeomVertexWriter(vd, "vertex")
+    cw   = GeomVertexWriter(vd, "color")
+    lns  = GeomLines(Geom.UHStatic)
+    vi   = [0]
+
+    def seg(p0, p1):
+        vw.addData3(*p0); cw.addData4(color)
+        vw.addData3(*p1); cw.addData4(color)
+        lns.addVertices(vi[0], vi[0] + 1); vi[0] += 2
+
+    for z in z_list:
+        seg((-hw, -hd - off, z), ( hw, -hd - off, z))
+        seg(( hw,  hd + off, z), (-hw,  hd + off, z))
+        seg(( hw + off, -hd, z), ( hw + off,  hd, z))
+        seg((-hw - off,  hd, z), (-hw - off, -hd, z))
+
+    geom = Geom(vd); geom.addPrimitive(lns)
+    gn   = GeomNode("neon_lines"); gn.addGeom(geom)
+    return NodePath(gn)
+
+
+def _build_cyl_lines(r, z, color, off, sides):
+    """Géométrie brute d'un anneau circulaire."""
+    R    = r + off
+    fmt  = GeomVertexFormat.getV3c4()
+    vd   = GeomVertexData("neon_cyl", fmt, Geom.UHStatic)
+    vw   = GeomVertexWriter(vd, "vertex")
+    cw   = GeomVertexWriter(vd, "color")
+    lns  = GeomLines(Geom.UHStatic)
+    for i in range(sides):
+        a0 = 2 * math.pi * i / sides
+        a1 = 2 * math.pi * (i + 1) / sides
+        vw.addData3(math.cos(a0) * R, math.sin(a0) * R, z); cw.addData4(color)
+        vw.addData3(math.cos(a1) * R, math.sin(a1) * R, z); cw.addData4(color)
+        lns.addVertices(i * 2, i * 2 + 1)
+    geom = Geom(vd); geom.addPrimitive(lns)
+    gn   = GeomNode("neon_cring"); gn.addGeom(geom)
+    return NodePath(gn)
+
+
+def _build_rect_lines(hw, hh, color, off):
+    """Géométrie brute d'un cadre rectangulaire plan XZ."""
+    fmt  = GeomVertexFormat.getV3c4()
+    vd   = GeomVertexData("frame", fmt, Geom.UHStatic)
+    vw   = GeomVertexWriter(vd, "vertex")
+    cw   = GeomVertexWriter(vd, "color")
+    lns  = GeomLines(Geom.UHStatic)
+    corners = [
+        (-hw - off, 0, -hh - off),
+        ( hw + off, 0, -hh - off),
+        ( hw + off, 0,  hh + off),
+        (-hw - off, 0,  hh + off),
+    ]
+    for i in range(4):
+        for p in (corners[i], corners[(i + 1) % 4]):
+            vw.addData3(*p); cw.addData4(color)
+        lns.addVertices(i * 2, i * 2 + 1)
+    geom = Geom(vd); geom.addPrimitive(lns)
+    gn   = GeomNode("neon_frame"); gn.addGeom(geom)
+    return NodePath(gn)
+
+
+def _c(color, alpha):
+    """Couleur avec alpha modifié."""
+    return Vec4(color.getX(), color.getY(), color.getZ(), alpha)
+
+
+def _neon_box_rings(hw, hd, hh, z_list, color, thick=2.5):
+    """Anneau néon avec 3 couches (core + glow + bloom)."""
+    root = NodePath("neon_box_grp")
+    layers = [
+        (0.025, thick,       1.00, False),
+        (0.060, thick * 3.0, 0.28, True),
+        (0.130, thick * 7.0, 0.09, True),
+    ]
+    for off, t, a, add in layers:
+        np = _build_box_lines(hw, hd, hh, z_list, _c(color, a), off)
+        _neon_attrib(np, t, a, add)
+        np.reparentTo(root)
+    return root
+
+
+def _neon_cyl_ring(r, z, color, thick=2.5, sides=12):
+    """Anneau cylindrique néon avec 3 couches (core + glow + bloom)."""
+    root = NodePath("neon_cyl_grp")
+    layers = [
+        (0.030, thick,       1.00, False),
+        (0.075, thick * 3.0, 0.28, True),
+        (0.150, thick * 7.0, 0.09, True),
+    ]
+    for off, t, a, add in layers:
+        np = _build_cyl_lines(r, z, _c(color, a), off, sides)
+        _neon_attrib(np, t, a, add)
+        np.reparentTo(root)
+    return root
+
+
+def _neon_rect_frame(hw, hh, color, thick=2.5):
+    """Cadre rectangulaire néon avec 3 couches (core + glow + bloom)."""
+    root = NodePath("neon_rect_grp")
+    layers = [
+        (0.025, thick,       1.00, False),
+        (0.060, thick * 3.0, 0.28, True),
+        (0.130, thick * 7.0, 0.09, True),
+    ]
+    for off, t, a, add in layers:
+        np = _build_rect_lines(hw, hh, _c(color, a), off)
+        _neon_attrib(np, t, a, add)
+        np.reparentTo(root)
+    return root
+
+
+_STAR_JEDI_FONT = None
+
+def _get_star_jedi_font():
+    """Charge StarJedi.ttf une seule fois (lazy, évite les imports circulaires)."""
+    global _STAR_JEDI_FONT
+    if _STAR_JEDI_FONT is None:
+        try:
+            from panda3d.core import FontPool
+            _STAR_JEDI_FONT = FontPool.loadFont("assets/fonts/StarJedi.ttf")
+        except Exception:
+            pass   # Fallback : police par défaut
+    return _STAR_JEDI_FONT
+
+
+def _imperial_label(text, size=0.28, color=(0.90, 0.55, 0.12, 0.90)):
+    """Label texte style impérial — billboard face caméra, police Star Jedi."""
+    tn = TextNode("imp_label")
+    tn.setText(text)
+    tn.setAlign(TextNode.ACenter)
+    tn.setTextColor(*color)
+    font = _get_star_jedi_font()
+    if font:
+        tn.setFont(font)
+    np = NodePath(tn)
+    np.setScale(size)
+    np.setLightOff()
+    np.setBillboardPointEye()
+    return np
+
+
 def _beacon(x, y, z, color, size=4.0):
     """Point lumineux (balise)."""
     fmt = GeomVertexFormat.getV3c4()
@@ -120,6 +298,14 @@ def _make_tower(hw, hd, h, rng):
     ant   = _cylinder_geom(0.06, ant_h/2, Vec4(0.18,0.18,0.17,1), Vec4(0.15,0.15,0.14,1), sides=4)
     ant.reparentTo(root); ant.setPos(0, 0, h/2 + ant_h/2)
     _beacon(0, 0, h/2 + ant_h + 0.15, Vec4(1.0, 0.1, 0.1, 1.0), 6).reparentTo(root)
+    # Néons — 3 anneaux oranges à 28 / 52 / 78 % de la hauteur
+    _neon_box_rings(hw, hd, h/2,
+                    [-h/2 + h*0.28, -h/2 + h*0.52, -h/2 + h*0.78],
+                    _NEON_ORANGE).reparentTo(root)
+    # Label impérial
+    lbl = _imperial_label(rng.choice(_CODES_TOWER))
+    lbl.reparentTo(root)
+    lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.12)
     root.setLightOff()
     return root
 
@@ -149,6 +335,18 @@ def _make_hangar(hw, hd, h, rng):
     geom2 = Geom(vd); geom2.addPrimitive(tris)
     gn2   = GeomNode("ridge"); gn2.addGeom(geom2)
     NodePath(gn2).reparentTo(root)
+    # Néon orange en haut des murs
+    _neon_box_rings(hw, hd, h/2, [h/2 - 0.12], _NEON_ORANGE, thick=3.0).reparentTo(root)
+    # Néon bleu à mi-hauteur — zone porte
+    _neon_box_rings(hw, hd, h/2, [-h/2 + h*0.42], _NEON_BLUE, thick=2.0).reparentTo(root)
+    # Cadre de porte bleu sur face avant (-Y)
+    door_frame = _neon_rect_frame(hw * 0.75, h * 0.42, _NEON_BLUE, thick=2.5)
+    door_frame.reparentTo(root)
+    door_frame.setPos(0, -hd - 0.04, -h/2 + h * 0.42)
+    # Label BAY
+    lbl = _imperial_label(rng.choice(_CODES_HANGAR), size=0.38)
+    lbl.reparentTo(root)
+    lbl.setPos(0, -hd - 0.08, -h/2 + h * 0.72)
     root.setLightOff()
     return root
 
@@ -171,6 +369,9 @@ def _make_silo(r, h, rng):
                            Vec4(0.45, 0.28, 0.10, 0.8), sides=10)
     band2.reparentTo(root); band2.setPos(0, 0, h*0.25)
     _beacon(0, 0, h/2+0.15, Vec4(1.0, 0.65, 0.1, 1.0), 5).reparentTo(root)
+    # Anneau néon orange au sommet + rouge à mi-corps
+    _neon_cyl_ring(r * 1.02, h/2 - 0.10, _NEON_ORANGE, thick=3.0).reparentTo(root)
+    _neon_cyl_ring(r * 1.02, -h * 0.08,  _NEON_RED,    thick=2.0).reparentTo(root)
     root.setLightOff()
     return root
 
@@ -193,6 +394,16 @@ def _make_bunker(hw, hd, h, rng):
                                 Vec4(b*0.55, b*0.54, b*0.52, 1),
                                 Vec4(b*0.45, b*0.44, b*0.42, 1), sides=6)
         turret.reparentTo(root); turret.setPos(0, 0, h/2 + h*0.12)
+    # Cadre néon rouge autour de la fente de tir (face +Y)
+    slit_frame = _neon_rect_frame(hw * 0.55, h * 0.12, _NEON_RED, thick=2.5)
+    slit_frame.reparentTo(root)
+    slit_frame.setPos(0, hd + 0.08, 0)
+    # Anneau orange en haut
+    _neon_box_rings(hw, hd, h/2, [h/2 - 0.08], _NEON_ORANGE, thick=2.5).reparentTo(root)
+    # Label SEC
+    lbl = _imperial_label(rng.choice(_CODES_BUNKER))
+    lbl.reparentTo(root)
+    lbl.setPos(0, -hd - 0.05, -h/2 + h * 0.65)
     root.setLightOff()
     return root
 
@@ -287,6 +498,9 @@ def _make_relay_tower(r, h, rng):
     dish.reparentTo(root); dish.setPos(0, 0, h/2 + h*0.06)
     dish.setHpr(rng.uniform(0,360), 0, 0)
     _beacon(0, 0, h/2+h*0.14, Vec4(1.0, 0.85, 0.1, 1.0), 5).reparentTo(root)
+    # Anneau néon orange sur le bord du plat + blanc sur le corps
+    _neon_cyl_ring(r*3.5, h/2 + h*0.07, _NEON_ORANGE, thick=2.5, sides=14).reparentTo(root)
+    _neon_cyl_ring(r,    -h * 0.12,      _NEON_WHITE,  thick=2.0, sides=8).reparentTo(root)
     root.setLightOff()
     return root
 
@@ -472,21 +686,25 @@ class LunarBaseGroup:
         self.node = NodePath("lunar_base")
         self.node.reparentTo(game.render)
         self.node.setPos(0, y_pos, 0)
+        self.node.setTransparency(TransparencyAttrib.MAlpha)
         self.node.setLightOff()
 
         rng    = random.Random(seed)
-        layout = self._pick_layout(rng)
+        layout = self._pick_layout(rng, LUNAR.get("enabled_layouts"))
         mark   = _pick_mark_style(rng)
         _make_ground_markings(self.node, rng, mark)
         getattr(self, f'_layout_{layout}')(rng)
 
     # ── Sélection anti-répétition ─────────────────────────────
 
-    def _pick_layout(self, rng):
+    def _pick_layout(self, rng, enabled=None):
         global _last_layouts
-        pool = [p for p in _LAYOUT_POOL if p not in _last_layouts]
+        base_pool = _LAYOUT_POOL if not enabled else [p for p in _LAYOUT_POOL if p in enabled]
+        if not base_pool:
+            base_pool = _LAYOUT_POOL[:]
+        pool = [p for p in base_pool if p not in _last_layouts]
         if not pool:
-            pool = _LAYOUT_POOL[:]
+            pool = base_pool[:]
         choice = rng.choice(pool)
         _last_layouts = (_last_layouts + [choice])[-2:]
         return choice
@@ -521,163 +739,245 @@ class LunarBaseGroup:
         mesh.reparentTo(self.node)
         mesh.setPos(lx, ly, GROUND_Z + h/2)
 
-        margin = 0.5
-        self._hitboxes.append({'lx': lx, 'ly': ly, 'hw': hw+margin, 'hd': hd+margin, 'height': h})
+        self._hitboxes.append({'lx': lx, 'ly': ly, 'hw': hw, 'hd': hd, 'height': h})
+
+        # Hitbox supplémentaire pour le toit en pente des hangars
+        if style == 'hangar':
+            ridge_h = h * 0.25
+            self._hitboxes.append({
+                'lx': lx, 'ly': ly,
+                'hw': hw * 0.55,
+                'hd': hd,
+                'height': h + ridge_h,
+                '_is_ridge': True,
+                '_ridge_bot': h,
+                '_debug_hidden': True,   # pas de wireframe debug (géom triangulaire)
+            })
+
+    # ── Placement générique depuis LAYOUTS / BUILDING_TYPES ──
+
+    def _layout_from_json(self, rng, layout_name):
+        """Lit le layout depuis settings.LAYOUTS et place les bâtiments."""
+        rules = LAYOUTS.get(layout_name, [])
+        for rule in rules:
+            btype    = rule["type"]
+            btdef    = BUILDING_TYPES.get(btype, {})
+            if not btdef:
+                continue
+
+            x_range  = rule.get("x", [-12.0, 12.0])
+            y_range  = rule.get("y", [-10.0, 10.0])
+            sc_range = rule.get("scale", [1.0, 1.0])
+            prob     = rule.get("prob", 1.0)
+            sides    = rule.get("sides", False)
+            min_ax   = rule.get("min_abs_x", 0.0)
+
+            raw_count = rule.get("count", 1)
+            if isinstance(raw_count, list):
+                count = rng.randint(raw_count[0], raw_count[1])
+            else:
+                count = int(raw_count)
+
+            side_list = [-1, 1] if sides else [0]
+
+            for side in side_list:
+                for _ in range(count):
+                    if rng.random() > prob:
+                        continue
+                    scale = rng.uniform(sc_range[0], sc_range[1])
+                    if sides:
+                        lx = side * rng.uniform(x_range[0], x_range[1])
+                    else:
+                        lx = rng.uniform(x_range[0], x_range[1])
+                        if min_ax > 0 and abs(lx) < min_ax:
+                            lx = min_ax * (1.0 if lx >= 0 else -1.0)
+                    ly = rng.uniform(y_range[0], y_range[1])
+                    self._add_from_type(rng, lx, ly, btype, scale)
+
+    def _add_from_type(self, rng, lx, ly, type_name, scale=1.0):
+        """Crée un bâtiment depuis BUILDING_TYPES[type_name]."""
+        btdef = BUILDING_TYPES.get(type_name)
+        if not btdef:
+            return
+
+        hw = rng.uniform(*btdef["hw"]) * scale
+        hd = rng.uniform(*btdef["hd"]) * scale
+        h  = rng.uniform(*btdef["h"])  * scale
+        hb = btdef.get("hb_scale", 1.0)
+
+        mesh_name = btdef["mesh"]
+        MAKERS = {
+            "tower":   lambda: _make_tower(hw, hd, h, rng),
+            "hangar":  lambda: _make_hangar(hw, hd, h, rng),
+            "silo":    lambda: _make_silo(hw, h, rng),
+            "bunker":  lambda: _make_bunker(hw, hd, h, rng),
+            "antenna": lambda: _make_antenna_mast(hw, h, rng),
+            "pad":     lambda: _make_landing_pad(hw, rng),
+            "relay":   lambda: _make_relay_tower(hw, h, rng),
+        }
+        maker = MAKERS.get(mesh_name)
+        if not maker:
+            return
+
+        mesh = maker()
+        mesh.reparentTo(self.node)
+        mesh.setPos(lx, ly, GROUND_Z + h / 2)
+
+        # Hitbox corps (hb_scale réduit les cylindres)
+        self._hitboxes.append({
+            "lx": lx, "ly": ly,
+            "hw": hw * hb, "hd": hd * hb,
+            "height": h,
+        })
+
+        # Ridge pour les hangars
+        if mesh_name == "hangar":
+            ridge_h = h * 0.25
+            self._hitboxes.append({
+                "lx": lx, "ly": ly,
+                "hw": hw * 0.55,
+                "hd": hd,
+                "height": h + ridge_h,
+                "_is_ridge": True,
+                "_ridge_bot": h,
+                "_debug_hidden": True,
+            })
 
     # ── Layouts ───────────────────────────────────────────────
 
     def _layout_runway(self, rng):
-        """Piste centrale flanquée de tours hautes et silos."""
-        for side in [-1, 1]:
-            self._add(rng, side*rng.uniform(8.0, 12.0), rng.uniform(-4, 4), 'tower', scale=rng.uniform(1.0, 1.4))
-            for _ in range(rng.randint(1, 2)):
-                self._add(rng, side*rng.uniform(6,11), rng.uniform(-8,8), 'hangar')
-            for _ in range(rng.randint(3, 5)):
-                self._add(rng, side*rng.uniform(8,13), rng.uniform(-9,9), 'silo')
-        for _ in range(rng.randint(3, 6)):
-            ax = rng.uniform(-13, 13)
-            if abs(ax) > 5:
-                self._add(rng, ax, rng.uniform(-10,10), 'antenna')
+        """Piste centrale flanquée de tours et silos."""
+        self._layout_from_json(rng, "runway")
 
     def _layout_platform(self, rng):
         """Pad central entouré de bunkers et relais."""
-        cx, cy = rng.uniform(-2,2), rng.uniform(-2,2)
-        self._add(rng, cx, cy, 'pad', scale=1.3)
-        self._add(rng, cx+rng.uniform(7,11), cy+rng.uniform(-3,3), 'tower', scale=1.4)
-        self._add(rng, cx-rng.uniform(7,11), cy+rng.uniform(-3,3), 'relay', scale=1.2)
-        for ang in [40, 130, 220, 310]:
-            r2 = rng.uniform(7, 11)
-            a  = math.radians(ang + rng.uniform(-20,20))
-            self._add(rng, cx+math.cos(a)*r2, cy+math.sin(a)*r2, rng.choice(['bunker','silo','relay']))
-        for _ in range(4):
-            ax = rng.uniform(-12,12)
-            if abs(ax) > 5:
-                self._add(rng, ax, rng.uniform(-9,9), 'antenna')
+        self._layout_from_json(rng, "platform")
 
     def _layout_compound(self, rng):
         """Grande base — 2 hangars massifs, silos multiples, tours aux coins."""
-        for side in [-1,1]:
-            self._add(rng, side*rng.uniform(8,12), rng.uniform(-5,5), 'hangar', scale=rng.uniform(1.1,1.4))
-        for i in range(rng.randint(4,7)):
-            sx = rng.choice([-1,1]) * rng.uniform(8,14)
-            self._add(rng, sx, -9+i*3.5+rng.uniform(-0.5,0.5), 'silo')
-        for _ in range(rng.randint(2,4)):
-            self._add(rng, rng.choice([-1,1])*rng.uniform(5,11), rng.uniform(-9,9), 'bunker')
-        for side in [-1,1]:
-            for ty in [-8, 8]:
-                self._add(rng, side*rng.uniform(9,13), ty, 'tower', scale=rng.uniform(1.0,1.3))
-        for _ in range(rng.randint(3,5)):
-            ax = rng.uniform(-13,13)
-            if abs(ax) > 5:
-                self._add(rng, ax, rng.uniform(-10,10), 'antenna')
+        self._layout_from_json(rng, "compound")
 
     def _layout_tower_row(self, rng):
         """Rangées de tours imposantes des deux côtés."""
-        for side in [-1,1]:
-            n = rng.randint(5,7)
-            for i in range(n):
-                tx = side * rng.uniform(8,12)
-                ty = -10 + i*(20.0/max(n-1,1)) + rng.uniform(-0.6,0.6)
-                t  = rng.choice(['tower','tower','silo','relay'])
-                sc = rng.uniform(1.0, 1.5)
-                self._add(rng, tx, ty, t, scale=sc)
-            self._add(rng, side*rng.uniform(9,13), rng.uniform(-6,6), 'hangar', scale=1.2)
-        for _ in range(rng.randint(2,4)):
-            ax = rng.uniform(-14,14)
-            if abs(ax) > 6:
-                self._add(rng, ax, rng.uniform(-9,9), 'antenna')
+        self._layout_from_json(rng, "tower_row")
 
     def _layout_industrial(self, rng):
         """Zone industrielle dense — silos serrés, bunkers, relais."""
-        # Cluster de silos côté gauche
-        for i in range(rng.randint(4,6)):
-            self._add(rng, -rng.uniform(7,14), -6+i*2.8+rng.uniform(-0.4,0.4), 'silo', scale=rng.uniform(1.0,1.5))
-        # Rangée de bunkers au centre
-        for i in range(rng.randint(3,5)):
-            self._add(rng, rng.uniform(-3,3), -8+i*4.5+rng.uniform(-0.5,0.5), 'bunker', scale=rng.uniform(1.1,1.4))
-        # Relais côté droit
-        for _ in range(rng.randint(2,3)):
-            self._add(rng, rng.uniform(7,13), rng.uniform(-9,9), 'relay', scale=rng.uniform(1.0,1.3))
-        for _ in range(rng.randint(2,3)):
-            self._add(rng, rng.uniform(-13,13), rng.uniform(-10,10), 'antenna')
+        self._layout_from_json(rng, "industrial")
 
     def _layout_fortress(self, rng):
         """Forteresse — 4 tours aux coins, hangars et bunkers intérieurs."""
-        corners = [(-1,-1),(-1,1),(1,-1),(1,1)]
-        for (sx, sy) in corners:
-            tx = sx * rng.uniform(9,13)
-            ty = sy * rng.uniform(7,11)
-            self._add(rng, tx, ty, 'tower', scale=rng.uniform(1.3, 1.8))
-        # Murs de bunkers entre les tours
-        for i in range(rng.randint(3,5)):
-            self._add(rng, rng.uniform(-8,8), -9+i*4.5, 'bunker', scale=rng.uniform(1.2,1.6))
-        # Centre : pad + relais
-        self._add(rng, rng.uniform(-2,2), rng.uniform(-2,2), 'pad', scale=1.1)
-        self._add(rng, rng.uniform(3,6),  rng.uniform(-3,3), 'relay')
-        for _ in range(rng.randint(2,4)):
-            ax = rng.uniform(-14,14)
-            if abs(ax) > 5:
-                self._add(rng, ax, rng.uniform(-10,10), 'antenna')
+        self._layout_from_json(rng, "fortress")
 
     def _layout_outpost(self, rng):
         """Avant-poste léger — quelques structures isolées, beaucoup d'espace."""
-        # 1 tour très haute au centre
-        self._add(rng, rng.uniform(-3,3), rng.uniform(-3,3), 'tower', scale=1.8)
-        # Quelques silos épars
-        for _ in range(rng.randint(3,5)):
-            angle = rng.uniform(0, 2*math.pi)
-            r2    = rng.uniform(7, 14)
-            self._add(rng, math.cos(angle)*r2, math.sin(angle)*r2,
-                      rng.choice(['silo','relay','bunker']))
-        for _ in range(rng.randint(4,6)):
-            ax = rng.uniform(-14,14)
-            if abs(ax) > 4:
-                self._add(rng, ax, rng.uniform(-10,10), 'antenna', scale=rng.uniform(0.9,1.4))
+        self._layout_from_json(rng, "outpost")
 
     def _layout_depot(self, rng):
         """Dépôt logistique — rangées de hangars + silos alignés."""
-        # Deux rangées de hangars parallèles
-        for side in [-1,1]:
-            for i in range(rng.randint(2,3)):
-                hy = -6 + i*7.0 + rng.uniform(-0.5,0.5)
-                self._add(rng, side*rng.uniform(6,10), hy, 'hangar', scale=rng.uniform(1.0,1.3))
-        # Silos entre les rangées
-        for i in range(rng.randint(4,6)):
-            self._add(rng, rng.uniform(-4,4), -9+i*3.8+rng.uniform(-0.3,0.3), 'silo')
-        # Relais au fond
-        for side in [-1,1]:
-            self._add(rng, side*rng.uniform(10,14), rng.uniform(-5,5), 'relay', scale=1.1)
-        for _ in range(2):
-            self._add(rng, rng.uniform(-14,14), rng.uniform(-10,10), 'antenna')
+        self._layout_from_json(rng, "depot")
 
     def _layout_mixed(self, rng):
-        """Mélange runway + pad + bunkers aléatoires."""
-        self._layout_runway(rng)
-        self._add(rng, rng.choice([-1,1])*rng.uniform(5,10), rng.uniform(-6,6), 'pad')
-        for _ in range(2):
-            self._add(rng, rng.choice([-1,1])*rng.uniform(6,11), rng.uniform(-8,8), 'bunker')
-        self._add(rng, rng.uniform(-12,12), rng.uniform(-8,8), 'relay')
+        """Mélange de bâtiments variés."""
+        self._layout_from_json(rng, "mixed")
 
-    # ── Collision ─────────────────────────────────────────────
+    # ── Hitboxes (debug) ─────────────────────────────────────
+
+    def get_hitboxes(self):
+        """Retourne les AABB des bâtiments en coordonnées monde.
+
+        Chaque entrée : (cx, cy, cz, hw, hd, hh) où
+          cx/cy/cz  — centre monde du bâtiment
+          hw/hd     — demi-largeurs X et Y (avec marge de collision)
+          hh        — demi-hauteur (height/2)
+        """
+        if not self.alive or self.node.isEmpty():
+            return []
+        group_y = self.node.getY()
+        result = []
+        for hb in self._hitboxes:
+            if hb.get('_debug_hidden'):
+                continue   # hitboxes internes (ridge) — collision active, pas de wireframe
+            if hb.get('_is_ridge'):
+                ridge_bot = hb['_ridge_bot']
+                ridge_top = hb['height']
+                half_h = (ridge_top - ridge_bot) / 2
+                cz = GROUND_Z + ridge_bot + half_h
+            else:
+                h  = hb['height']
+                cz = GROUND_Z + h / 2
+                half_h = h / 2
+            cx = hb['lx']
+            cy = group_y + hb['ly']
+            result.append((cx, cy, cz, hb['hw'], hb['hd'], half_h))
+        return result
+
+    # ── Collision ellipsoïde (joueur) vs AABB (bâtiment) ────────
+    #
+    # Algorithme : point le plus proche de la AABB du bâtiment par
+    # rapport au centre du vaisseau, puis test ellipsoïde :
+    #   (dx/rx)² + (dy/ry)² + (dz/rz)² ≤ 1
+    #
+    # L'ellipsoïde couvre naturellement les ailes (rx large) sans
+    # les coins carrés d'une AABB.
+    _E_RX = 1.10   # demi-axe X — bout d'aile à bout d'aile
+    _E_RY = 0.15   # demi-axe Y — quasi-ignoré (on s'en fout du nez)
+    _E_RZ = 0.40   # demi-axe Z — hauteur
 
     def check_collision(self, player_pos):
         if not self.alive or self.node.isEmpty():
-            return 0, 0.0
+            return 0, (0.0, 0.0)
         group_y = self.node.getY()
+        px = player_pos.getX()
+        py = player_pos.getY()
+        pz = player_pos.getZ()
+
         for hb in self._hitboxes:
-            world_y = group_y + hb['ly']
-            world_x = hb['lx']
-            bz_bot  = GROUND_Z - 0.5
-            bz_top  = GROUND_Z + hb['height'] + 0.6
-            dy = abs(player_pos.getY() - world_y)
-            if dy > hb['hd'] + 1.5: continue
-            dx = abs(player_pos.getX() - world_x)
-            if dx > hb['hw']: continue
-            if player_pos.getZ() > bz_top or player_pos.getZ() < bz_bot: continue
-            sign_x = 1.0 if player_pos.getX() >= world_x else -1.0
-            push_x = sign_x * (hb['hw'] - dx + 0.6)
-            return 2, push_x
-        return 0, 0.0
+            bx  = hb['lx']
+            by  = group_y + hb['ly']
+            bhw = hb['hw']
+            bhd = hb['hd']
+
+            if hb.get('_is_ridge'):
+                ridge_bot = hb['_ridge_bot']
+                ridge_top = hb['height']
+                bcz = GROUND_Z + ridge_bot + (ridge_top - ridge_bot) / 2
+                bhh = (ridge_top - ridge_bot) / 2
+            else:
+                bhh = hb['height'] / 2
+                bcz = GROUND_Z + bhh
+
+            # Rejet rapide AABB élargie (évite le sqrt pour les cas lointains)
+            if abs(px - bx) > self._E_RX + bhw: continue
+            if abs(py - by) > self._E_RY + bhd: continue
+            if abs(pz - bcz) > self._E_RZ + bhh: continue
+
+            # Point le plus proche de la AABB du bâtiment depuis le centre vaisseau
+            cx = max(bx - bhw, min(px, bx + bhw))
+            cy = max(by - bhd, min(py, by + bhd))
+            cz = max(bcz - bhh, min(pz, bcz + bhh))
+
+            # Test ellipsoïde : (dx/rx)² + (dy/ry)² + (dz/rz)² ≤ 1
+            dx = (cx - px) / self._E_RX
+            dy = (cy - py) / self._E_RY
+            dz = (cz - pz) / self._E_RZ
+            if dx*dx + dy*dy + dz*dz > 1.0:
+                continue
+
+            # Axe de pénétration minimale → push sur l'axe le moins pénétré
+            ox = (self._E_RX + bhw) - abs(px - bx)
+            oz = (self._E_RZ + bhh) - abs(pz - bcz)
+
+            if oz < ox:
+                # Collision par dessus/dessous → push vertical
+                sign_z = 1.0 if pz >= bcz else -1.0
+                return 2, (0.0, sign_z * oz)
+            else:
+                # Collision latérale → push horizontal
+                sign_x = 1.0 if px >= bx else -1.0
+                return 2, (sign_x * ox, 0.0)
+
+        return 0, (0.0, 0.0)
 
     # ── Update / Destroy ──────────────────────────────────────
 
@@ -686,6 +986,200 @@ class LunarBaseGroup:
             return
         self.node.setY(self.node.getY() - scroll_speed * dt)
         if self.node.getY() < -60:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ─────────────────────────────────────────────────────────────
+# Montagnes de bord — pyramides rocheuses sur les flancs X
+# ─────────────────────────────────────────────────────────────
+
+class LunarBorderMountain:
+    """Bande de montagnes procédurales sur les bords gauche/droit du niveau L2.
+
+    Chaque montagne = pyramide triangulaire (4 faces), couleur roc lunaire,
+    hauteur aléatoire 2.0–6.0 units, espacées de 8–15 units en Y.
+    Spawn en band de X ≈ ±18 à ±22.
+    """
+
+    _ROC_COLORS = [
+        (0.45, 0.42, 0.38),
+        (0.40, 0.38, 0.34),
+        (0.50, 0.47, 0.43),
+        (0.42, 0.40, 0.36),
+    ]
+
+    def __init__(self, parent, y_start, y_end, seed):
+        self.alive = True
+        self.node  = NodePath("border_mountains")
+        self.node.reparentTo(parent)
+        self.node.setLightOff()
+
+        rng = random.Random(seed)
+        self._build(rng, y_start, y_end)
+
+    def _pyramid(self, cx, cy, h, base, col):
+        """Crée une pyramide simple, posée sur GROUND_Z."""
+        r = base / 2.0
+        bz = GROUND_Z
+        tz = GROUND_Z + h
+        verts = [
+            (cx - r, cy - r, bz),  # 0 base avant-gauche
+            (cx + r, cy - r, bz),  # 1 base avant-droit
+            (cx + r, cy + r, bz),  # 2 base arrière-droit
+            (cx - r, cy + r, bz),  # 3 base arrière-gauche
+            (cx,     cy,     tz),  # 4 sommet
+        ]
+        faces = [
+            (0, 1, 4),  # face avant
+            (1, 2, 4),  # face droite
+            (2, 3, 4),  # face arrière
+            (3, 0, 4),  # face gauche
+        ]
+        c = Vec4(*col, 1.0)
+        c_dark = Vec4(col[0]*0.65, col[1]*0.63, col[2]*0.60, 1.0)
+
+        fmt  = GeomVertexFormat.getV3c4()
+        vd   = GeomVertexData("mtn", fmt, Geom.UHStatic)
+        vw   = GeomVertexWriter(vd, "vertex")
+        cw   = GeomVertexWriter(vd, "color")
+        tris = GeomTriangles(Geom.UHStatic)
+
+        for i, (vi, vj, vk) in enumerate(faces):
+            shade = c if i in (0, 1) else c_dark
+            for idx in (vi, vj, vk):
+                vw.addData3(*verts[idx]); cw.addData4(shade)
+            base_i = i * 3
+            tris.addVertices(base_i, base_i + 1, base_i + 2)
+
+        geom = Geom(vd); geom.addPrimitive(tris)
+        gn   = GeomNode("mtn"); gn.addGeom(geom)
+        return NodePath(gn)
+
+    def _build(self, rng, y_start, y_end):
+        y = y_start
+        while y < y_end:
+            for side in (-1, 1):
+                cx   = side * rng.uniform(18.0, 22.0)
+                h    = rng.uniform(2.0, 6.0)
+                base = rng.uniform(3.0, 7.0)
+                col  = rng.choice(self._ROC_COLORS)
+                np   = self._pyramid(cx, y, h, base, col)
+                np.reparentTo(self.node)
+            y += rng.uniform(LUNAR["mountain_spacing_min"], LUNAR["mountain_spacing_max"])
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        # Détruire quand toute la géométrie (qui s'étend jusqu'à ~SPAWN_DEPTH+80)
+        # est passée derrière le joueur. -250 laisse la dernière pyramide (~230u)
+        # sortir complètement avant de nettoyer.
+        if self.node.getY() < -250:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ─────────────────────────────────────────────────────────────
+# Routes lunaires — bandes perpendiculaires à la direction de vol
+# ─────────────────────────────────────────────────────────────
+
+class LunarRoad:
+    """2–3 routes horizontales (quads plats) perpendiculaires à l'axe Y.
+
+    Chaque route = quad légèrement au-dessus du sol + pointillés sur la ligne
+    médiane. Couleur plus claire que le sol lunaire.
+    """
+
+    ROAD_COLOR    = (0.55, 0.52, 0.48)
+    DASH_COLOR    = (0.80, 0.78, 0.70)
+    ROAD_WIDTH    = 0.8   # demi-largeur totale = ±0.4
+    ROAD_HALF_X   = 14.0  # s'étend de -14 à +14 en X
+    Z_OFFSET      = 0.05  # légèrement au-dessus de GROUND_Z
+
+    def __init__(self, parent, y_positions):
+        """y_positions : liste de Y absolus (coordonnées monde) pour les routes."""
+        self.alive = True
+        self.node  = NodePath("lunar_roads")
+        self.node.reparentTo(parent)
+        self.node.setLightOff()
+        self.node.setDepthOffset(1)
+
+        for y in y_positions:
+            self._make_road(y)
+
+    def _make_road(self, y):
+        z     = GROUND_Z + self.Z_OFFSET
+        hw    = self.ROAD_HALF_X
+        hd    = self.ROAD_WIDTH / 2.0   # = 0.4
+        rc    = Vec4(*self.ROAD_COLOR, 1.0)
+        dc    = Vec4(*self.DASH_COLOR, 0.9)
+
+        # ── Quad principal ──
+        fmt  = GeomVertexFormat.getV3c4()
+        vd   = GeomVertexData("road", fmt, Geom.UHStatic)
+        vw   = GeomVertexWriter(vd, "vertex")
+        cw   = GeomVertexWriter(vd, "color")
+        tris = GeomTriangles(Geom.UHStatic)
+
+        verts = [
+            (-hw, y - hd, z),
+            ( hw, y - hd, z),
+            ( hw, y + hd, z),
+            (-hw, y + hd, z),
+        ]
+        for v in verts:
+            vw.addData3(*v); cw.addData4(rc)
+        tris.addVertices(0, 1, 2); tris.addVertices(0, 2, 3)
+
+        geom = Geom(vd); geom.addPrimitive(tris)
+        gn   = GeomNode("road_quad"); gn.addGeom(geom)
+        np_q = NodePath(gn)
+        np_q.reparentTo(self.node)
+        np_q.setTransparency(TransparencyAttrib.MAlpha)
+
+        # ── Pointillés sur la médiane ──
+        fmt2  = GeomVertexFormat.getV3c4()
+        vd2   = GeomVertexData("dashes", fmt2, Geom.UHStatic)
+        vw2   = GeomVertexWriter(vd2, "vertex")
+        cw2   = GeomVertexWriter(vd2, "color")
+        lns   = GeomLines(Geom.UHStatic)
+        dz    = z + 0.02
+        DASH  = 1.2   # longueur d'un tiret
+        GAP   = 0.8   # espace entre tirets
+        step  = DASH + GAP
+        x     = -hw
+        vi    = 0
+        while x < hw:
+            x1 = x
+            x2 = min(x + DASH, hw)
+            vw2.addData3(x1, y, dz); cw2.addData4(dc)
+            vw2.addData3(x2, y, dz); cw2.addData4(dc)
+            lns.addVertices(vi, vi + 1)
+            vi += 2
+            x  += step
+
+        geom2 = Geom(vd2); geom2.addPrimitive(lns)
+        gn2   = GeomNode("road_dashes"); gn2.addGeom(geom2)
+        np_d  = NodePath(gn2)
+        np_d.reparentTo(self.node)
+        np_d.setRenderModeThickness(1.8)
+        np_d.setTransparency(TransparencyAttrib.MAlpha)
+        np_d.setDepthOffset(2)
+
+    def update(self, dt, scroll_speed):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - scroll_speed * dt)
+        if self.node.getY() < -80:
             self.destroy()
 
     def destroy(self):

@@ -43,6 +43,10 @@ class ForceAbility:
             gain += FORCE_TORPEDO_BONUS
         self.gauge = min(FORCE_MAX, self.gauge + gain)
 
+    def add_pickup(self, amount=35.0):
+        """Ajoute de la Force via un power-up ramassé (losange bleu)."""
+        self.gauge = min(FORCE_MAX, self.gauge + amount)
+
     def is_ready(self):
         """Jauge suffisante pour activer (seuil minimal 5%)."""
         return self.gauge >= FORCE_MAX * 0.05

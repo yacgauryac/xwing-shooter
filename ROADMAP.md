@@ -40,35 +40,121 @@
 
 ## V2 — En cours / Planifié
 
-### Priorité haute
+---
+
+### Implémenté — session polish (mai 2026)
+
+#### Caméra & contrôles
+- [x] **Vue normale reculée** : `(0,-8,3.5)` → `lookAt(0,22,0)` (était `-4`)
+- [x] **Zoom Force ADS** : lerp fluide vers `(0,3,1.8)` quand Force active — style visée FPS
+- [x] **Touche 5** : bascule manuelle vue proche/lointaine
+- [x] **Caméra avant HUD** dans la boucle `update()` — projection 1-frame synchronisée
+
+#### HUD polish
+- [x] **Barres mini-HUD persistantes** — plus de create/destroy chaque frame (fix saccade)
+- [x] **WARN/OVERHEAT** : nœud `OnscreenText` pré-alloué, repositionné chaque frame (fix pop)
+- [x] **Torpilles** : compteur losange bas-centre + supprimé du mini-HUD
+- [x] **Trapèzes dégâts** suivent le roll du vaisseau (`setR(-roll)`)
+- [x] **Lumière ambiante par niveau** : données `ambient_color` dans `levels.py` (désactivé — design à revoir)
+
+#### Joueur & effets
+- [x] **Hit flash** : ambre chaud `(1.5,0.28,0.06,0.055)` — plus de rouge saturé
+- [x] **Bouclier hit** : supprimé (réservé V3 — vrai système de bouclier)
+- [x] **SPAWN_PROTECT_Y supprimé** : ennemis touchables dès le spawn
+- [x] **Portée bolts** : `MAX_DISTANCE=380u`, `SPEED=115 u/s`
+- [x] **Auto-aim lasers supprimé** : conservé uniquement pour torpilles
+- [x] **Lumière ambiante revenue** : `(0.15,0.15,0.25)` bleu froid d'origine
+
+#### Building viewer
+- [x] Touche **1-7** : jump direct au bâtiment
+- [x] Lancement **plein écran** au démarrage
+- [x] Hitbox **cyan** (non confondue avec les néons orange)
+- [x] **Néons 3 couches** additifs sur tour, hangar, silo, bunker, relay
+- [x] **Labels Star Jedi** font impériale sur les bâtiments
+
+---
+
+### Phase P0 — Performance (bloquant)
+
+- [ ] **40fps → diagnostic draw calls** : `panda3d.core.PStatClient` ou `base.setFrameRateMeter(True)` + analyse
+- [ ] **`flattenStrong()`** sur les groupes de bâtiments après création (fusionne les GeomNodes, drastique)
+- [ ] **Néons : 3 couches → 2** : supprimer la couche bloom (×7) qui coûte cher pour peu de gain à distance de jeu
+- [ ] **Faces invisibles meshs** : audit culling `lunar_base.py` — `setTwoSided(True)` ciblé ou inversion normales
+
+---
+
+### Phase P1 — Visuels niveaux (priorité haute)
 
 #### 1. Visuels distincts par niveau
-- [ ] L1 (Champ d'astéroïdes) : actuel ✅
-- [ ] L2 (Surface lunaire) : plan de terrain, tourelles sol, éclairage monochrome
-  - [ ] Spaceport — bâtiments procéduraux, lignes de piste, structures
-  - [ ] Navmesh — ennemis contournent les bâtiments et la surface lunaire
-  - [ ] **Bug connu** : boss touche les murs et traverse la lune → navmesh obligatoire pour L2
-- [ ] L3 (Tranchée) : murs latéraux défilants, espace étroit, éclairage industriel
-- [ ] L4 (Nébuleuse) : volume de brouillard, faible visibilité, particules, éclairage tamisé
-- [ ] Couleur de fond change par niveau
+- [x] L1 (Champ d'astéroïdes) : actuel ✅
+- [x] L2 (Surface lunaire) : terrain, bâtiments procéduraux, néons impériaux ✅
+- [x] L3 (Tranchée Death Star) : murs panelés, textures circuit imprimé ✅
+- [ ] **L4 (Nébuleuse)** : brouillard violet dense `(0.05,0.02,0.12)`, onset 40u, opaque 90u — ennemis = silhouettes
+- [x] Couleur de fond par niveau ✅
 
-#### 2. Nouveaux ennemis
+#### 2. Polish bâtiments L2
+- [ ] **Néons façade** :
+  - Hangars : panneaux lumineux rectangulaires sur façade avant (enseigne impériale)
+  - Tours / bunkers : liserés de contour arêtes de la façade principale
+- [ ] **Positionnement nombre d'or** (φ=0.618) sur anneaux existants + nouveaux
+- [ ] **Lumière ambiante par niveau** : activer `_apply_ambient()` avec couleurs validées par niveau
+
+---
+
+### Phase P2 — Gameplay & UI
+
+#### 3. Menu pause
+- [ ] **Touche Échap** en jeu → overlay pause semi-transparent
+- [ ] Consolide **toutes les options debug** (touches 1-7 actuelles) dans un menu lisible
+- [ ] Options : Reprendre / Recommencer / Menu principal / toggles debug (hitbox, squelette, ruler, cam…)
+
+#### 4. Écran de fin
+- [ ] Refonte game over / victoire : récap score, kills par type d'ennemi, vague atteinte
+
+#### 5. Ennemis — comportement
+- [ ] **Sonde (ProbeDroid)** : ajouter tirs laser (actuellement muet)
+- [ ] **Drift plus agressif** et imprévisible sur Interceptor / ProbeDroid
+- [ ] **Spawn plus dense** : moins d'espace entre vagues, plus d'ennemis simultanés
+- [ ] **HP et points rééquilibrés** par type (trop faciles actuellement)
+- [ ] **Astéroïdes L1** : plus nombreux, plus gros
+
+---
+
+### Phase P3 — Outils & difficulté
+
+#### 6. Éditeur de level (tous niveaux)
+- [ ] Vue couloir side-view : visualise le flux des vagues sur un axe Y
+- [ ] Placement visuel des groupes d'ennemis par position Y
+- [ ] Export vers `wave_config.py` / `WAVE_DEFS_BY_LEVEL`
+- [ ] Paramètres par groupe : type, formation, delay, difficulty_scale
+
+#### 7. Debug avancé
+- [ ] **Hit debug** : en mode debug, pause auto au hit + flèche 3D + label source de dégât
+- [ ] **Squelette** : affiner le rendu debug squelette X-Wing
+
+---
+
+### Priorité haute (existant)
+
+#### 8. Visuels distincts par niveau (suite)
+
+#### 9. Nouveaux ennemis
 - [ ] Imperial Shuttle — lent, résistant, bon loot
 - [ ] Attack Bomber — plus lourd que TIE Bomber
 - [ ] Probe Droid — rapide, erratique
 - [ ] Ennemis sol / tourelles (niveaux surface)
 
-#### 3. Boss améliorés
+#### 10. Boss améliorés
 - [x] Boss TIE Advanced — Utility AI (8 actions, scoring dynamique, mouvement adaptatif)
 - [ ] Star Destroyer (phase 2) — tourelles destructibles, générateurs de bouclier
 - [ ] Intro boss avec dialogue radio
 
-#### 4. Audio upgrade
+#### 11. Audio upgrade
 - [ ] Musiques ambiantes — menu, combat, boss, victoire
 - [ ] Dialogues radio ("Rebel squadron, engage!", "Enemy destroyed!", …)
 - [ ] Gestion volume dynamique
 
-#### 5. VFX & Game Feel — `VFX_EXPLOSIONS_PROMPT_FR.md`
+#### 12. VFX & Game Feel — `VFX_EXPLOSIONS_PROMPT_FR.md`
 - [x] **Screenshake** (`src/screenshake.py`) — décroissance quadratique, intensités par événement
   - TIE Fighter mort : 0.15 / 0.2s | TIE Bomber : 0.25 / 0.25s
   - Hit torpille : 0.4 / 0.3s | Joueur touché : 0.5 / 0.3s
@@ -90,19 +176,19 @@
 
 ### Priorité moyenne
 
-#### 6. Game feel
+#### 13. Game feel
 - [ ] Traînées particules sur lasers
 - [ ] Débris d'astéroïdes détruits
 - [ ] Impacts visuels sur l'environnement
 - [ ] Feedback visuel charge d'arme
 
-#### 7. Nouvelles mécaniques
+#### 14. Nouvelles mécaniques
 - [ ] Difficulté — easy / normal / hard
 - [ ] Système de vies — 3 vaisseaux, perd 1 par mort
 - [ ] Combo — bonus kills consécutifs sans dégâts
 - [ ] Variantes d'armes — spread shot, charged shot
 
-#### 8. Contenu
+#### 15. Contenu
 - [ ] Plus de formations ennemies
 - [ ] Dangers environnementaux (zones radiation, tempêtes d'astéroïdes)
 - [ ] Mini-boss entre niveaux
@@ -112,13 +198,13 @@
 
 ### Priorité basse
 
-#### 9. QoL
+#### 16. QoL
 - [ ] Persistance paramètres (volume, difficulté, remapping touches)
 - [ ] Tutoriel / hints premier lancement
 - [ ] Stats (kills totaux, streak max, arme favorite)
 - [ ] Unlockables (skins, variantes vaisseaux)
 
-#### 10. Post-game
+#### 17. Post-game
 - [ ] Mode survie infini
 - [ ] Mode défi (patterns de vagues spécifiques)
 - [ ] Éditeur de difficulté custom

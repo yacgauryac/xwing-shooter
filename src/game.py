@@ -11,8 +11,12 @@ from panda3d.core import (
     AntialiasAttrib,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomLines, GeomNode, NodePath, TransparencyAttrib,
-    TextNode,
+    TextNode, loadPrcFileData,
 )
+
+# MSAA 4x — doit être déclaré avant ShowBase.__init__
+loadPrcFileData("", "framebuffer-multisample 1")
+loadPrcFileData("", "multisamples 4")
 
 from src.player import Player
 from src.starfield import Starfield
@@ -30,15 +34,73 @@ from src.menu import MainMenu
 from src.boss import BossTIEAdvanced, BOSS_TRIGGER_WAVE
 from src.screenshake import Screenshake
 from src.levels import LEVELS
+from src.settings import get_level as _get_level_settings
 
 
 class Game(ShowBase):
     """Classe principale du jeu X-Wing Shooter."""
 
-    PLAYER_MAX_HP = 16   # +6 HP — bolts font 1 dmg, 16 tirs pour mourir
+    PLAYER_MAX_HP = 50
 
-    def __init__(self):
+    # ── Caméra ──────────────────────────────────────────────────────────────
+    # Vue normale (reculée par rapport à l'origine -4)
+    CAM_FAR_POS  = (0, -8, 3.5)
+    CAM_FAR_LOOK = (0, 22, 0)
+    # Vue Force / zoom ADS — on se rapproche du vaisseau
+    CAM_CLOSE_POS  = (0, 3, 1.8)
+    CAM_CLOSE_LOOK = (0, 16, 0)
+    # Vitesse de lerp (unités/s, >1 = réactif, ~5 = fondu fluide ~0.2s)
+    CAM_LERP_SPEED = 5.0
+
+    # Squelette procédural X-Wing — coordonnées locales au player.node (X=droite, Y=avant, Z=haut)
+    _SKEL_LOCAL = [
+        # Fuselage
+        ((0, -0.55, 0),    (0,  0.75,  0)),
+        # Cockpit
+        ((0,  0.60, 0),    (0,  0.75,  0.12)),
+        ((0,  0.75, 0.12), (0,  0.55,  0.16)),
+        # Aile haut-gauche
+        ((0, -0.05, 0.04), (-0.9, -0.20,  0.22)),
+        # Aile haut-droite
+        ((0, -0.05, 0.04), ( 0.9, -0.20,  0.22)),
+        # Aile bas-gauche
+        ((0, -0.05,-0.04), (-0.9, -0.20, -0.22)),
+        # Aile bas-droite
+        ((0, -0.05,-0.04), ( 0.9, -0.20, -0.22)),
+        # Nacelle haut-gauche
+        ((-0.9, -0.20, 0.22), (-0.9, -0.48, 0.22)),
+        # Nacelle haut-droite
+        (( 0.9, -0.20, 0.22), ( 0.9, -0.48, 0.22)),
+        # Nacelle bas-gauche
+        ((-0.9, -0.20,-0.22), (-0.9, -0.48,-0.22)),
+        # Nacelle bas-droite
+        (( 0.9, -0.20,-0.22), ( 0.9, -0.48,-0.22)),
+        # Canon haut-gauche → nacelle
+        ((-1.0, 1.5, 0.03), (-0.9, -0.20, 0.22)),
+        # Canon haut-droite → nacelle
+        (( 1.0, 1.5, 0.03), ( 0.9, -0.20, 0.22)),
+        # Canon bas-gauche → nacelle
+        ((-1.0, 1.5,-0.03), (-0.9, -0.20,-0.22)),
+        # Canon bas-droite → nacelle
+        (( 1.0, 1.5,-0.03), ( 0.9, -0.20,-0.22)),
+    ]
+    _CANNON_LOCAL = [(-1.0, 1.0, 0.03), (1.0, 1.0, 0.03),
+                     (-1.0, 1.0,-0.03), (1.0, 1.0,-0.03)]
+    _ENGINE_LOCAL = [(-0.31,-1.20, 0.17), (0.31,-1.20, 0.17),
+                     (-0.31,-1.20,-0.17), (0.31,-1.20,-0.17)]
+
+    def __init__(self, net_mode=None, net_ip="127.0.0.1", net_port=7777):
         ShowBase.__init__(self)
+
+        # Réseau (skeleton V3)
+        self.network = None
+        self._net_mode = net_mode
+        self._net_ip = net_ip
+        self._net_port = net_port
+        if net_mode is not None:
+            from src.network import NetworkManager
+            self.network = NetworkManager(mode=net_mode, port=net_port, host_ip=net_ip)
+            self.network.start()
 
         self.setup_window()
         self.setup_lights()
@@ -95,18 +157,20 @@ class Game(ShowBase):
 
         self.game_started = True
         self.selected_level = start_level if start_level in LEVELS else 1
-        self._debug_level   = (self.selected_level == 99)
+        _ls = _get_level_settings(self.selected_level)
+
+        # _debug_level = niveau sans ennemis (L99 historique + L0 sandbox)
+        self._debug_level = _ls["no_enemies"]
 
         # Masque le curseur — doMethodLater évite le conflit avec le clic DirectGUI
         self.taskMgr.doMethodLater(0.05, self._hide_cursor_task, "hide_cursor")
 
-        # Couleur de fond selon le niveau
+        # Couleur de fond + lumière ambiante selon le niveau
         bg = LEVELS.get(self.selected_level, LEVELS[1]).get("bg_color", (0, 0, 0))
         self.setBackgroundColor(bg[0], bg[1], bg[2], 1)
 
-        # Systèmes de jeu
-        # L99 passe tel quel à Environment (gère visuels L1 + spawn debug)
-        env_level = self.selected_level if self._debug_level else self.selected_level
+        # Systèmes de jeu — env_level peut différer (ex: L0 sandbox → env L2)
+        env_level = _ls["env_level"]
         self.environment = Environment(self, level=env_level)
         self.player = Player(self)
         self.lasers = LaserSystem(self)
@@ -116,13 +180,17 @@ class Game(ShowBase):
         self.powerups = PowerUpManager(self)
         self.torpedoes = TorpedoSystem(self)
         self.force = ForceAbility()
+        self.force.gauge = 100.0   # Force pleine au démarrage
 
         self.lasers.set_enemies(self.spawner)
 
+        # Bounds joueur depuis settings
+        self.player.set_bounds(bounds_x=_ls["bounds_x"])
+
         # État du jeu
-        self.player_hp = 100 if self._debug_level else self.PLAYER_MAX_HP
+        self.player_hp = _ls["player_hp"]
         self.game_over = False
-        self.scroll_speed = 40.0
+        self.scroll_speed = _ls["scroll_speed"]
         self.last_wave = 1
         self.last_score = 0
         self.total_kills = 0
@@ -133,8 +201,8 @@ class Game(ShowBase):
         self.boss_phase = None       # None, "active", "destroying", "done"
         self._boss_phase_label = ""  # Suivi transitions de phase boss
 
-        # Mode debug : pas d'ennemis
-        if self._debug_level:
+        # Pas d'ennemis si niveau sandbox/debug
+        if _ls["no_enemies"]:
             self.spawner.stop_spawning()
 
         # VFX — screenshake + slow-mo combo
@@ -154,14 +222,29 @@ class Game(ShowBase):
         self.accept("mouse3",    self.fire_torpedo)
         self.accept("2", self._toggle_debug)
         self.accept("3", self._toggle_skeleton)
+        self.accept("4", self._toggle_top_cam)
+        self.accept("5", self._toggle_close_cam)
 
         # Mode debug
         self.debug_mode       = False
+        self._top_cam_mode    = False
+        self._close_cam_mode  = False  # Lointaine par défaut
+
+        # Caméra — position initiale + tracking pour le lerp
+        self._cam_cur_pos  = Vec3(*self.CAM_FAR_POS)
+        self._cam_cur_look = Vec3(*self.CAM_FAR_LOOK)
+        self.camera.setPos(self._cam_cur_pos)
+        self.camera.lookAt(self._cam_cur_look)
         self._debug_node      = None
         self._skeleton_mode   = False
         self._debug_skel_vd   = None
         self._debug_skel_node = None
         self._debug_x_label   = None
+
+        # Sandbox / debug : règle debug active dès le départ
+        if _ls.get("debug_ruler"):
+            self.debug_mode = True
+            self._build_debug_ruler()
 
     def setup_window(self):
         props = WindowProperties()
@@ -233,6 +316,9 @@ class Game(ShowBase):
         if self.game_over:
             return task.cont
 
+        # Réseau (stub V3)
+        self._process_network()
+
         # Screenshake (toujours en temps réel)
         self.screenshake.update(dt)
 
@@ -255,12 +341,19 @@ class Game(ShowBase):
         self.environment.update(dt_world, self.scroll_speed)
 
         # Joueur (temps normal)
-        self.player.update(dt_player)
+        self.player.update(dt_player,
+                           hp_pct=self.player_hp / max(self.PLAYER_MAX_HP, 1))
         player_pos = self.player.node.getPos()
 
         # Lasers joueur (temps normal, force_active pour auto-aim + no overheat)
         self.lasers.update(dt_player, self.player.node,
                           force_active=self.force.active)
+
+        # Collisions lasers → décor (astéroïdes + débris)
+        ast_hits = self.environment.check_laser_hits(self.lasers.get_bolts())
+        for hit_pos in ast_hits:
+            self.explosions.spawn(hit_pos, preset="small", score=0)
+            self.sounds.play("explosion")
 
         # Score avant pour détecter les kills
         score_before = self.spawner.score
@@ -308,6 +401,9 @@ class Game(ShowBase):
             elif pu_type == "repair":
                 self.player_hp = min(self.PLAYER_MAX_HP, self.player_hp + 2)
                 self.hud.show_pickup("+2 HULL")
+            elif pu_type == "force":
+                self.force.add_pickup(35.0)
+                self.hud.show_pickup("FORCE CHARGED")
             self.sounds.play("hit")
 
         # Torpilles — cibles : ennemis normaux OU boss si phase boss
@@ -338,6 +434,10 @@ class Game(ShowBase):
             pass  # self.sounds.play("overheat")  # désactivé (trop énervant)
         self._was_overheated = self.lasers.overheated
 
+        # Caméra — lerp AVANT le HUD pour que la projection soit synchrone avec le rendu
+        if not self._top_cam_mode:
+            self._update_camera(dt)
+
         # Warning astéroïdes proches
         self._check_asteroid_warning(player_pos)
 
@@ -360,7 +460,7 @@ class Game(ShowBase):
                     self._trigger_leaderboard()
 
             # Collisions décor (astéroïdes + bâtiments L2)
-            env_damage, push_x = self.environment.check_player_collision(player_pos)
+            env_damage, push_x, push_z = self.environment.check_player_collision(player_pos)
             if env_damage > 0:
                 self.player_hp -= env_damage
                 hp_pct = self.player_hp / self.PLAYER_MAX_HP
@@ -369,12 +469,16 @@ class Game(ShowBase):
                 self.player.show_shield_hit()
                 self.sounds.play("hit")
                 self.screenshake.trigger(0.4, 0.25)
-                # Éjection latérale si collision bâtiment
+                # Éjection vers le plan le plus proche (X latéral ou Z vertical)
+                cur = self.player.node.getPos()
                 if push_x != 0.0:
-                    cur = self.player.node.getPos()
                     new_x = max(-self.player.BOUNDS_X, min(self.player.BOUNDS_X,
                                                           cur.getX() + push_x))
                     self.player.node.setX(new_x)
+                if push_z != 0.0:
+                    bz = self.player.BOUNDS_Z
+                    new_z = max(-bz, min(bz, cur.getZ() + push_z))
+                    self.player.node.setZ(new_z)
 
                 if self.player_hp <= 0:
                     self.player_hp = 0
@@ -558,6 +662,15 @@ class Game(ShowBase):
             dg.destroy()
         for bg in self.environment.base_groups:
             bg.destroy()
+        for fl in self.environment.fog_layers:
+            fl.destroy()
+
+        # Lumière ambiante L4 — nettoyage avant re-spawn
+        env = self.environment
+        if hasattr(env, '_l4_ambient_np') and env._l4_ambient_np and not env._l4_ambient_np.isEmpty():
+            self.render.clearLight(env._l4_ambient_np)
+            env._l4_ambient_np.removeNode()
+            env._l4_ambient_np = None
 
         self.environment.asteroids      = []
         self.environment.planets        = []
@@ -569,6 +682,9 @@ class Game(ShowBase):
         self.environment.surface_panels = []
         self.environment.decor_groups   = []
         self.environment.base_groups    = []
+        self.environment.fog_layers     = []
+        self.environment.border_mountains = []
+        self.environment.roads          = []
         self.environment.asteroid_timer = 2.0
         self.environment.nebula_timer   = 15.0
         self.environment.debris_timer   = 4.0
@@ -587,10 +703,15 @@ class Game(ShowBase):
         elif lvl == 4:
             self.environment._spawn_nebula_planet()
 
+        # Fog globale + nappes — recréés après init niveau
+        if lvl not in (3, 99):
+            self.environment._setup_distance_fog(lvl)
+        self.environment._setup_fog_layers(lvl)
+
         # Reset spawner au bon niveau
         self.spawner.level = lvl
-        from src.enemies import WAVE_DEFS_BY_LEVEL
-        self.spawner.wave_defs = list(WAVE_DEFS_BY_LEVEL.get(lvl, WAVE_DEFS_BY_LEVEL[1]))
+        from src.wave_config import get_wave_defs_for_level
+        self.spawner.wave_defs = get_wave_defs_for_level(lvl)
 
         self.player.node.setPos(0, 20, 0)
         self.player.target_x = 0
@@ -614,6 +735,9 @@ class Game(ShowBase):
         self._debug_node      = None
         self._debug_cursor_vd = None
         self._debug_hitbox_vd = None
+        self._debug_skel_vd   = None
+        self._debug_marks_vd  = None
+        self._debug_bldg_vd   = None
         self.debug_mode       = False
 
         if hasattr(self, '_debug_label_nodes'):
@@ -748,6 +872,13 @@ class Game(ShowBase):
                 dg.destroy()
             for bg in self.environment.base_groups:
                 bg.destroy()
+            for fl in getattr(self.environment, 'fog_layers', []):
+                fl.destroy()
+            # Lumière ambiante L4
+            if hasattr(self.environment, '_l4_ambient_np') and self.environment._l4_ambient_np:
+                if not self.environment._l4_ambient_np.isEmpty():
+                    self.render.clearLight(self.environment._l4_ambient_np)
+                    self.environment._l4_ambient_np.removeNode()
             self.render.clearFog()
 
         if hasattr(self, 'boss') and self.boss is not None:
@@ -772,6 +903,39 @@ class Game(ShowBase):
 
         # Réaffiche le menu
         self.menu.show()
+
+    # ============================================================
+    # Réseau (skeleton V3)
+    # ============================================================
+
+    def _process_network(self):
+        """Traite les messages réseau entrants (stub — V3)."""
+        if self.network is None:
+            return
+        # Draine la queue — traitement futur dans V3
+        from src.net_protocol import MSG_HANDSHAKE, MSG_DISCONNECT, MSG_HANDSHAKE_ACK
+        for msg, addr in self.network.recv_all():
+            msg_type = msg.get("type")
+            if self._net_mode == "host":
+                if msg_type == MSG_HANDSHAKE:
+                    pid = self.network.register_client(addr, msg.get("name", "Player"))
+                    from src.net_protocol import make_handshake_ack
+                    self.network.send_to(
+                        make_handshake_ack(pid, getattr(self, "selected_level", 1)),
+                        addr,
+                    )
+                elif msg_type == MSG_DISCONNECT:
+                    self.network.unregister_client(addr)
+                else:
+                    self.network.touch_client(addr)
+            elif self._net_mode == "client":
+                if msg_type == MSG_HANDSHAKE_ACK:
+                    self.network.connected = True
+                    self.network.player_id = msg.get("player_id")
+                    print(f"[NET] Connected as player {self.network.player_id}")
+                elif msg_type == MSG_DISCONNECT:
+                    self.network.connected = False
+                    print("[NET] Disconnected by host")
 
     def toggle_fps(self):
         """Active/désactive le compteur FPS."""
@@ -846,6 +1010,7 @@ class Game(ShowBase):
             self._debug_node      = None
             self._debug_cursor_vd = None
             self._debug_hitbox_vd = None
+            self._debug_bldg_vd   = None
 
             if hasattr(self, '_debug_label_nodes'):
                 for lbl in self._debug_label_nodes:
@@ -971,18 +1136,25 @@ class Game(ShowBase):
         np_cur.reparentTo(root)
         np_cur.setRenderModeThickness(2.5)
 
-        # ── Hitbox wireframe — boîte autour du joueur (12 arêtes = 24 vertices) ──
-        vd3  = GeomVertexData("hitbox", fmt, Geom.UHDynamic)
+        # ── Hitbox ellipsoïde — 3 ellipses (XY/XZ/YZ) × 32 seg = 192 vertices ──
+        from src.lunar_base import LunarBaseGroup as _LBG
+        self._debug_erx = _LBG._E_RX
+        self._debug_ery = _LBG._E_RY
+        self._debug_erz = _LBG._E_RZ
+        _HBX_SEGS  = 32
+        _HBX_VERTS = 3 * _HBX_SEGS * 2   # 192
+        self._debug_hbx_segs = _HBX_SEGS
+        vd3  = GeomVertexData("hitbox_ell", fmt, Geom.UHDynamic)
         vw3  = GeomVertexWriter(vd3, "vertex")
         cw3  = GeomVertexWriter(vd3, "color")
         lns3 = GeomLines(Geom.UHDynamic)
-        C_HBX = Vec4(0.0, 1.0, 0.4, 0.385)  # vert clair, transparence -23%
-        for _ in range(24):
+        C_HBX = Vec4(0.0, 1.0, 0.4, 0.55)
+        for _ in range(_HBX_VERTS):
             vw3.addData3(0, 0, 0); cw3.addData4(C_HBX)
-        for k in range(0, 24, 2):
-            lns3.addVertices(k, k+1)
+        for k in range(0, _HBX_VERTS, 2):
+            lns3.addVertices(k, k + 1)
         geom3 = Geom(vd3); geom3.addPrimitive(lns3)
-        gn3 = GeomNode("hitbox"); gn3.addGeom(geom3)
+        gn3   = GeomNode("hitbox_ell"); gn3.addGeom(geom3)
         np_hbx = NodePath(gn3)
         np_hbx.reparentTo(root)
         np_hbx.setRenderModeThickness(1.5)
@@ -1000,9 +1172,70 @@ class Game(ShowBase):
         np_x.setLightOff()
         self._debug_x_label = np_x
 
-        # ── Squelette (géométrie créée par _toggle_skeleton) ──
+        # ── Squelette procédural X-Wing (lignes cyan, UHDynamic) ──
+        _SKEL = self._SKEL_LOCAL
+        N_SK  = len(_SKEL)
+        vd_sk = GeomVertexData("skel", fmt, Geom.UHDynamic)
+        vw_sk = GeomVertexWriter(vd_sk, "vertex")
+        cw_sk = GeomVertexWriter(vd_sk, "color")
+        lns_sk = GeomLines(Geom.UHDynamic)
+        C_SK  = Vec4(0.3, 0.95, 1.0, 0.85)
+        for _ in range(N_SK * 2):
+            vw_sk.addData3(0, 0, 0); cw_sk.addData4(C_SK)
+        for k in range(0, N_SK * 2, 2):
+            lns_sk.addVertices(k, k + 1)
+        geom_sk = Geom(vd_sk); geom_sk.addPrimitive(lns_sk)
+        gn_sk   = GeomNode("dbg_skel"); gn_sk.addGeom(geom_sk)
+        np_sk   = NodePath(gn_sk)
+        np_sk.reparentTo(root)
+        np_sk.setRenderModeThickness(1.5)
+        self._debug_skel_vd = vd_sk
+
+        # ── Marqueurs canons (jaune) + moteurs (rouge) — croix 3D ──
+        # 4 canons × 3 axes × 2 pts = 24 verts  +  4 moteurs × 3 × 2 = 24 verts = 48 total
+        vd_mk = GeomVertexData("marks", fmt, Geom.UHDynamic)
+        vw_mk = GeomVertexWriter(vd_mk, "vertex")
+        cw_mk = GeomVertexWriter(vd_mk, "color")
+        lns_mk = GeomLines(Geom.UHDynamic)
+        C_CAN = Vec4(1.0, 0.90, 0.10, 1.0)   # jaune — canons
+        C_ENG = Vec4(1.0, 0.18, 0.05, 1.0)   # rouge — moteurs
+        for _ in range(4 * 6):   # 4 canons × 6 vertices
+            vw_mk.addData3(0, 0, 0); cw_mk.addData4(C_CAN)
+        for _ in range(4 * 6):   # 4 moteurs × 6 vertices
+            vw_mk.addData3(0, 0, 0); cw_mk.addData4(C_ENG)
+        for k in range(0, 48, 2):
+            lns_mk.addVertices(k, k + 1)
+        geom_mk = Geom(vd_mk); geom_mk.addPrimitive(lns_mk)
+        gn_mk   = GeomNode("dbg_marks"); gn_mk.addGeom(geom_mk)
+        np_mk   = NodePath(gn_mk)
+        np_mk.reparentTo(root)
+        np_mk.setRenderModeThickness(3.0)
+        self._debug_marks_vd = vd_mk
+
+        # ── Hitboxes bâtiments L2 (wireframe jaune — max 96 bâtiments × 12 arêtes) ──
+        # 96 entrées × 12 arêtes × 2 vertices = 2304 vertices (hangars ont 2 hitboxes: corps + ridge)
+        _BLDG_MAX = 96
+        _BLDG_VERTS = _BLDG_MAX * 12 * 2
+        vd_bldg  = GeomVertexData("bldg_hitbox", fmt, Geom.UHDynamic)
+        vw_bldg  = GeomVertexWriter(vd_bldg, "vertex")
+        cw_bldg  = GeomVertexWriter(vd_bldg, "color")
+        lns_bldg = GeomLines(Geom.UHDynamic)
+        C_BLDG   = Vec4(1.0, 1.0, 0.0, 0.75)   # jaune vif
+        for _ in range(_BLDG_VERTS):
+            vw_bldg.addData3(0, 0, 0); cw_bldg.addData4(C_BLDG)
+        for k in range(0, _BLDG_VERTS, 2):
+            lns_bldg.addVertices(k, k + 1)
+        geom_bldg = Geom(vd_bldg); geom_bldg.addPrimitive(lns_bldg)
+        gn_bldg   = GeomNode("bldg_hitbox"); gn_bldg.addGeom(geom_bldg)
+        np_bldg   = NodePath(gn_bldg)
+        np_bldg.reparentTo(root)
+        np_bldg.setRenderModeThickness(1.5)
+        np_bldg.setTransparency(TransparencyAttrib.MAlpha)
+        self._debug_bldg_vd   = vd_bldg
+        self._debug_bldg_max  = _BLDG_MAX
+
+        # ── Squelette (géométrie créée par _toggle_skeleton — key 3) ──
         self._skeleton_mode   = False
-        self._debug_skel_vd   = None
         self._debug_skel_node = None
 
         self._debug_node      = root
@@ -1054,25 +1287,88 @@ class Game(ShowBase):
             vw.setRow(k)
             vw.setData3(x, y, z)
 
-        # ── Hitbox wireframe ──
+        # ── Hitbox ellipsoïde — 3 ellipses centrées sur le joueur ──
         if hasattr(self, '_debug_hitbox_vd') and self._debug_hitbox_vd is not None:
-            HX, HY, HZ = 1.2, 0.55, 0.90   # demi-dimensions de la boîte
-            corners = [
-                (px-HX, py-HY, pz-HZ), (px+HX, py-HY, pz-HZ),
-                (px+HX, py+HY, pz-HZ), (px-HX, py+HY, pz-HZ),
-                (px-HX, py-HY, pz+HZ), (px+HX, py-HY, pz+HZ),
-                (px+HX, py+HY, pz+HZ), (px-HX, py+HY, pz+HZ),
+            import math as _math
+            ERX  = self._debug_erx
+            ERY  = self._debug_ery
+            ERZ  = self._debug_erz
+            SEGS = self._debug_hbx_segs
+            # 3 plans : XY, XZ, YZ
+            ellipses = [
+                lambda a: (ERX*_math.cos(a), ERY*_math.sin(a), 0),
+                lambda a: (ERX*_math.cos(a), 0,                ERZ*_math.sin(a)),
+                lambda a: (0,                ERY*_math.cos(a), ERZ*_math.sin(a)),
             ]
-            edges = [(0,1),(1,2),(2,3),(3,0),
+            vw_h = GeomVertexWriter(self._debug_hitbox_vd, "vertex")
+            vi = 0
+            for ell in ellipses:
+                for i in range(SEGS):
+                    a0 = 2*_math.pi * i       / SEGS
+                    a1 = 2*_math.pi * (i + 1) / SEGS
+                    dx0, dy0, dz0 = ell(a0)
+                    dx1, dy1, dz1 = ell(a1)
+                    vw_h.setRow(vi);     vw_h.setData3(px+dx0, py+dy0, pz+dz0)
+                    vw_h.setRow(vi + 1); vw_h.setData3(px+dx1, py+dy1, pz+dz1)
+                    vi += 2
+
+        # ── Hitboxes bâtiments L2 (wireframe jaune) ──
+        if (hasattr(self, '_debug_bldg_vd') and self._debug_bldg_vd is not None
+                and getattr(self, 'selected_level', -1) in (0, 2)
+                and hasattr(self, 'environment') and self.environment):
+            env = self.environment
+            vw_b  = GeomVertexWriter(self._debug_bldg_vd, "vertex")
+            vi    = 0
+            EDGES = [(0,1),(1,2),(2,3),(3,0),
                      (4,5),(5,6),(6,7),(7,4),
                      (0,4),(1,5),(2,6),(3,7)]
-            hbx_pts = []
-            for a, b in edges:
-                hbx_pts.append(corners[a])
-                hbx_pts.append(corners[b])
-            vw_h = GeomVertexWriter(self._debug_hitbox_vd, "vertex")
-            for k, (x, y, z) in enumerate(hbx_pts):
-                vw_h.setRow(k); vw_h.setData3(x, y, z)
+            MAX_V = self._debug_bldg_max * 12 * 2
+            # Rembobine toutes les positions à l'origine (invisible) puis écrit
+            vw_b.setRow(0)
+            for _ in range(MAX_V):
+                vw_b.setData3(0, 0, 0)
+            vi = 0
+            for bg in env.base_groups:
+                if vi + 24 > MAX_V:
+                    break
+                for (cx, cy, cz, hw, hd, hh) in bg.get_hitboxes():
+                    if vi + 24 > MAX_V:
+                        break
+                    corners = [
+                        (cx-hw, cy-hd, cz-hh), (cx+hw, cy-hd, cz-hh),
+                        (cx+hw, cy+hd, cz-hh), (cx-hw, cy+hd, cz-hh),
+                        (cx-hw, cy-hd, cz+hh), (cx+hw, cy-hd, cz+hh),
+                        (cx+hw, cy+hd, cz+hh), (cx-hw, cy+hd, cz+hh),
+                    ]
+                    for a_i, b_i in EDGES:
+                        vw_b.setRow(vi);     vw_b.setData3(*corners[a_i])
+                        vw_b.setRow(vi + 1); vw_b.setData3(*corners[b_i])
+                        vi += 2
+
+        # ── Squelette X-Wing ──
+        if hasattr(self, '_debug_skel_vd') and self._debug_skel_vd is not None:
+            vw_sk = GeomVertexWriter(self._debug_skel_vd, "vertex")
+            for k, (p1, p2) in enumerate(self._SKEL_LOCAL):
+                w1 = self.render.getRelativePoint(self.player.node, Point3(*p1))
+                w2 = self.render.getRelativePoint(self.player.node, Point3(*p2))
+                vw_sk.setRow(k*2);   vw_sk.setData3(w1)
+                vw_sk.setRow(k*2+1); vw_sk.setData3(w2)
+
+        # ── Marqueurs canons (jaune) + moteurs (rouge) ──
+        if hasattr(self, '_debug_marks_vd') and self._debug_marks_vd is not None:
+            vw_mk = GeomVertexWriter(self._debug_marks_vd, "vertex")
+            SZ = 0.22   # demi-taille de la croix
+            idx = 0
+            for pts, sz in [(self._CANNON_LOCAL, SZ), (self._ENGINE_LOCAL, SZ * 1.3)]:
+                for lp in pts:
+                    wp = self.render.getRelativePoint(self.player.node, Point3(*lp))
+                    vw_mk.setRow(idx);   vw_mk.setData3(wp.x-sz, wp.y, wp.z)
+                    vw_mk.setRow(idx+1); vw_mk.setData3(wp.x+sz, wp.y, wp.z)
+                    vw_mk.setRow(idx+2); vw_mk.setData3(wp.x, wp.y, wp.z)
+                    vw_mk.setRow(idx+3); vw_mk.setData3(wp.x, wp.y, wp.z+sz)
+                    vw_mk.setRow(idx+4); vw_mk.setData3(wp.x, wp.y-sz, wp.z)
+                    vw_mk.setRow(idx+5); vw_mk.setData3(wp.x, wp.y+sz, wp.z)
+                    idx += 6
 
         # ── Label X en 3D (positionnement) ──
         if hasattr(self, '_debug_x_label') and self._debug_x_label:
@@ -1091,7 +1387,7 @@ class Game(ShowBase):
 
     def _toggle_skeleton(self):
         """Touche 3 — cache le modèle 3D et affiche le squelette clé du vaisseau."""
-        if not self.debug_mode or not hasattr(self, 'player'):
+        if not hasattr(self, 'player'):
             return
         self._skeleton_mode = not self._skeleton_mode
         if self._skeleton_mode:
@@ -1103,6 +1399,44 @@ class Game(ShowBase):
                 self._debug_skel_node.removeNode()
             self._debug_skel_node = None
             self._debug_skel_vd   = None
+
+    def _update_camera(self, dt):
+        """Lerp fluide entre vue normale et zoom Force/close (style ADS)."""
+        # Force active OU touche 5 = zoom avant
+        force_zoom = (hasattr(self, 'force') and self.force.active) or self._close_cam_mode
+        t_pos  = Vec3(*self.CAM_CLOSE_POS)  if force_zoom else Vec3(*self.CAM_FAR_POS)
+        t_look = Vec3(*self.CAM_CLOSE_LOOK) if force_zoom else Vec3(*self.CAM_FAR_LOOK)
+
+        alpha = min(1.0, dt * self.CAM_LERP_SPEED)
+        self._cam_cur_pos  = self._cam_cur_pos  + (t_pos  - self._cam_cur_pos)  * alpha
+        self._cam_cur_look = self._cam_cur_look + (t_look - self._cam_cur_look) * alpha
+
+        self.camera.setPos(self._cam_cur_pos)
+        self.camera.lookAt(self._cam_cur_look)
+
+    def _toggle_close_cam(self):
+        """Touche 5 — bascule manuelle entre vue proche et vue lointaine."""
+        if not hasattr(self, 'player'):
+            return
+        self._close_cam_mode = not self._close_cam_mode
+
+    def _toggle_top_cam(self):
+        """Touche 4 — bascule vue du dessus (debug alignement moteurs)."""
+        if not hasattr(self, 'player'):
+            return
+        self._top_cam_mode = not self._top_cam_mode
+        if self._top_cam_mode:
+            # Vue du dessus, centrée sur le vaisseau, Y vers le bas
+            px = self.player.node.getX()
+            py = self.player.node.getY()
+            self.camera.setPos(px, py, 18)
+            self.camera.lookAt(px, py, 0)
+        else:
+            # Retour caméra normale — remet le tracking du lerp à jour
+            self._cam_cur_pos  = Vec3(*self.CAM_FAR_POS)
+            self._cam_cur_look = Vec3(*self.CAM_FAR_LOOK)
+            self.camera.setPos(self._cam_cur_pos)
+            self.camera.lookAt(self._cam_cur_look)
 
     def _build_skeleton_geom(self):
         """Crée la géométrie UHDynamic du squelette (80 vertices pré-alloués)."""

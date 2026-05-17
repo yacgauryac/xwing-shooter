@@ -10,7 +10,8 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomLines, GeomNode,
-    NodePath, WindowProperties, TransparencyAttrib
+    NodePath, WindowProperties, TransparencyAttrib,
+    ColorBlendAttrib,
 )
 import math
 
@@ -18,15 +19,10 @@ import math
 class Player:
     """Gère le vaisseau du joueur et ses contrôles."""
 
-    BOUNDS_X = 11.0
+    BOUNDS_X = 14.0    # Élargi (L1/L4 par défaut, réduit par set_bounds pour L2/L3)
     BOUNDS_Z = 6.5
     MOVE_SPEED = 12.0
     LERP_SPEED = 12.0
-
-    # Rectangle de visée (mode FPS)
-    AIM_W     = 1.2    # demi-largeur  (≈ hitbox X)
-    AIM_H     = 0.9    # demi-hauteur  (≈ hitbox Z)
-    MOUSE_SENS = 0.004  # pixels bruts → unités monde
 
     # Inclinaisons visuelles
     MAX_ROLL = 30.0    # Roulis quand on va à gauche/droite
@@ -38,10 +34,15 @@ class Player:
     MODEL_SCALE = 0.1
     TARGET_SIZE = 2.5  # Un peu plus gros
 
+    # Positions des réacteurs (espace local player.node) — synchronisées avec game._ENGINE_LOCAL
+    _ENGINE_LOCAL = [(-0.31,-1.20, 0.17), (0.31,-1.20, 0.17),
+                     (-0.31,-1.20,-0.17), (0.31,-1.20,-0.17)]
+
     def __init__(self, game):
         self.game = game
         self.target_x = 0.0
         self.target_z = 0.0
+        self.movement_mode = "rail"   # "rail" (actuel) ou "free" (V3 — pas implémenté)
 
         self.keys = {
             "left": False, "right": False,
@@ -92,43 +93,37 @@ class Player:
         self.base_fov = 60.0
         self.speed_lines = []
 
-        # Réticule de visée — système spring-damper (pendule au bout d'une tige)
+        # Réticule de visée — système spring-damper (suit le vaisseau avec inertie)
         self.crosshair = self._create_crosshair()
         self.crosshair.reparentTo(game.render)
         self.crosshair.setLightOff()
-
-        # Rectangle de visée FPS
-        self._aim_rect_np, self._aim_rect_vd = self._create_aim_rect()
         self.crosshair_x = 0.0
         self.crosshair_z = 0.0
         self.crosshair_vx = 0.0  # Vitesse du réticule (inertie)
         self.crosshair_vz = 0.0
-
-        # Offset souris dans le rectangle de visée (FPS)
-        self.mouse_aim_x = 0.0
-        self.mouse_aim_z = 0.0
 
         # Paramètres physiques du réticule
         self.CH_SPRING = 15.0    # Force du ressort (rappel vers le vaisseau)
         self.CH_DAMPING = 6.0    # Amortissement (freine les oscillations)
         self.CH_DISTANCE = 60.0  # Distance devant le vaisseau
 
-        # Souris — mode absolu + warp centre (FPS aim)
-        props = WindowProperties()
-        props.setCursorHidden(True)
-        props.setMouseMode(WindowProperties.M_absolute)
-        game.win.requestProperties(props)
-        # Warp initial au centre pour éviter un delta parasite au premier frame
-        cx = game.win.getXSize() // 2
-        cy = game.win.getYSize() // 2
-        game.win.movePointer(0, cx, cy)
-
-        # Caméra derrière — vue légèrement du dessus
-        game.camera.setPos(0, -4, 3.0)
+        # Caméra derrière — vue légèrement du dessus (lointaine par défaut)
+        game.camera.setPos(0, 4, 2.5)
         game.camera.lookAt(0, 22, 0)
 
-        # Shield hit flash
+        # Shield hit flash — Option B : copie du modèle agrandie rouge
         self.shield_flash_timer = 0.0
+        self._hit_flash_np = self._create_hit_flash()
+
+        # Overheat warning — teinte rouge sur le vaisseau (pas de halos canons)
+        self._overheat_pulse = 0.0
+        self._overheat_tint_np = None  # Créé à la première surchauffe
+
+        # Lueurs réacteurs — disques billboard rouge/rose aux nacelles
+        self._create_engine_glows()
+
+        # Bouclier — désactivé, réservé pour V3 (vrai système de bouclier)
+        self._shield_np = None
 
     def load_model(self):
         """Charge le modèle .glb/.gltf, auto-scale à TARGET_SIZE, fallback procédural."""
@@ -159,8 +154,13 @@ class Player:
                     model.setH(self.model_h)
                     model.setColorScale(Vec4(3.0, 3.0, 3.0, 1))
 
-                    # Moteurs rouges (4 points lumineux aux réacteurs)
-                    self._add_engine_glows(model)
+                    # Log bounds finales en espace parent (node) pour positionner les glows
+                    bounds3 = model.getTightBounds()
+                    if bounds3:
+                        bmin3, bmax3 = bounds3
+                        print(f"[Player] Bounds en espace model_node: min={bmin3}, max={bmax3}")
+                        print(f"[Player] Centre model: {(bmin3 + bmax3) * 0.5}")
+                        print(f"[Player] Moteurs attendus aux 4 coins arrière (Y min)")
 
                     return model
             except Exception as e:
@@ -189,6 +189,13 @@ class Player:
         g.accept("d-up",           self.set_key, ["right", False])
         g.accept("z-up",           self.set_key, ["up", False])
         g.accept("s-up",           self.set_key, ["down", False])
+
+    def set_bounds(self, bounds_x=None, bounds_z=None):
+        """Ajuste les limites de mouvement (appelé par game.py selon le niveau)."""
+        if bounds_x is not None:
+            self.BOUNDS_X = bounds_x
+        if bounds_z is not None:
+            self.BOUNDS_Z = bounds_z
 
     def set_key(self, key, value):
         self.keys[key] = value
@@ -291,17 +298,36 @@ class Player:
         node.addGeom(geom)
         return NodePath(node)
 
-    def update(self, dt):
-        # --- Shield hit (vaisseau clignote blanc) ---
+    def update(self, dt, hp_pct=1.0, force_pct=0.0):
+        # --- Shield hit flash (Option B — mesh rouge semi-transparent) ---
         if self.shield_flash_timer > 0:
             self.shield_flash_timer -= dt
             progress = self.shield_flash_timer / 0.25
-            red = progress * 3.0
-            self.model_node.setColorScale(
-                3.0 + red, 3.0, 3.0, 1.0
-            )
+            if self._hit_flash_np and not self._hit_flash_np.isEmpty():
+                alpha = progress * 0.12
+                self._hit_flash_np.setColorScale(3.0, 0.05, 0.05, alpha)
             if self.shield_flash_timer <= 0:
-                self.model_node.setColorScale(Vec4(3.0, 3.0, 3.0, 1))
+                if self._hit_flash_np and not self._hit_flash_np.isEmpty():
+                    self._hit_flash_np.hide()
+
+        # --- Overheat warning — teinte rouge pulsante sur le vaisseau ---
+        if hasattr(self.game, 'lasers') and self.game.lasers:
+            heat_pct = self.game.lasers.heat / self.game.lasers.MAX_HEAT
+            if heat_pct > 0.72:
+                warn = (heat_pct - 0.72) / 0.28        # 0→1 sur 72%→100%
+                freq = 3.0 + warn * 9.0                 # 3→12 Hz
+                self._overheat_pulse += dt * freq * 2 * math.pi
+                pulse = (math.sin(self._overheat_pulse) * 0.5 + 0.5) * warn
+                # Teinte rouge-orange sur le modèle (pulse)
+                r = 3.0 + pulse * 4.0   # 3→7 (surbrillance rouge)
+                g = 3.0 - pulse * 2.5   # 3→0.5
+                b = 3.0 - pulse * 2.8   # 3→0.2
+                self.model_node.setColorScale(r, g, b, 1)
+            else:
+                self._overheat_pulse = 0.0
+                self.model_node.setColorScale(3.0, 3.0, 3.0, 1)  # Normal
+
+        # --- Bouclier — désactivé pour l'instant ---
 
         # --- Cooldown barrel roll ---
         if self.barrel_cooldown > 0:
@@ -426,19 +452,31 @@ class Player:
         px = new_pos.getX()
         pz = new_pos.getZ()
 
+        close = getattr(self.game, '_close_cam_mode', False)
+
+        # Décalage caméra adapté à chaque vue (proche = angle serré, suivi plus fort)
+        cam_follow_strength = 2.5 if close else 1.5
         cam_offset_x = 0
         cam_offset_z = 0
         if abs(px) > edge_x:
             excess = (abs(px) - edge_x) / (self.BOUNDS_X - edge_x)
-            cam_offset_x = excess * 1.5 * (1 if px > 0 else -1)
+            cam_offset_x = excess * cam_follow_strength * (1 if px > 0 else -1)
         if abs(pz) > edge_z:
             excess = (abs(pz) - edge_z) / (self.BOUNDS_Z - edge_z)
             cam_offset_z = excess * 0.8 * (1 if pz > 0 else -1)
 
-        cam_target = Point3(cam_offset_x, -4, 3.0 + cam_offset_z * 0.3)
-        cam_current = self.game.camera.getPos()
-        self.game.camera.setPos(cam_current + (cam_target - cam_current) * min(1.0, 6.0 * dt))
-        self.game.camera.lookAt(cam_offset_x * 0.3, 22, 0)
+        # Vue top-down (touche 4) — caméra suit le vaisseau depuis le dessus
+        if getattr(self.game, '_top_cam_mode', False):
+            self.game.camera.setPos(px, 20, 18)
+            self.game.camera.lookAt(px, 20, 0)
+        else:
+            cam_y        = 11   if close else 2   # lointaine reculée de ~10%
+            cam_z        = 1.5  if close else 2.5
+            look_mult    = 0.7  if close else 0.3  # suivi lookAt plus fort en proche
+            cam_target = Point3(cam_offset_x, cam_y, cam_z + cam_offset_z * 0.3)
+            cam_current = self.game.camera.getPos()
+            self.game.camera.setPos(cam_current + (cam_target - cam_current) * min(1.0, 6.0 * dt))
+            self.game.camera.lookAt(cam_offset_x * look_mult, 22, 0)
 
         # --- Rotation visuelle du modèle ---
         rot_lerp = self.ROT_SPEED * dt
@@ -462,45 +500,21 @@ class Player:
                 self.current_roll,
             )
 
-        # --- Réticule FPS : souris → offset dans rectangle → spring vers cible ---
+        # --- Réticule : spring-damper vers la position du vaisseau ---
         ship_x = new_pos.getX()
         ship_z = new_pos.getZ()
 
-        # Lecture souris (delta depuis centre, warp chaque frame)
-        win = self.game.win
-        w, h = win.getXSize(), win.getYSize()
-        cx, cy = w // 2, h // 2
-        ptr = win.getPointer(0)
-        raw_dx = max(-50, min(50, ptr.getX() - cx))
-        raw_dy = max(-50, min(50, ptr.getY() - cy))
-        win.movePointer(0, cx, cy)
-
-        self.mouse_aim_x = max(-self.AIM_W, min(self.AIM_W,
-                               self.mouse_aim_x + raw_dx * self.MOUSE_SENS))
-        self.mouse_aim_z = max(-self.AIM_H, min(self.AIM_H,
-                               self.mouse_aim_z - raw_dy * self.MOUSE_SENS))
-
-        # Cible du spring = ship + offset souris
-        target_x = ship_x + self.mouse_aim_x
-        target_z = ship_z + self.mouse_aim_z
-
-        # Spring-damper vers la cible souris
-        spring_fx = (target_x - self.crosshair_x) * self.CH_SPRING
-        spring_fz = (target_z - self.crosshair_z) * self.CH_SPRING
+        spring_fx = (ship_x - self.crosshair_x) * self.CH_SPRING
+        spring_fz = (ship_z - self.crosshair_z) * self.CH_SPRING
         damp_fx   = -self.crosshair_vx * self.CH_DAMPING
         damp_fz   = -self.crosshair_vz * self.CH_DAMPING
-        ax = spring_fx + damp_fx
-        az = spring_fz + damp_fz
-        self.crosshair_vx += ax * dt
-        self.crosshair_vz += az * dt
+        self.crosshair_vx += (spring_fx + damp_fx) * dt
+        self.crosshair_vz += (spring_fz + damp_fz) * dt
         self.crosshair_x  += self.crosshair_vx * dt
         self.crosshair_z  += self.crosshair_vz * dt
 
         crosshair_y = new_pos.getY() + self.CH_DISTANCE
         self.crosshair.setPos(self.crosshair_x, crosshair_y, self.crosshair_z)
-
-        # Rectangle de visée (centré sur le vaisseau, suivi en XZ)
-        self._update_aim_rect(ship_x, crosshair_y, ship_z)
 
     def _create_crosshair(self):
         """Réticule — 2 brackets courbés (gauche/droit) style image de référence.
@@ -642,76 +656,84 @@ class Player:
             self.speed_lines.append({"node": np, "life": life, "max_life": life})
 
     def show_shield_hit(self, impact_pos=None):
-        """Flash rouge sur le vaisseau quand touché."""
-        self.shield_flash_timer = 0.25
+        """Lueur ambrée subtile sur la coque au hit."""
+        self.shield_flash_timer = 0.18
+        if self._hit_flash_np and not self._hit_flash_np.isEmpty():
+            self._hit_flash_np.show()
+            self._hit_flash_np.setColorScale(1.5, 0.28, 0.06, 0.055)
 
-    def _create_aim_rect(self):
-        """Rectangle de visée FPS — 4 lignes en 3D monde (UHDynamic)."""
+    def _create_hit_flash(self):
+        """Copie du modèle légèrement agrandie, rouge semi-transparente — flash au hit."""
+        flash = self.model_node.copyTo(self.node)
+        # Garde le scale original du modèle, juste +10%
+        ms = self.model_node.getScale().getX()
+        flash.setScale(ms * 1.10)
+        flash.setColorScale(4.0, 0.05, 0.05, 0.55)
+        flash.setTransparency(TransparencyAttrib.MAlpha)
+        flash.setDepthWrite(False)
+        flash.setDepthTest(False)
+        flash.setBin("transparent", 5)
+        flash.setLightOff()
+        flash.hide()
+        return flash
+
+    # _create_shield / _update_shield — supprimés, réservés pour V3
+
+    def _create_engine_glows(self):
+        """4 glows billboard aux réacteurs : halo rouge/rose + noyau blanc. Toujours visibles.
+
+        Attachés à model_node pour tourner avec le vaisseau (roll, pitch, barrel roll).
+        getRelativePoint convertit automatiquement node→model_node (H=180 + auto-scale).
+        """
         fmt = GeomVertexFormat.getV3c4()
-        vd  = GeomVertexData("aim_rect", fmt, Geom.UHDynamic)
-        vw  = GeomVertexWriter(vd, "vertex")
-        cw  = GeomVertexWriter(vd, "color")
-        lns = GeomLines(Geom.UHDynamic)
-        col = Vec4(0.95, 0.82, 0.18, 0.50)   # jaune, semi-transparent
-        for _ in range(8):
-            vw.addData3(0, 0, 0); cw.addData4(col)
-        for k in range(0, 8, 2):
-            lns.addVertices(k, k+1)
-        geom = Geom(vd); geom.addPrimitive(lns)
-        gn   = GeomNode("aim_rect"); gn.addGeom(geom)
-        np   = NodePath(gn)
-        np.reparentTo(self.game.render)
-        np.setRenderModeThickness(1.5)
-        np.setLightOff()
-        np.setTransparency(TransparencyAttrib.MAlpha)
-        np.setDepthWrite(False)
-        np.setDepthTest(False)
-        return np, vd
 
-    def _update_aim_rect(self, cx, ry, cz):
-        """Met à jour les 4 coins du rectangle de visée."""
-        W, H = self.AIM_W, self.AIM_H
-        pts = [
-            (cx-W, ry, cz-H), (cx+W, ry, cz-H),   # bas
-            (cx+W, ry, cz-H), (cx+W, ry, cz+H),   # droite
-            (cx+W, ry, cz+H), (cx-W, ry, cz+H),   # haut
-            (cx-W, ry, cz+H), (cx-W, ry, cz-H),   # gauche
-        ]
-        vw = GeomVertexWriter(self._aim_rect_vd, "vertex")
-        for k, (x, y, z) in enumerate(pts):
-            vw.setRow(k); vw.setData3(x, y, z)
+        def make_disc(parent, radius, c_center, c_edge, segs=16):
+            vd = GeomVertexData("eg", fmt, Geom.UHStatic)
+            vw = GeomVertexWriter(vd, "vertex")
+            cw = GeomVertexWriter(vd, "color")
+            vw.addData3(0, 0, 0); cw.addData4(c_center)
+            for i in range(segs):
+                a = 2 * math.pi * i / segs
+                vw.addData3(math.cos(a) * radius, 0, math.sin(a) * radius)
+                cw.addData4(c_edge)
+            tris = GeomTriangles(Geom.UHStatic)
+            for i in range(segs):
+                tris.addVertices(0, 1 + i, 1 + (i + 1) % segs)
+            geom = Geom(vd); geom.addPrimitive(tris)
+            gn = GeomNode("eg_disc"); gn.addGeom(geom)
+            np = NodePath(gn)
+            np.reparentTo(parent)
+            np.setTwoSided(True)
+            np.setDepthTest(False)
+            np.setDepthWrite(False)
+            np.setBin("fixed", 50)
 
-    def _add_engine_glows(self, model):
-        """Ajoute des points rouges lumineux aux 4 réacteurs."""
-        from panda3d.core import (
-            GeomVertexFormat, GeomVertexData, GeomVertexWriter,
-            Geom, GeomPoints, GeomNode
-        )
+        # Récupère le scale hérité de model_node pour le compenser
+        ms = self.model_node.getScale().getX()
+        inv_scale = (1.0 / ms) if ms > 0 else 1.0
 
-        # Positions approximatives des 4 moteurs (modèle orienté H=180)
-        engine_positions = [
-            Point3(0.9, 0.5, 0.3),
-            Point3(-0.9, 0.5, 0.3),
-            Point3(0.9, 0.5, -0.3),
-            Point3(-0.9, 0.5, -0.3),
-        ]
+        for (lx, ly, lz) in self._ENGINE_LOCAL:
+            # Convertit la position de l'espace node → espace model_node
+            # (gère automatiquement le H=180 et l'auto-scale du modèle)
+            pos_model = self.model_node.getRelativePoint(self.node, Point3(lx, ly, lz))
+            root = self.model_node.attachNewNode("engine_glow_root")
+            root.setPos(pos_model)
+            root.setScale(inv_scale)        # Annule le scale hérité → taille monde réelle
+            root.setColorScale(1/3, 1/3, 1/3, 1)  # Annule le colorScale (3,3,3) hérité → résultat = (1,1,1)
+            root.setLightOff()
+            root.setTransparency(TransparencyAttrib.MAlpha)
+            root.setBillboardPointEye()
 
-        for epos in engine_positions:
-            fmt = GeomVertexFormat.getV3c4()
-            vdata = GeomVertexData("eng", fmt, Geom.UHStatic)
-            v = GeomVertexWriter(vdata, "vertex")
-            c = GeomVertexWriter(vdata, "color")
-            v.addData3(0, 0, 0)
-            c.addData4(Vec4(1.0, 0.2, 0.05, 1.0))
-            pts = GeomPoints(Geom.UHStatic)
-            pts.addVertex(0)
-            geom = Geom(vdata)
-            geom.addPrimitive(pts)
-            node = GeomNode("engine_glow")
-            node.addGeom(geom)
-            np = NodePath(node)
-            np.reparentTo(model)
-            np.setPos(epos)
-            np.setRenderModeThickness(6.0)
-            np.setLightOff()
-            np.setColorScale(3.0, 0.5, 0.1, 1.0)
+            # Couche 1 : halo rouge/rose dégradé
+            make_disc(root,
+                      radius=0.28,
+                      c_center=Vec4(1.0, 0.20, 0.30, 0.85),
+                      c_edge  =Vec4(0.9, 0.08, 0.12, 0.0),
+                      segs=14)
+
+            # Couche 2 : noyau blanc brillant
+            make_disc(root,
+                      radius=0.10,
+                      c_center=Vec4(1.0, 0.95, 0.90, 1.0),
+                      c_edge  =Vec4(1.0, 0.50, 0.45, 0.0),
+                      segs=8)

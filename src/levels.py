@@ -15,39 +15,52 @@ C_ORANGE = Vec4(0.9, 0.55, 0.15, 1.0)
 C_DIM = Vec4(0.5, 0.3, 0.1, 0.5)
 
 LEVELS = {
+    0: {
+        "name": "LUNAR SANDBOX",
+        "waves": 999,
+        "intro_text": "Sandbox — explore the lunar base freely.",
+        "bg_color":      (0.04, 0.04, 0.05),
+        "ambient_color": (0.18, 0.14, 0.08),   # poussière lunaire, tiède
+        "description": "Surface lunaire — aucun ennemi — debug libre",
+    },
     1: {
         "name": "ASTEROID FIELD",
         "waves": 7,
         "intro_text": "Rebel squadron, engage enemy fighters!",
-        "bg_color": (0.0,  0.0,  0.0),
+        "bg_color":      (0.0,  0.0,  0.0),
+        "ambient_color": (0.10, 0.12, 0.22),   # espace profond, bleu nuit
         "description": "TIE Fighters, Interceptors, Bombers",
     },
     2: {
         "name": "LUNAR SURFACE",
         "waves": 7,
         "intro_text": "Stay low — Imperial ground forces ahead!",
-        "bg_color": (0.04, 0.04, 0.05),
+        "bg_color":      (0.04, 0.04, 0.05),
+        "ambient_color": (0.20, 0.15, 0.06),   # ambre chaud, lune désertique
         "description": "Imperial Shuttles + Ground Turrets",
     },
     3: {
         "name": "DEATH STAR TRENCH",
         "waves": 7,
         "intro_text": "Stay on target... USE THE FORCE!",
-        "bg_color": (0.04, 0.04, 0.05),    # Gris sombre — tranchée Death Star
+        "bg_color":      (0.04, 0.04, 0.05),
+        "ambient_color": (0.13, 0.12, 0.13),   # acier impérial, gris métal froid
         "description": "Probe Droids + Attack Bombers + Turrets",
     },
     4: {
         "name": "NEBULA",
         "waves": 7,
         "intro_text": "Sensors jammed — fly by instinct!",
-        "bg_color": (0.03, 0.01, 0.05),
+        "bg_color":      (0.03, 0.01, 0.05),
+        "ambient_color": (0.10, 0.06, 0.20),   # nébuleuse, violet profond
         "description": "All enemies — maximum difficulty",
     },
     99: {
         "name": "DEBUG — ASTEROIDS",
         "waves": 999,
         "intro_text": "DEBUG MODE",
-        "bg_color": (0.0, 0.0, 0.0),
+        "bg_color":      (0.0, 0.0, 0.0),
+        "ambient_color": (0.14, 0.13, 0.12),   # neutre debug
         "description": "Asteroids only — no enemies — 100 HP",
     },
 }
@@ -122,7 +135,7 @@ class LevelManager:
                 self.transition_timer = 0.0
                 self._show_level_intro()
 
-                # Change le bg color
+                # Change le bg color + lumière ambiante
                 config = self.get_level_config()
                 bg = config.get("bg_color", (0, 0, 0))
                 self.game.setBackgroundColor(bg[0], bg[1], bg[2], 1)

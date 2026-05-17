@@ -1,6 +1,6 @@
 """
 Power-ups — Items récupérables droppés par les ennemis.
-Torpedo (bleu) : +3 torpilles | Repair (vert) : +2 HP
+Torpedo (blanc cassé) : +3 torpilles | Repair (jaune) : +2 HP | Force (bleu) : +jauge Force
 """
 
 from panda3d.core import (
@@ -13,14 +13,17 @@ import random
 import math
 
 
-COLOR_TORPEDO = Vec4(1.0, 0.85, 0.2, 1.0)   # Jaune doré
-COLOR_REPAIR = Vec4(1.0, 0.5, 0.15, 1.0)    # Orange chaud
+COLOR_TORPEDO = Vec4(0.92, 0.92, 0.88, 1.0)  # Blanc cassé
+COLOR_REPAIR  = Vec4(0.95, 0.82, 0.12, 1.0)  # Jaune interface
+COLOR_FORCE   = Vec4(0.25, 0.55, 1.00, 1.0)  # Bleu force
 
-DROP_CHANCE = 0.20
-WEIGHT_TORPEDO = 0.6
+DROP_CHANCE    = 0.22
+WEIGHT_TORPEDO = 0.45   # 45% → torpilles
+WEIGHT_REPAIR  = 0.30   # 30% → hull
+# reste 25% → force
 COLLECT_RADIUS = 5.0
-LIFETIME = 12.0
-NO_DROP_TIME = 15.0
+LIFETIME       = 12.0
+NO_DROP_TIME   = 15.0
 
 
 class PowerUp:
@@ -31,7 +34,12 @@ class PowerUp:
         self.alive = True
         self.age = 0.0
 
-        color = COLOR_TORPEDO if pu_type == "torpedo" else COLOR_REPAIR
+        if pu_type == "torpedo":
+            color = COLOR_TORPEDO
+        elif pu_type == "force":
+            color = COLOR_FORCE
+        else:
+            color = COLOR_REPAIR
 
         self.node = self._make_octahedron(color)
         self.node.reparentTo(parent)
@@ -109,14 +117,15 @@ class PowerUp:
         h, p, r = self.node.getHpr()
         self.node.setHpr(h + 60 * dt, p + 30 * dt, r)
 
-        # Pulse doux
-        pulse = 0.9 + 0.2 * math.sin(self.age * 3.0)
+        # Blink visible — strobe à ~4 Hz
+        blink = 0.42 + 0.58 * abs(math.sin(self.age * 4.2))
         if self.age > LIFETIME - 2.0:
+            # Clignotement rapide en fin de vie + fondu
             alpha = (LIFETIME - self.age) / 2.0
-            blink = 0.8 if int(self.age * 4) % 2 == 0 else 0.3
-            self.node.setColorScale(pulse * blink, pulse * blink, pulse * blink, alpha)
+            fast  = 0.9 if int(self.age * 7) % 2 == 0 else 0.1
+            self.node.setColorScale(fast, fast, fast, alpha * fast)
         else:
-            self.node.setColorScale(pulse, pulse, pulse, 0.9)
+            self.node.setColorScale(blink, blink, blink, 0.75 + 0.25 * blink)
 
         if pos.getY() < -10:
             self.destroy()
@@ -138,7 +147,13 @@ class PowerUpManager:
             return
         if random.random() > DROP_CHANCE:
             return
-        pu_type = "torpedo" if random.random() < WEIGHT_TORPEDO else "repair"
+        r = random.random()
+        if r < WEIGHT_TORPEDO:
+            pu_type = "torpedo"
+        elif r < WEIGHT_TORPEDO + WEIGHT_REPAIR:
+            pu_type = "repair"
+        else:
+            pu_type = "force"
         pu = PowerUp(self.game.render, position, pu_type)
         self.powerups.append(pu)
 

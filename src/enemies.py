@@ -13,6 +13,8 @@ import random
 import math
 import os
 
+from src.wave_config import get_wave_defs_for_level, get_escalation_pool
+
 
 # ============================================================
 # Système de paliers (tiers) — Z = -4, 0, +4
@@ -458,8 +460,8 @@ class BaseEnemy:
 
         # Clamp X (Z clampé par les paliers)
         x = self.node.getX()
-        if x < -9:   self.node.setX(-9)
-        elif x > 9:  self.node.setX(9)
+        if x < -12:   self.node.setX(-12)
+        elif x > 12:  self.node.setX(12)
 
         # Flash de dégât
         if self.flash_timer > 0:
@@ -501,13 +503,7 @@ class BaseEnemy:
 
         return None
 
-    SPAWN_PROTECT_Y = 120.0  # Invincible tant qu'au-delà de cette distance
-
     def hit(self, damage=1):
-        # Protection au spawn — pas touchable tant que trop loin
-        if self.node.getY() > self.SPAWN_PROTECT_Y:
-            return False
-
         self.hp -= damage
         if self.hp <= 0:
             self.destroy()
@@ -960,51 +956,8 @@ class Formation:
 
 
 # ============================================================
-# Vagues par niveau
+# Vagues par niveau — définies dans src/wave_config.py
 # ============================================================
-
-WAVE_DEFS_BY_LEVEL = {
-    # L1 — Champ d'astéroïdes : TIE classiques
-    1: [
-        {"enemies": [TIEFighter] * 5, "formation": "line"},
-        {"enemies": [TIEFighter] * 7, "formation": "v"},
-        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 2, "formation": "swarm"},
-        {"enemies": [TIEInterceptor] * 6, "formation": "pincer"},
-        {"enemies": [TIEBomber] * 1 + [TIEFighter] * 4, "formation": "v"},
-        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 3 + [TIEBomber] * 1, "formation": "swarm"},
-        {"enemies": [TIEInterceptor] * 4 + [TIEBomber] * 2 + [TIEFighter] * 4, "formation": "pincer"},
-    ],
-    # L2 — Surface lunaire : Shuttles (tourelles retirées — bâtiments à venir)
-    2: [
-        {"enemies": [TIEFighter] * 4 + [TIEInterceptor] * 2, "formation": "line"},
-        {"enemies": [ImperialShuttle] * 1 + [TIEFighter] * 4, "formation": "v"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEInterceptor] * 3, "formation": "swarm"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEFighter] * 2 + [TIEBomber] * 1, "formation": "line"},
-        {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4 + [TIEBomber] * 1, "formation": "pincer"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEBomber] * 2 + [TIEFighter] * 2, "formation": "swarm"},
-        {"enemies": [ImperialShuttle] * 2 + [TIEInterceptor] * 3 + [TIEBomber] * 2, "formation": "pincer"},
-    ],
-    # L3 — Tranchée : Probe Droids + Attack Bombers + Tourelles
-    3: [
-        {"enemies": [TIEFighter] * 4 + [ProbeDroid] * 2, "formation": "swarm"},
-        {"enemies": [ProbeDroid] * 5 + [TIEInterceptor] * 2, "formation": "v"},
-        {"enemies": [AttackBomber] * 1 + [TIEFighter] * 3 + [GroundTurret] * 2, "formation": "line"},
-        {"enemies": [ProbeDroid] * 5 + [GroundTurret] * 3, "formation": "pincer"},
-        {"enemies": [AttackBomber] * 2 + [TIEInterceptor] * 3 + [ProbeDroid] * 2, "formation": "swarm"},
-        {"enemies": [AttackBomber] * 1 + [ProbeDroid] * 4 + [GroundTurret] * 3, "formation": "swarm"},
-        {"enemies": [AttackBomber] * 2 + [TIEInterceptor] * 3 + [GroundTurret] * 3, "formation": "pincer"},
-    ],
-    # L4 — Nébuleuse : tout mélangé, difficulté max (tourelles retirées — niveau spatial)
-    4: [
-        {"enemies": [TIEFighter] * 4 + [ProbeDroid] * 3, "formation": "swarm"},
-        {"enemies": [ImperialShuttle] * 1 + [TIEInterceptor] * 4, "formation": "v"},
-        {"enemies": [AttackBomber] * 1 + [ProbeDroid] * 2 + [TIEFighter] * 3, "formation": "line"},
-        {"enemies": [ProbeDroid] * 4 + [ImperialShuttle] * 2, "formation": "pincer"},
-        {"enemies": [AttackBomber] * 2 + [TIEBomber] * 2 + [ProbeDroid] * 2, "formation": "swarm"},
-        {"enemies": [ImperialShuttle] * 2 + [AttackBomber] * 1 + [ProbeDroid] * 3, "formation": "swarm"},
-        {"enemies": [AttackBomber] * 2 + [ImperialShuttle] * 2 + [TIEInterceptor] * 3, "formation": "pincer"},
-    ],
-}
 
 
 # ============================================================
@@ -1014,13 +967,13 @@ WAVE_DEFS_BY_LEVEL = {
 class EnemySpawner:
     """Gère le spawn, les tirs ennemis, et les vagues."""
 
-    SPAWN_DEPTH = 150.0
+    SPAWN_DEPTH = 200.0
     MAX_ENEMIES = 15
 
     def __init__(self, game, level=1):
         self.game = game
         self.level = level
-        self.wave_defs = list(WAVE_DEFS_BY_LEVEL.get(level, WAVE_DEFS_BY_LEVEL[1]))
+        self.wave_defs = get_wave_defs_for_level(level)
 
         self.enemies = []
         self.enemy_bolts = []
@@ -1029,6 +982,7 @@ class EnemySpawner:
         self.wave = 1
         self.wave_enemies_to_spawn = []
         self.spawn_index = 0
+        self.spawn_interval = 0.5
         self.wave_started = False
         self.last_kill_pos = None
         self.last_kill_class = None
@@ -1042,18 +996,13 @@ class EnemySpawner:
 
         enemy_classes = list(wave_def["enemies"])   # copie pour ne pas muter le template
         formation_type = wave_def["formation"]
+        delay_before = wave_def.get("delay_before", 1.5)
+        spawn_interval = wave_def.get("spawn_interval", 0.5)
 
         # Pour les vagues au-delà des définitions, on scale
         if self.wave > len(self.wave_defs):
             extra = self.wave - len(self.wave_defs)
-            # Ajoute des ennemis supplémentaires (adapté au niveau)
-            level_pool = {
-                1: [TIEFighter, TIEInterceptor, TIEBomber],
-                2: [TIEFighter, TIEInterceptor, ImperialShuttle, GroundTurret],
-                3: [ProbeDroid, AttackBomber, TIEInterceptor, GroundTurret],
-                4: [AttackBomber, ImperialShuttle, ProbeDroid, GroundTurret],
-            }
-            pool = level_pool.get(self.level, [TIEFighter, TIEInterceptor, TIEBomber])
+            pool = get_escalation_pool(self.level)
             for _ in range(extra * 2):
                 enemy_classes.append(random.choice(pool))
 
@@ -1072,7 +1021,8 @@ class EnemySpawner:
 
         self.wave_enemies_to_spawn = list(zip(enemy_classes, offsets))
         self.spawn_index = 0
-        self.spawn_timer = 1.5  # Pause avant la vague
+        self.spawn_timer = delay_before
+        self.spawn_interval = spawn_interval
         self.wave_started = True
 
     def update(self, dt, laser_system, player_pos):
@@ -1081,7 +1031,7 @@ class EnemySpawner:
         if self.spawn_timer <= 0 and self.spawn_index < len(self.wave_enemies_to_spawn):
             if len(self.enemies) < self.MAX_ENEMIES:
                 self._spawn_next()
-                self.spawn_timer = 0.5  # Délai entre chaque spawn dans la formation
+                self.spawn_timer = self.spawn_interval
 
         # Update ennemis
         for enemy in self.enemies:
