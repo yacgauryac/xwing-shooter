@@ -255,27 +255,34 @@ class _NeonLineBatch:
             self._sg(gc[i], gc[(i+1)%4], cg)
 
     def emit(self, parent):
-        """Émet core + glow dans parent — 2 draw calls transparents."""
-        for vd, lns, cnt, name, thick, additive in [
-            (self._vc, self._lnc, self._ic, "neon_core", 2.5, False),
-            (self._vg, self._lng, self._ig, "neon_glow", 3.0, True),
-        ]:
-            if cnt == 0:
-                continue
-            geom = Geom(vd); geom.addPrimitive(lns)
-            gn   = GeomNode(name); gn.addGeom(geom)
+        """Émet core (opaque) + glow (bin fixe, pas de sort) dans parent."""
+        # ── Core : alpha=1.0 → opaque, zéro depth-sort
+        if self._ic > 0:
+            geom = Geom(self._vc); geom.addPrimitive(self._lnc)
+            gn   = GeomNode("neon_core"); gn.addGeom(geom)
             np   = NodePath(gn)
-            np.setRenderModeThickness(thick)
+            np.setRenderModeThickness(2.5)
             np.setLightOff()
             np.setDepthWrite(False)
             np.setDepthOffset(-1)
+            # Pas de setTransparency → reste dans le bucket OPAQUE
+            np.reparentTo(parent)
+        # ── Glow : additif, bin "fixed" → rendu sans tri par distance
+        if self._ig > 0:
+            geom = Geom(self._vg); geom.addPrimitive(self._lng)
+            gn   = GeomNode("neon_glow"); gn.addGeom(geom)
+            np   = NodePath(gn)
+            np.setRenderModeThickness(3.0)
+            np.setLightOff()
+            np.setDepthWrite(False)
+            np.setDepthOffset(-2)
             np.setTransparency(TransparencyAttrib.MAlpha)
-            if additive:
-                np.setAttrib(ColorBlendAttrib.make(
-                    ColorBlendAttrib.MAdd,
-                    ColorBlendAttrib.OIncomingAlpha,
-                    ColorBlendAttrib.OOne,
-                ))
+            np.setBin("fixed", 50)      # additif = ordre indépendant, pas besoin de sort
+            np.setAttrib(ColorBlendAttrib.make(
+                ColorBlendAttrib.MAdd,
+                ColorBlendAttrib.OIncomingAlpha,
+                ColorBlendAttrib.OOne,
+            ))
             np.reparentTo(parent)
 
 
@@ -301,8 +308,9 @@ class _BeaconBatch:
         gn   = GeomNode("beacons"); gn.addGeom(geom)
         np   = NodePath(gn)
         np.setRenderModeThickness(size)
-        np.setTransparency(TransparencyAttrib.MAlpha)
         np.setLightOff()
+        np.setBin("fixed", 55)   # points lumineux — ordre indépendant, pas de sort
+        np.setTransparency(TransparencyAttrib.MAlpha)
         np.reparentTo(parent)
 
 
@@ -624,6 +632,7 @@ def _make_landing_pad(r, rng, nc=None, bb=None, ox=0.0, oy=0.0, oz=0.0):
     cross_np.reparentTo(root)
     cross_np.setRenderModeThickness(2.0)
     cross_np.setTransparency(TransparencyAttrib.MAlpha)
+    cross_np.setBin("fixed", 45)
     cross_np.setDepthOffset(1)
 
     root.setLightOff()
@@ -801,6 +810,7 @@ def _make_ground_markings(parent, rng, style):
     np.reparentTo(parent)
     np.setRenderModeThickness(1.8)
     np.setTransparency(TransparencyAttrib.MAlpha)
+    np.setBin("fixed", 45)   # marquages sol — pas besoin de sort par distance
     np.setDepthOffset(1)
     np.setLightOff()
 
