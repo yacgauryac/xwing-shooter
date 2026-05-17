@@ -125,6 +125,56 @@ class Player:
         # Bouclier — désactivé, réservé pour V3 (vrai système de bouclier)
         self._shield_np = None
 
+        # Ombre au sol — blob pour L2/L0 (surface lunaire)
+        self.SHADOW_GROUND_Z = -7.8   # == LunarTerrain.GROUND_Z
+        self._shadow_np = self._create_shadow()
+        self._shadow_active = False
+
+    def _create_shadow(self):
+        """Blob d'ombre au sol — ellipse semi-transparente pour L2 (surface lunaire)."""
+        segs = 20
+        rx, ry = 2.4, 1.6   # demi-axes : large en X (envergure), fin en Y (profondeur)
+
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("player_shadow", fmt, Geom.UHStatic)
+        vdata.setNumRows(segs + 1)
+        vw = GeomVertexWriter(vdata, "vertex")
+        cw = GeomVertexWriter(vdata, "color")
+
+        # Centre — opaque
+        vw.addData3(0, 0, 0)
+        cw.addData4(0, 0, 0, 0.55)
+
+        # Périmètre — transparent (dégradé radial via interpolation GPU)
+        for i in range(segs):
+            a = i / segs * 2 * math.pi
+            vw.addData3(rx * math.cos(a), ry * math.sin(a), 0)
+            cw.addData4(0, 0, 0, 0.0)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(segs):
+            tris.addVertices(0, i + 1, (i + 1) % segs + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn = GeomNode("player_shadow")
+        gn.addGeom(geom)
+
+        np = NodePath(gn)
+        np.reparentTo(self.game.render)
+        np.setTransparency(TransparencyAttrib.MAlpha)
+        np.setBin("fixed", 42)    # Pas de depth-sort, s'affiche toujours sous les bâtiments
+        np.setLightOff()
+        np.setDepthWrite(False)
+        np.hide()
+        return np
+
+    def set_shadow_visible(self, visible):
+        """Active/désactive l'ombre au sol (L2/L0 seulement)."""
+        self._shadow_active = visible
+        if not visible and not self._shadow_np.isEmpty():
+            self._shadow_np.hide()
+
     def load_model(self):
         """Charge le modèle .glb/.gltf, auto-scale à TARGET_SIZE, fallback procédural."""
         if os.path.exists(self.MODEL_PATH):
@@ -515,6 +565,20 @@ class Player:
 
         crosshair_y = new_pos.getY() + self.CH_DISTANCE
         self.crosshair.setPos(self.crosshair_x, crosshair_y, self.crosshair_z)
+
+        # --- Ombre au sol (L2/L0) ---
+        if self._shadow_active and not self._shadow_np.isEmpty():
+            # Hauteur au-dessus du sol — le joueur est toujours au-dessus (GROUND_Z=-7.8)
+            h = new_pos.getZ() - self.SHADOW_GROUND_Z      # ~1.3u (bas) à ~14.3u (haut)
+            h_norm  = max(0.0, min(1.0, (h - 1.0) / 13.0)) # 0=joueur bas, 1=joueur haut
+            # Plus haut = ombre plus grande + plus transparente (effet altitude)
+            scale   = 1.0 + h_norm * 0.7                    # 1.0→1.7
+            alpha   = 1.0 - h_norm * 0.55                   # 1.0→0.45
+            self._shadow_np.setPos(new_pos.getX(), new_pos.getY(),
+                                   self.SHADOW_GROUND_Z + 0.14)
+            self._shadow_np.setScale(scale)
+            self._shadow_np.setColorScale(1, 1, 1, alpha)
+            self._shadow_np.show()
 
     def _create_crosshair(self):
         """Réticule — 2 brackets courbés (gauche/droit) style image de référence.

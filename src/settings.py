@@ -26,7 +26,7 @@ LEVEL_SETTINGS = {
         "player_hp":     50,
     },
     2: {
-        "scroll_speed":  38.0,
+        "scroll_speed":  25.0,   # Plus lent sur surface lunaire (manœuvrabilité bâtiments)
         "bounds_x":      12.0,
         "player_hp":     50,
     },
@@ -60,7 +60,7 @@ LUNAR = {
     #   ["outpost"] ou ["runway", "compound"]
     # Layouts disponibles : runway, platform 2, compound, tower_row,
     #                        industrial, fortress 1, outpost, depot, mixed
-    "enabled_layouts":   [  "runway" ],
+    "enabled_layouts":   [  "compound" ],
 
     # Espacement entre les montagnes de bord (unités Y, random entre min et max)
     "mountain_spacing_min": 22.0,

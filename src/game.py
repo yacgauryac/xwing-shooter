@@ -187,6 +187,10 @@ class Game(ShowBase):
         # Bounds joueur depuis settings
         self.player.set_bounds(bounds_x=_ls["bounds_x"])
 
+        # Ombre au sol — uniquement sur surface lunaire (env L2)
+        if env_level == 2:
+            self.player.set_shadow_visible(True)
+
         # État du jeu
         self.player_hp = _ls["player_hp"]
         self.game_over = False
@@ -888,6 +892,9 @@ class Game(ShowBase):
         self.boss_phase = None
 
         if hasattr(self, 'player'):
+            # Nettoie l'ombre au sol
+            if hasattr(self.player, '_shadow_np') and not self.player._shadow_np.isEmpty():
+                self.player._shadow_np.removeNode()
             self.player.node.removeNode()
         if hasattr(self, 'powerups'):
             self.powerups.reset()
