@@ -2144,7 +2144,7 @@ class Environment:
         if level == 1:
             color, onset, opaque = (0.0, 0.0, 0.0), 150.0, 230.0
         elif level in (2, 0):
-            color, onset, opaque = (0.04, 0.04, 0.05), 55.0, 95.0
+            color, onset, opaque = (0.04, 0.04, 0.05), 75.0, 110.0
         elif level == 4:
             color, onset, opaque = (0.03, 0.01, 0.05), 100.0, 190.0
         else:
@@ -2482,7 +2482,7 @@ class Environment:
                     bg.node.show()
                     bg.node.setTransparency(TransparencyAttrib.MAlpha)
                     bg.node.setColorScale(1, 1, 1, alpha)
-                elif bg_y - player_y > 90.0:
+                elif bg_y - player_y > 105.0:
                     # Trop loin devant — dans le fog, rien à rendre
                     bg.node.hide()
                 else:
