@@ -112,7 +112,12 @@ main.py
   - Extinction progressive sur `_danger_timer` à la désactivation
 - **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés)
 - **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
-- **L4 (Nébuleuse)** : nébuleuses denses × 2 + planète violette de fond
+- **L4 (Nébuleuse)** : nébuleuses denses × 2 (richness=2.0) + 3 planètes violettes/roses + filaments de gaz billboard
+  - **`GasFilament`** : ellipse billboard `setBillboardPointEye()`, dégradé alpha (centre plein → bords=0), éventail de 12 triangles, palette 10 couleurs violet/rose/magenta, scrolle avec la scène, fade-in 1.8s. 26 filaments initiaux + spawn périodique (toutes 5–10s) dans `_update_l4`
+  - **Palette nébuleuses L4** : 7 couleurs violet/rose/magenta/indigo exclusivement (aucun bleu/vert/orange)
+  - **Palette nébuleuses L1** : orange-brun / bleu-électrique / rouge-orangé / cyan-vert / jaune-ambre — aucun violet → contraste maximal avec L4
+  - **5 nappes fog L4** : violet `-3u` / rose-magenta `+2.5u` / indigo `0u` / bleu-indigo `+5.5u` / magenta ras-du-sol `-6u`
+  - **`Nebula` (richness)** : param `richness=2.0` pour L4 — `num_points = 80 × richness`, variation couleur `col_var = 0.10 + 0.07 × richness`, alpha max `0.20`, point size `2 + round(richness)`
 - Couleur de fond `setBackgroundColor` appliquée depuis `LEVELS` au lancement
 - Toutes les classes : `update(dt, scroll_speed)` + `destroy()`, `setLightOff()` systématique
 - Tuilage : step exact = `TILE_DEPTH`, spawn runtime à `max_y + TILE_DEPTH` → 0 overlap, 0 Z-fighting
@@ -145,7 +150,11 @@ main.py
   - L1 espace froid `(0.10,0.12,0.22)` | L2 lune ambre `(0.20,0.15,0.06)` | L3 acier `(0.13,0.12,0.13)` | L4 violet `(0.10,0.06,0.20)`
 - L1 Asteroid Field → L2 Lunar Surface → L3 Death Star Trench → L4 Nebula
 - L99 DEBUG : astéroïdes only, 999 vagues, 100 HP
-- `LevelManager` : transitions entre niveaux (infrastructure, partiellement câblée)
+- `LevelManager` : câblé dans `game.py` — `start_intro_for_level()` appelé depuis `start_game()`
+- **Intro fade** : fondu noir (alpha 1→0) sur 1.5s au début de chaque niveau, texte visible jusqu'à 3s
+  - Nom du niveau affiché en police **StarJedi** (`assets/fonts/StarJedi.ttf`), échelle 0.10
+  - Sous-titre (nom court) en StarJedi, intro text en police par défaut
+  - Même effet au lancement initial et lors des transitions entre niveaux
 
 ### `src/game.py` — Caméra
 - **Vue normale** : `CAM_FAR_POS=(0,-8,3.5)` → `CAM_FAR_LOOK=(0,22,0)`
@@ -170,9 +179,15 @@ main.py
 - `"SOLO"` démarre toujours depuis L1
 
 ### `src/powerups.py` — Collectibles
-- 20% de chance de drop par kill ennemi
-- **Torpedo** : +3 ammo (poids 60%)
-- **Repair** : +2 HP (poids 40%)
+- 22% de chance de drop par kill (désactivé les 15 premières secondes)
+- **4 types à 25% chacun** :
+  - **Torpedo** (blanc cassé, lettre `T`) : +1 torpille
+  - **Repair** (jaune, lettre `H`) : +1 HP
+  - **Force** (bleu, lettre `F`) : +15 jauge Force
+  - **Fake** (violet Sith, lettre `?`) : piège — inflige -5 HP, flash dégâts + screenshake
+- **Visuels** : gemme octaédrique + label StarJedi billboard + flamme mystique 3 couches additives (core/glow/bloom)
+- **Clignotement** : battement double fréquence `sin(age×3.2) + sin(age×7.1)`, amplitude 0.15→1.6, cycle couleur A↔B
+- **Flamme** : 3 disques `ColorBlendAttrib.MAdd` (r=0.55/1.05/1.90), phases décalées, respiration 2.2 Hz
 
 ### `src/menu.py` — Menu principal *(section déjà mise à jour ci-dessus)*
 - Écran titre avec starfield en fond
@@ -195,7 +210,7 @@ main.py
 | Force durée | 6s |
 | Lock-on portée | 120 u |
 | Score de base/kill | 100 |
-| Drop chance powerup | 20% |
+| Drop chance powerup | 22% (4 types × 25%) |
 | Leaderboard | Top 10 |
 
 ---

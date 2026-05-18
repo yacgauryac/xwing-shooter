@@ -7,7 +7,7 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexArrayFormat, GeomEnums,
     GeomVertexData, GeomVertexWriter,
-    Geom, GeomTriangles, GeomLines, GeomNode,
+    Geom, GeomTriangles, GeomNode,
     NodePath, TransparencyAttrib,
     Fog, Texture, TextureStage, PNMImage,
     AmbientLight, PointLight, Spotlight,
@@ -463,7 +463,7 @@ class StarDestroyerDecor:
 class Nebula:
     """Nappe de couleur en fond (points colorés semi-transparents)."""
 
-    def __init__(self, parent, center_pos, color, size=30.0):
+    def __init__(self, parent, center_pos, color, size=30.0, richness=1.0):
         self.alive = True
         self.speed = 1.0
         self._fade_age      = 0.0
@@ -476,10 +476,14 @@ class Nebula:
         self.node.setTransparency(TransparencyAttrib.MAlpha)
         self.node.setColorScale(1, 1, 1, 0)
 
-        self._make_cloud(size, color)
+        self._make_cloud(size, color, richness)
 
-    def _make_cloud(self, size, color):
-        num_points = 80
+    def _make_cloud(self, size, color, richness=1.0):
+        # richness=1.0 → L1 sobre ; richness=2.0 → L4 dense et saturé
+        num_points = int(80 * max(0.5, richness))
+        col_var    = min(0.22, 0.10 + 0.07 * richness)
+        alpha_max  = min(0.20, 0.06 + 0.07 * richness)
+        pt_size    = 2 + round(richness)
 
         fmt = GeomVertexFormat.getV3c4()
         vdata = GeomVertexData("nebula", fmt, Geom.UHStatic)
@@ -495,10 +499,10 @@ class Nebula:
 
             vertex.addData3(x, y, z)
 
-            r = color.getX() + random.uniform(-0.1, 0.1)
-            g = color.getY() + random.uniform(-0.1, 0.1)
-            b = color.getZ() + random.uniform(-0.1, 0.1)
-            a = random.uniform(0.03, 0.08)
+            r = color.getX() + random.uniform(-col_var, col_var)
+            g = color.getY() + random.uniform(-col_var, col_var)
+            b = color.getZ() + random.uniform(-col_var, col_var)
+            a = random.uniform(0.03, alpha_max)
             col.addData4(max(0, r), max(0, g), max(0, b), a)
 
         from panda3d.core import GeomPoints
@@ -513,7 +517,7 @@ class Nebula:
 
         np = NodePath(geom_node)
         np.reparentTo(self.node)
-        np.setRenderModeThickness(2)
+        np.setRenderModeThickness(pt_size)
         np.setTransparency(TransparencyAttrib.MAlpha)
 
     def update(self, dt):
@@ -570,7 +574,7 @@ class FogLayer:
         """Crée un quad centré à l'origine, dans le plan XZ (horizontal)."""
         hw = size / 2.0
         fmt = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("fog_quad", fmt, Geom.UHDynamic)
+        vdata = GeomVertexData("fog_quad", fmt, Geom.UHStatic)
         vdata.setNumRows(4)
 
         vertex = GeomVertexWriter(vdata, "vertex")
@@ -609,8 +613,7 @@ class FogLayer:
         np.setPos(ox, initial_y, self.altitude_z + random.uniform(-0.5, 0.5))
         np.setTransparency(TransparencyAttrib.MAlpha)
         np.setLightOff()
-        # Billboard axe Z : le quad reste horizontal mais tourne face caméra en Z
-        np.setBillboardAxis()
+        # setBillboardAxis() retiré — test perf (les quads horizontaux n'ont pas besoin de billboard)
         # Rendu après les objets opaques
         np.setBin("transparent", 50)
 
@@ -652,6 +655,103 @@ class FogLayer:
 
 
 # ============================================================
+# Filaments de gaz — billboard scrollant, palette violet/rose
+# ============================================================
+
+class GasFilament:
+    """Filament de gaz scrollant : ellipse billboard avec dégradé alpha radial.
+
+    Géométrie : 1 vertex central (alpha plein) + N sur périmètre (alpha=0).
+    N triangles en éventail → fondu parfait vers les bords.
+    Billboard point-eye = toujours face caméra quelle que soit la vue.
+    """
+
+    _PALETTES = [
+        (0.60, 0.08, 0.88),   # violet saturé
+        (0.85, 0.18, 0.58),   # rose-magenta
+        (0.35, 0.04, 0.65),   # indigo sombre
+        (0.70, 0.28, 0.92),   # violet clair
+        (0.90, 0.22, 0.48),   # rose chaud
+        (0.22, 0.06, 0.55),   # bleu-violet profond
+        (0.95, 0.30, 0.72),   # magenta vif
+        (0.48, 0.05, 0.82),   # violet pur
+        (0.78, 0.12, 0.65),   # rose-violet intermédiaire
+        (0.28, 0.04, 0.70),   # indigo électrique
+    ]
+
+    def __init__(self, parent, pos, speed):
+        self.alive = True
+        self.speed = speed
+        self._fade_age      = 0.0
+        self._fade_duration = 1.8
+
+        r_col, g_col, b_col = random.choice(self._PALETTES)
+        # Légère dérive de teinte pour éviter la répétition exacte
+        r_col = max(0.0, min(1.0, r_col + random.uniform(-0.08, 0.08)))
+        g_col = max(0.0, min(1.0, g_col + random.uniform(-0.04, 0.04)))
+        b_col = max(0.0, min(1.0, b_col + random.uniform(-0.06, 0.06)))
+
+        width  = random.uniform(5.0, 15.0)
+        length = random.uniform(28.0, 85.0)
+        alpha  = random.uniform(0.22, 0.48)
+
+        N = 12   # segments périmètre — éventail lisse
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("filament", fmt, Geom.UHStatic)
+        vdata.setNumRows(1 + N)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col_w  = GeomVertexWriter(vdata, "color")
+
+        hw, hl = width / 2.0, length / 2.0
+
+        # Centre — alpha plein
+        vertex.addData3(0, 0, 0)
+        col_w.addData4(r_col, g_col, b_col, alpha)
+
+        # Périmètre ellipse — alpha=0 (bords invisibles)
+        for i in range(N):
+            a  = 2 * math.pi * i / N
+            cx = hw * math.cos(a)
+            cz = hl * math.sin(a)
+            vertex.addData3(cx, 0, cz)
+            col_w.addData4(r_col, g_col, b_col, 0.0)
+
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(N):
+            tris.addVertices(0, 1 + i, 1 + (i + 1) % N)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gnode = GeomNode("filament")
+        gnode.addGeom(geom)
+
+        self.node = NodePath(gnode)
+        self.node.reparentTo(parent)
+        self.node.setPos(pos)
+        self.node.setTransparency(TransparencyAttrib.MAlpha)
+        self.node.setDepthWrite(False)
+        self.node.setLightOff()
+        self.node.setBin("transparent", 30)
+        self.node.setColorScale(1, 1, 1, 0)   # fade-in doux
+        self.node.setBillboardPointEye()        # toujours face caméra
+
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - self.speed * dt)
+        if self._fade_age < self._fade_duration:
+            self._fade_age += dt
+            self.node.setColorScale(1, 1, 1, min(1.0, self._fade_age / self._fade_duration))
+        if self.node.getY() < -80:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ============================================================
 # L2 — Surface lunaire
 # ============================================================
 
@@ -660,7 +760,7 @@ class LunarTerrain:
 
     GROUND_Z = -7.8
 
-    def __init__(self, parent, x_center, y_pos, width=240.0, depth=22.0):
+    def __init__(self, parent, x_center, y_pos, width=90.0, depth=22.0):
         self.alive = True
         self._depth = depth
         self.node = self._make_tile(width, depth)
@@ -680,7 +780,7 @@ class LunarTerrain:
         col = GeomVertexWriter(vdata, "color")
 
         # Low-poly : courbe sphérique visible, bumps lisibles, perf prioritaire
-        segs_x = 12   # était max(16, w/8) = 30 — 90% de géométrie en moins
+        segs_x = 8    # était max(16, w/8) = 30 — 90% de géométrie en moins
         segs_y = 6    # était max(8, d/2)  = 22
         R = self.SPHERE_R
 
@@ -724,32 +824,48 @@ class LunarTerrain:
         # ── Quadrillage de couloirs ────────────────────────────────────────────
         # Lignes longitudinales (Y) = limites de couloirs, tous les 4u en X
         # Lignes transversales (X)  = repères de distance, tous les 4u en Y
+        #
+        # Implémentation : quads GPU (2 triangles/segment) au lieu de GeomLines.
+        # glLineWidth > 1.0 est deprecated OpenGL Core → software-emulé → -10fps.
+        # LINE_HW = demi-largeur en world units (~0.12u à cette distance caméra).
         CORRIDOR_W = 4.0
         BOUNDS_X   = 14.0
-        c_lane  = Vec4(0.50, 0.44, 0.24, 0.55)   # orange chaud — limites couloirs
-        c_cross = Vec4(0.32, 0.30, 0.20, 0.30)   # gris-brun discret — repères Y
+        LINE_HW    = 0.12
+        # Alpha pre-multiplié dans RGB → rendu 100% opaque, zéro passe transparence
+        c_lane  = Vec4(0.50*0.55, 0.44*0.55, 0.24*0.55, 1.0)   # orange chaud
+        c_cross = Vec4(0.32*0.30, 0.30*0.30, 0.20*0.30, 1.0)   # gris-brun discret
 
-        vd2 = GeomVertexData("grid", GeomVertexFormat.getV3c4(), Geom.UHStatic)
-        vw2 = GeomVertexWriter(vd2, "vertex")
-        cw2 = GeomVertexWriter(vd2, "color")
-        lns = GeomLines(Geom.UHStatic)
-        gi  = [0]
+        vd2   = GeomVertexData("grid", GeomVertexFormat.getV3c4(), Geom.UHStatic)
+        vw2   = GeomVertexWriter(vd2, "vertex")
+        cw2   = GeomVertexWriter(vd2, "color")
+        tris2 = GeomTriangles(Geom.UHStatic)
+        gi    = [0]
 
-        def gline(x0, y0, z0, x1, y1, z1, col):
-            vw2.addData3(x0, y0, z0); cw2.addData4(col)
-            vw2.addData3(x1, y1, z1); cw2.addData4(col)
-            lns.addVertices(gi[0], gi[0]+1); gi[0] += 2
+        GRID_Z = 0.05  # décalage Z baked dans les vertices — évite z-fighting sans setDepthOffset
+        def gquad(x0, y0, z0, x1, y1, z1, col, hw=LINE_HW):
+            """Émet un quad (2 tris) autour du segment, perpendiculaire en XY."""
+            dx, dy = x1 - x0, y1 - y0
+            inv = hw / (dx*dx + dy*dy) ** 0.5
+            px, py = -dy * inv, dx * inv
+            vw2.addData3(x0 - px, y0 - py, z0 + GRID_Z); cw2.addData4(col)
+            vw2.addData3(x0 + px, y0 + py, z0 + GRID_Z); cw2.addData4(col)
+            vw2.addData3(x1 + px, y1 + py, z1 + GRID_Z); cw2.addData4(col)
+            vw2.addData3(x1 - px, y1 - py, z1 + GRID_Z); cw2.addData4(col)
+            i = gi[0]
+            tris2.addVertices(i, i+1, i+2)
+            tris2.addVertices(i, i+2, i+3)
+            gi[0] += 4
 
-        # Limites longitudinales
+        # Limites longitudinales (parallèles à Y → perp = X)
         nx = int(BOUNDS_X / CORRIDOR_W)
         for i in range(-nx, nx+1):
             x = i * CORRIDOR_W
             if abs(x) > BOUNDS_X + 0.1:
                 continue
             gz = -(x*x) / (2.0 * self.SPHERE_R) + 0.06
-            gline(x, -d/2, gz, x, d/2, gz, c_lane)
+            gquad(x, -d/2, gz, x, d/2, gz, c_lane)
 
-        # Repères transversaux (grille complète)
+        # Repères transversaux (parallèles à X → perp = Y)
         y = -d / 2
         while y <= d / 2 + 0.01:
             for i in range(-nx, nx):
@@ -758,27 +874,29 @@ class LunarTerrain:
                 gz0 = -(x0*x0) / (2.0 * self.SPHERE_R) + 0.06
                 gz1 = -(x1*x1) / (2.0 * self.SPHERE_R) + 0.06
                 gz  = (gz0 + gz1) / 2
-                gline(x0, y, gz, x1, y, gz, c_cross)
+                gquad(x0, y, gz, x1, y, gz, c_cross)
             y += CORRIDOR_W
 
-        geom2 = Geom(vd2); geom2.addPrimitive(lns)
+        geom2 = Geom(vd2); geom2.addPrimitive(tris2)
         gn2   = GeomNode("corridor_grid"); gn2.addGeom(geom2)
         grid_np = NodePath(gn2)
         grid_np.reparentTo(root)
-        grid_np.setRenderModeThickness(1.2)
-        grid_np.setTransparency(TransparencyAttrib.MAlpha)
-        grid_np.setBin("fixed", 40)   # pas de depth-sort — grille sol = ordre indépendant
-        grid_np.setLightOff()
-        grid_np.setDepthWrite(False)
+        # Pas de setLightOff ici — le root le fait dans __init__, même état pour les 2 nodes
+        # → flattenStrong peut les fusionner en 1 draw call
+
+        root.flattenStrong()
 
         return root
+
+    def recycle(self, new_y):
+        """Repositionne la tile en tête de file — zéro création géométrique."""
+        self.alive = True
+        self.node.setY(new_y)
 
     def update(self, dt, scroll_speed):
         if not self.alive:
             return
         self.node.setY(self.node.getY() - scroll_speed * dt)
-        if self.node.getY() < -45:
-            self.destroy()
 
     def destroy(self):
         self.alive = False
@@ -2091,32 +2209,42 @@ class Environment:
         # Nappes de brouillard mobiles (T3)
         self.fog_layers = []
 
+        # Flags debug perf (L0/L2) — toggle via touches T/B/F
+        self._dbg_hide_terrain   = False
+        self._dbg_hide_buildings = False
+        self._dbg_hide_fog       = False
+
         # Timers — niveau 99 (debug) : 3× plus d'astéroïdes, vitesses aléatoires
         self._debug_asteroids = (level == 99)
         debug = self._debug_asteroids
-        self.asteroid_timer = 0.1 if debug else 2.0
-        self.nebula_timer   = 15.0
-        self.debris_timer   = 4.0
+        self.asteroid_timer  = 0.1 if debug else 2.0
+        self.nebula_timer    = 15.0
+        self.debris_timer    = 4.0
+        self.filament_timer  = 8.0   # L4 : filaments de gaz périodiques
         self._asteroid_interval = 0.1 if debug else self.ASTEROID_INTERVAL   # L99 : 10/s
 
         self.star_destroyer = None
 
-        # Couleurs nébuleuses (L1/L4) — L4 utilise une palette violet/rose
+        # Couleurs nébuleuses — palettes complètement différentes par niveau
         if level == 4:
+            # L4 : violet/rose/magenta seulement — identité nébuleuse forte
             self.nebula_colors = [
-                Vec4(0.55, 0.1, 0.80, 1),   # violet profond
-                Vec4(0.75, 0.2, 0.60, 1),   # rose-magenta
-                Vec4(0.45, 0.05, 0.70, 1),  # indigo
-                Vec4(0.80, 0.25, 0.50, 1),  # rose chaud
-                Vec4(0.60, 0.15, 0.85, 1),  # violet saturé
+                Vec4(0.60, 0.08, 0.88, 1),   # violet saturé
+                Vec4(0.85, 0.18, 0.58, 1),   # rose-magenta
+                Vec4(0.42, 0.04, 0.68, 1),   # indigo profond
+                Vec4(0.90, 0.28, 0.48, 1),   # rose chaud
+                Vec4(0.55, 0.12, 0.92, 1),   # violet électrique
+                Vec4(0.78, 0.06, 0.72, 1),   # magenta vif
+                Vec4(0.30, 0.04, 0.58, 1),   # bleu-violet sombre
             ]
         else:
+            # L1/L2/L3 : chaud + froid, AUCUN violet — contraste maximal avec L4
             self.nebula_colors = [
-                Vec4(0.6, 0.2, 0.8, 1),
-                Vec4(0.2, 0.4, 0.9, 1),
-                Vec4(0.8, 0.3, 0.2, 1),
-                Vec4(0.2, 0.7, 0.5, 1),
-                Vec4(0.9, 0.6, 0.1, 1),
+                Vec4(0.88, 0.42, 0.12, 1),   # orange-brun chaud
+                Vec4(0.18, 0.55, 0.92, 1),   # bleu électrique
+                Vec4(0.92, 0.22, 0.10, 1),   # rouge-orangé
+                Vec4(0.12, 0.78, 0.62, 1),   # cyan-vert
+                Vec4(0.95, 0.68, 0.08, 1),   # jaune-ambre
             ]
 
         # Init selon le niveau (L99 = visuels L1)
@@ -2145,7 +2273,7 @@ class Environment:
         if level == 1:
             color, onset, opaque = (0.0, 0.0, 0.0), 150.0, 230.0
         elif level in (2, 0):
-            color, onset, opaque = (0.04, 0.04, 0.05), 75.0, 110.0
+            color, onset, opaque = (0.04, 0.04, 0.05), 90.0, 130.0
         elif level == 4:
             color, onset, opaque = (0.03, 0.01, 0.05), 100.0, 190.0
         else:
@@ -2176,32 +2304,37 @@ class Environment:
             # 2 nappes grises — ras du sol + légèrement au-dessus
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.55, 0.55, 0.52), alpha=0.16,
-                altitude_z=-7.0, spread_x=30.0, count=11, speed_y=3.0,
+                altitude_z=-7.0, spread_x=30.0, count=5, speed_y=3.0,
             ))
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.48, 0.48, 0.46), alpha=0.09,
-                altitude_z=-5.5, spread_x=28.0, count=7, speed_y=2.5,
+                altitude_z=-5.5, spread_x=28.0, count=3, speed_y=2.5,
             ))
         elif level == 3:
             pass  # Tranchée : pas de nappe
         elif level == 4:
-            # 4 nappes violettes/roses/indigo étagées en altitude
+            # 5 nappes étagées — violet profond / rose-magenta / indigo / rose chaud / magenta ras-du-sol
             self.fog_layers.append(FogLayer(
-                render, Vec3(0.55, 0.10, 0.75), alpha=0.30,
-                altitude_z=-3.0, spread_x=30.0, count=13, speed_y=5.0,
+                render, Vec3(0.55, 0.10, 0.78), alpha=0.33,
+                altitude_z=-3.0, spread_x=30.0, count=14, speed_y=5.0,
             ))
             self.fog_layers.append(FogLayer(
-                render, Vec3(0.75, 0.22, 0.55), alpha=0.34,
-                altitude_z=2.5, spread_x=26.0, count=11, speed_y=4.5,
+                render, Vec3(0.80, 0.20, 0.55), alpha=0.38,
+                altitude_z=2.5, spread_x=26.0, count=12, speed_y=4.5,
             ))
             self.fog_layers.append(FogLayer(
-                render, Vec3(0.42, 0.05, 0.62), alpha=0.27,
-                altitude_z=0.0, spread_x=35.0, count=14, speed_y=6.0,
+                render, Vec3(0.40, 0.04, 0.65), alpha=0.30,
+                altitude_z=0.0, spread_x=36.0, count=15, speed_y=6.0,
             ))
-            # 4ème nappe haute — bleu-indigo très léger pour depth
+            # 4ème nappe haute — bleu-indigo pour profondeur
             self.fog_layers.append(FogLayer(
-                render, Vec3(0.18, 0.05, 0.42), alpha=0.15,
+                render, Vec3(0.18, 0.05, 0.45), alpha=0.18,
                 altitude_z=5.5, spread_x=32.0, count=8, speed_y=7.0,
+            ))
+            # 5ème nappe basse — magenta-rose ras du sol, subtile
+            self.fog_layers.append(FogLayer(
+                render, Vec3(0.88, 0.14, 0.58), alpha=0.20,
+                altitude_z=-6.0, spread_x=34.0, count=9, speed_y=3.2,
             ))
 
     # ----------------------------------------------------------
@@ -2222,6 +2355,10 @@ class Environment:
             self.base_groups.append(LunarBaseGroup(self.game, by, seed))
             by += random.uniform(48, 70)
             seed += 97
+        # Groupe "tampon" pré-réchauffé : VBOs uploadés lors du renderFrame() warmup
+        # (visible avant le premier _update_l2()), puis immédiatement recyclable.
+        # Évite la création mid-gameplay (~0.5s) qui cause un stall GPU de ~900ms.
+        self.base_groups.append(LunarBaseGroup(self.game, -20.0, seed + 9999))
 
         # Montagnes de bord — désactivées temporairement (test perf)
         # self.border_mountains.append(
@@ -2316,77 +2453,18 @@ class Environment:
         p3.grow_rate = 0.0   # planète fixe — ne grossit pas
         self.planets.append(p3)
 
-        # Filaments de gaz multicolores
-        self._spawn_gas_filaments(count=16)
+        # Filaments de gaz initiaux — billboard, dégradé alpha, violet/rose
+        self._spawn_gas_filaments(count=26)
 
-    def _spawn_gas_filaments(self, count=16):
-        """L4 — Filaments de gaz multicolores semi-transparents en arrière-plan.
-
-        Géométrie : 1 vertex central (alpha plein) + 4 coins (alpha=0).
-        5 triangles en éventail → dégradé radial, aucun bord rectangulaire visible.
-        """
+    def _spawn_gas_filaments(self, count=26):
+        """L4 — Filaments de gaz initiaux : GasFilament billboard scrollants."""
         render = self.game.render
-
-        # Palettes de couleurs nébuleuses : (r, g, b)
-        _FILAMENT_PALETTES = [
-            (0.45, 0.08, 0.65),   # violet profond
-            (0.70, 0.15, 0.50),   # rose-magenta
-            (0.30, 0.05, 0.55),   # indigo sombre
-            (0.60, 0.25, 0.75),   # violet clair
-            (0.80, 0.20, 0.45),   # rose chaud
-            (0.20, 0.08, 0.50),   # bleu-violet
-        ]
-
         for _ in range(count):
-            r_col, g_col, b_col = random.choice(_FILAMENT_PALETTES)
-            x = random.uniform(-55, 55)
-            z = random.uniform(-22, 22)
-            y = random.uniform(90, 270)
-            # Dimensions allongées (filament)
-            width  = random.uniform(3.0, 8.0)
-            length = random.uniform(22.0, 65.0)
-            alpha  = random.uniform(0.18, 0.38)
-
-            fmt = GeomVertexFormat.getV3c4()
-            vdata = GeomVertexData("filament", fmt, Geom.UHStatic)
-            # 5 vertices : 0=centre, 1=BL, 2=BR, 3=TR, 4=TL
-            vdata.setNumRows(5)
-            vertex = GeomVertexWriter(vdata, "vertex")
-            col_w  = GeomVertexWriter(vdata, "color")
-
-            hw, hl = width / 2.0, length / 2.0
-
-            # Centre — alpha plein
-            vertex.addData3(0, 0, 0)
-            col_w.addData4(r_col, g_col, b_col, alpha)
-
-            # 4 coins — alpha=0 (bords totalement transparents)
-            for cx, cz in [(-hw, -hl), (hw, -hl), (hw, hl), (-hw, hl)]:
-                vertex.addData3(cx, 0, cz)
-                col_w.addData4(r_col, g_col, b_col, 0.0)
-
-            # 4 triangles en éventail depuis le centre
-            tris = GeomTriangles(Geom.UHStatic)
-            tris.addVertices(0, 1, 2)
-            tris.addVertices(0, 2, 3)
-            tris.addVertices(0, 3, 4)
-            tris.addVertices(0, 4, 1)
-
-            geom = Geom(vdata)
-            geom.addPrimitive(tris)
-            gnode = GeomNode("filament_node")
-            gnode.addGeom(geom)
-            np = NodePath(gnode)
-            np.reparentTo(render)
-            np.setPos(x, y, z)
-            # Légère rotation aléatoire pour varier l'orientation
-            np.setR(random.uniform(-30, 30))
-            np.setTransparency(TransparencyAttrib.MAlpha)
-            np.setDepthWrite(False)
-            np.setLightOff()
-            np.setBin("transparent", 30)
-            # Stocker dans planets pour cleanup
-            self.planets.append(_StaticDecor(np))
+            x = random.uniform(-58, 58)
+            z = random.uniform(-24, 24)
+            y = random.uniform(80, 380)
+            speed = random.uniform(1.0, 3.5)   # dérive lente — éléments de fond
+            self.nebulae.append(GasFilament(render, Point3(x, y, z), speed))
 
     # ----------------------------------------------------------
     # Update principal
@@ -2394,11 +2472,12 @@ class Environment:
 
     def update(self, dt, scroll_speed):
         player_y = self.game.player.node.getY() if hasattr(self.game, 'player') and self.game.player else 0.0
+        player_x = self.game.player.node.getX() if hasattr(self.game, 'player') and self.game.player else 0.0
 
         if self.level in (1, 99):
             self._update_l1(dt, scroll_speed, player_y)
         elif self.level in (2, 0):
-            self._update_l2(dt, scroll_speed, player_y)
+            self._update_l2(dt, scroll_speed, player_y, player_x)
         elif self.level == 3:
             self._update_l3(dt, scroll_speed)
         elif self.level == 4:
@@ -2406,7 +2485,8 @@ class Environment:
 
         # Nappes de brouillard mobiles (T3)
         for fl in self.fog_layers:
-            fl.update(dt, Point3(0, player_y, 0))
+            if not self._dbg_hide_fog:
+                fl.update(dt, Point3(0, player_y, 0))
 
         # Cleanup commun
         self.asteroids          = [a  for a  in self.asteroids        if a.alive]
@@ -2454,61 +2534,101 @@ class Environment:
         for d in self.debris:
             d.update(dt)
 
-    def _update_l2(self, dt, scroll_speed, player_y=0.0):
+    # ── Toggles debug perf L0/L2 ──────────────────────────────────────────────
+
+    def toggle_terrain_debug(self):
+        self._dbg_hide_terrain = not self._dbg_hide_terrain
+        for t in self.terrain_tiles:
+            if not t.node.isEmpty():
+                (t.node.hide if self._dbg_hide_terrain else t.node.show)()
+
+    def toggle_buildings_debug(self):
+        self._dbg_hide_buildings = not self._dbg_hide_buildings
+        for bg in self.base_groups:
+            if not bg.node.isEmpty():
+                (bg.node.hide if self._dbg_hide_buildings else bg.node.show)()
+
+    def toggle_fog_debug(self):
+        self._dbg_hide_fog = not self._dbg_hide_fog
+        for fl in self.fog_layers:
+            for q in fl.quads:
+                (q.hide if self._dbg_hide_fog else q.show)()
+
+    # ── Update L2 ─────────────────────────────────────────────────────────────
+
+    def _update_l2(self, dt, scroll_speed, player_y=0.0, player_x=0.0):
         """L2 — Surface lunaire : terrain continu + bâtiments spaceport (pas de rochers)."""
+        import time
+        _t0 = time.perf_counter()
 
         # Terrain sol — spawn + culling fog
         for t in self.terrain_tiles:
             t.update(dt, scroll_speed)
             if not t.node.isEmpty():
-                ty     = t.node.getY()
-                ahead  = ty - player_y
-                behind = player_y - ty
-                if ahead > 90.0 or behind > self.TILE_DEPTH:
-                    t.node.hide()   # dans le fog ou derrière — inutile de rendre
+                if self._dbg_hide_terrain:
+                    t.node.hide()
                 else:
-                    t.node.show()
+                    ty     = t.node.getY()
+                    ahead  = ty - player_y
+                    behind = player_y - ty
+                    if ahead > 90.0 or behind > self.TILE_DEPTH:
+                        t.node.hide()
+                    else:
+                        t.node.show()
 
         alive_tiles = [t for t in self.terrain_tiles if t.alive and not t.node.isEmpty()]
         max_tile_y = max((t.node.getY() for t in alive_tiles), default=0)
         if max_tile_y < self.SPAWN_DEPTH - self.TILE_DEPTH / 2:
             new_y = max_tile_y + self.TILE_DEPTH
-            self.terrain_tiles.append(
-                LunarTerrain(self.game.render, 0, new_y, depth=self.TILE_DEPTH))
+            # Recycle le tile le plus en arrière au lieu d'en créer un nouveau
+            candidate = min(alive_tiles, key=lambda t: t.node.getY(), default=None)
+            if candidate is not None:
+                candidate.recycle(new_y)
+            else:
+                self.terrain_tiles.append(
+                    LunarTerrain(self.game.render, 0, new_y, depth=self.TILE_DEPTH))
+
+        _t1 = time.perf_counter()
 
         # Bâtiments spaceport
         for bg in self.base_groups:
             bg.update(dt, scroll_speed)
             if not bg.node.isEmpty():
-                bg_y   = bg.node.getY()
-                behind = player_y - bg_y
-                if behind > 22.0:
-                    # Loin derrière — caché, zéro draw call
-                    bg.node.hide()
-                elif behind > 8.0:
-                    # Fade transparent — démarre tardivement, dure ~0.35s à 40u/s
-                    alpha = max(0.0, 1.0 - (behind - 8.0) / 14.0)
-                    bg.node.show()
-                    bg.node.setTransparency(TransparencyAttrib.MAlpha)
-                    bg.node.setColorScale(1, 1, 1, alpha)
-                elif bg_y - player_y > 85.0:
-                    # Trop loin devant — fog opaque, inutile de rendre
+                if self._dbg_hide_buildings:
                     bg.node.hide()
                 else:
-                    # Zone visible — opaque, pas de tri transparence
-                    bg.node.show()
-                    bg.node.clearTransparency()
-                    bg.node.setColorScale(1, 1, 1, 1)
+                    bg_y   = bg.node.getY()
+                    behind = player_y - bg_y
+                    if behind > 22.0 or bg_y - player_y > 85.0:
+                        bg.node.hide()
+                    # FADE COMMENTÉ — test perf pour isoler la source des spikes GPU 29ms.
+                    # Remettre ce bloc pour restaurer le fondu derrière le joueur :
+                    # elif behind > 8.0:
+                    #     alpha = max(0.0, 1.0 - (behind - 8.0) / 14.0)
+                    #     bg.node.show()
+                    #     bg.node.setTransparency(TransparencyAttrib.MAlpha)
+                    #     bg.node.setColorScale(1, 1, 1, alpha)
+                    else:
+                        bg.node.show()
+                        bg.node.clearTransparency()
+                        bg.node.setColorScale(1, 1, 1, 1)
         self.base_groups = [bg for bg in self.base_groups if bg.alive]
-        # Spawn de nouveaux groupes
+        # Spawn / recyclage de groupes
         if self.base_groups:
             max_by = max(bg.node.getY() for bg in self.base_groups if not bg.node.isEmpty())
         else:
             max_by = 40.0
         if max_by < self.SPAWN_DEPTH - 50:
-            new_y  = max_by + random.uniform(LUNAR["base_spacing_min"], LUNAR["base_spacing_max"])
-            seed   = int(abs(new_y) * 17 + len(self.base_groups) * 53) & 0xFFFF
-            self.base_groups.append(LunarBaseGroup(self.game, new_y, seed))
+            new_y = max_by + random.uniform(LUNAR["base_spacing_min"], LUNAR["base_spacing_max"])
+            # Recycle le groupe le plus en arrière s'il est hors champ — zéro création géométrique
+            recyclable = next((bg for bg in self.base_groups if bg.needs_recycle), None)
+            if recyclable:
+                recyclable.recycle(new_y)
+            else:
+                seed = int(abs(new_y) * 17 + len(self.base_groups) * 53) & 0xFFFF
+                self.base_groups.append(LunarBaseGroup(self.game, new_y, seed))
+
+        _t2 = time.perf_counter()
 
         # Montagnes de bord — désactivées temporairement (test perf)
         for m in self.border_mountains:
@@ -2521,14 +2641,25 @@ class Environment:
         #                             self.SPAWN_DEPTH + 30.0, seed=seed_m)
         #     )
 
-        # Routes — update + respawn quand le batch courant est trop avancé
+        _t3 = time.perf_counter()
+
+        # Routes — update + recyclage (zéro création géométrique après init)
         for r in self.roads:
             r.update(dt, scroll_speed)
         alive_roads = [r for r in self.roads if r.alive and not r.node.isEmpty()]
         if not alive_roads or max(r.node.getY() for r in alive_roads) < -60:
-            # Spawn un nouveau batch de routes baked à l'avance
-            rys = [random.uniform(155, 185), random.uniform(110, 140), random.uniform(70, 100)]
-            self.roads.append(LunarRoad(self.game.render, rys))
+            recyclable = next((r for r in self.roads if r.needs_recycle), None)
+            if recyclable:
+                recyclable.recycle()
+            else:
+                rys = [random.uniform(155, 185), random.uniform(110, 140), random.uniform(70, 100)]
+                self.roads.append(LunarRoad(self.game.render, rys))
+
+        _t4 = time.perf_counter()
+        if dt > 1/35.0:
+            n_bg = len(self.base_groups)
+            ms = lambda a, b: f"{(b-a)*1000:.2f}ms"
+            print(f"[L2] terrain={ms(_t0,_t1)} bldg={ms(_t1,_t2)} spawn={ms(_t2,_t3)} roads={ms(_t3,_t4)}  bg_total={n_bg}")
 
     def _update_l3(self, dt, scroll_speed):
         """L3 — Tranchée : murs + sol + surface Death Star continus."""
@@ -2562,7 +2693,7 @@ class Environment:
             d.update(dt)
 
     def _update_l4(self, dt, scroll_speed, player_y=0.0):
-        """L4 — Nébuleuse : astéroïdes + nuages denses."""
+        """L4 — Nébuleuse : astéroïdes + nuages denses + filaments billboard."""
         speed_factor = scroll_speed / 20.0
 
         self.asteroid_timer -= dt
@@ -2574,12 +2705,22 @@ class Environment:
 
         self.nebula_timer -= dt
         if self.nebula_timer <= 0:
-            # L4 : double nappe pour densifier le fond nébuleux
-            self._spawn_nebula(scale=2.2)
-            self._spawn_nebula(scale=1.6)
+            # L4 : double nappe enrichie (richness=2.0)
+            self._spawn_nebula(scale=2.2, richness=2.0)
+            self._spawn_nebula(scale=1.6, richness=2.0)
             self.nebula_timer = (self.NEBULA_INTERVAL * 0.4) + random.uniform(-3, 3)
         for n in self.nebulae:
             n.update(dt)
+
+        # Filaments de gaz — spawned périodiquement pour maintenir la densité
+        self.filament_timer -= dt
+        if self.filament_timer <= 0:
+            x = random.uniform(-58, 58)
+            z = random.uniform(-24, 24)
+            y = self.SPAWN_DEPTH + random.uniform(40, 180)
+            speed = random.uniform(1.5, 4.0)
+            self.nebulae.append(GasFilament(self.game.render, Point3(x, y, z), speed))
+            self.filament_timer = random.uniform(5.0, 10.0)
 
         self.debris_timer -= dt
         if self.debris_timer <= 0:
@@ -2710,13 +2851,13 @@ class Environment:
         )
         self.planets.append(p2)
 
-    def _spawn_nebula(self, scale=1.0):
+    def _spawn_nebula(self, scale=1.0, richness=1.0):
         x = random.uniform(-60, 60)
         z = random.uniform(-40, 40)
         y = self.SPAWN_DEPTH + random.uniform(200, 500)
         color = random.choice(self.nebula_colors)
         size = random.uniform(15, 30) * scale
-        self.nebulae.append(Nebula(self.game.render, Point3(x, y, z), color, size))
+        self.nebulae.append(Nebula(self.game.render, Point3(x, y, z), color, size, richness=richness))
 
     def _spawn_debris(self, scroll_speed):
         x = random.uniform(-self.FIELD_WIDTH, self.FIELD_WIDTH)
