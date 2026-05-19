@@ -132,12 +132,13 @@ main.py
   - Extinction progressive sur `_danger_timer` à la désactivation
 - **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés)
 - **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
-- **L4 (Nébuleuse)** : nébuleuses denses × 2 (richness=2.0) + 3 planètes violettes/roses + filaments de gaz billboard
-  - **`GasFilament`** : ellipse billboard `setBillboardPointEye()`, dégradé alpha (centre plein → bords=0), éventail de 12 triangles, palette 10 couleurs violet/rose/magenta, scrolle avec la scène, fade-in 1.8s. **45 filaments initiaux** en bandes régulières Y=20→620 + spawn périodique 3.5–7s, **minimum garanti 18 actifs**. 6 Nebula pré-spawnées à l'init. `nebula_timer=3s, filament_timer=0` au démarrage.
-  - **Palette nébuleuses L4** : 7 couleurs violet/rose/magenta/indigo exclusivement (aucun bleu/vert/orange)
-  - **Palette nébuleuses L1** : orange-brun / bleu-électrique / rouge-orangé / cyan-vert / jaune-ambre — aucun violet → contraste maximal avec L4
-  - **5 nappes fog L4** : violet `-3u` / rose-magenta `+2.5u` / indigo `0u` / bleu-indigo `+5.5u` / magenta ras-du-sol `-6u`
-  - **`Nebula` (richness)** : param `richness=2.0` pour L4 — `num_points = 80 × richness`, variation couleur `col_var = 0.10 + 0.07 × richness`, alpha max `0.20`, point size `2 + round(richness)`
+- **L4 (Nébuleuse)** : nébuleuses denses (richness=2.0) + 3 planètes violettes/roses + filaments + nappes opaques
+  - **`GasFilament`** : ellipse dans le plan XZ (face caméra +Y par construction — pas de billboard), éventail 12 triangles dégradé alpha, `setR(random)` pour orientation variée sans jamais être edge-on, `setDepthTest(False)`. Palette 10 couleurs violet/rose/magenta. **28 filaments initiaux** en bandes régulières Y=20→520, spawn 5–9s, minimum 12 actifs. `filament_timer=0` au démarrage.
+  - **`FogBank`** : nappe de brouillard très opaque traversable. 3 couches en Y (-8u/0u/+10u) pour effet volumétrique. Ellipse XZ large (55–90u) × haute (30–48u), **alpha 0.36–0.58** au centre, dégradé → 0 aux bords. 5 palettes violet/indigo/magenta. `setDepthTest(False)`, bin transparent 20. 3 initiaux (Y≈80/190/310u) + spawn toutes 20–35s. Stockés dans `nebulae`.
+  - **`Nebula` (richness=2.0)** : `num_points=160`, `col_var=0.24`, alpha max 0.20, point size 4. 6 pré-spawnées à l'init, `nebula_timer=3s`.
+  - **Palette L4** : 7 couleurs violet/rose/magenta/indigo exclusivement
+  - **Palette L1** : orange-brun / bleu-électrique / rouge-orangé / cyan-vert / jaune-ambre — aucun violet
+  - **5 nappes FogLayer L4** (38 quads total) : violet -3u / rose-magenta +2.5u / indigo 0u / bleu-indigo +5.5u / magenta -6u
 - Couleur de fond `setBackgroundColor` appliquée depuis `LEVELS` au lancement
 - Toutes les classes : `update(dt, scroll_speed)` + `destroy()`, `setLightOff()` systématique
 - Tuilage : step exact = `TILE_DEPTH`, spawn runtime à `max_y + TILE_DEPTH` → 0 overlap, 0 Z-fighting
