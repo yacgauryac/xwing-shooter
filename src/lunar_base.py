@@ -890,24 +890,35 @@ class LunarBaseGroup:
         layout = self._pick_layout(rng, LUNAR.get("enabled_layouts"))
         mark   = _pick_mark_style(rng)
 
-        # Batches créés AVANT layout — les bâtiments y accumulent corps + neons + balises
+        # Noeud détail — tout le géo haute qualité (batch corps + néons + balises + tours centre)
+        # Caché quand le groupe est loin (LOD actif)
+        self._detail_root = self.node.attachNewNode("detail")
+
+        # Batches créés AVANT layout — accumulent dans _detail_root
         # Résultat : ~35 draw calls → 4 (body + neon core + neon glow + beacons)
         self._neon_bat   = _NeonLineBatch()
         self._beacon_bat = _BeaconBatch()
         self._body_bat   = _GeomBatch()
 
         # NodePaths indépendants pour les tours du couloir central (|X|<3.5)
-        # Seuls ceux-ci peuvent être fadés individuellement sans coût de tri GPU
         self.center_nodes = []
 
-        _make_ground_markings(self.node, rng, mark)
+        # Suivi des bounds réels — mis à jour par _add/_add_from_type/_add_center_towers
+        # [xmin, xmax, ymin, ymax, hmax]
+        self._lod_bounds = [+999.0, -999.0, +999.0, -999.0, 10.0]
+
+        _make_ground_markings(self._detail_root, rng, mark)
         getattr(self, f'_layout_{layout}')(rng)
         self._add_center_towers(rng)
 
-        # Émet les batches dans le groupe
-        self._neon_bat.emit(self.node)
-        self._beacon_bat.emit(self.node)
-        self._body_bat.emit("buildings").reparentTo(self.node)
+        # Émet les batches dans _detail_root
+        self._neon_bat.emit(self._detail_root)
+        self._beacon_bat.emit(self._detail_root)
+        self._body_bat.emit("buildings").reparentTo(self._detail_root)
+
+        # Boîte LOD — silhouette générique basse-poly, visible à distance
+        self._lod_box = self._make_lod_box()
+        self._lod_box.hide()   # caché par défaut (on démarre près)
 
     # ── Sélection anti-répétition ─────────────────────────────
 
@@ -922,6 +933,51 @@ class LunarBaseGroup:
         choice = rng.choice(pool)
         _last_layouts = (_last_layouts + [choice])[-2:]
         return choice
+
+    # ── LOD box — silhouette basse-poly pour distance > 55u ─────────────────
+
+    def _track_bounds(self, lx, ly, hw, hd, h):
+        """Met à jour l'enveloppe réelle du groupe (appelé par _add/_add_from_type/_add_center_towers)."""
+        b = self._lod_bounds
+        b[0] = min(b[0], lx - hw)
+        b[1] = max(b[1], lx + hw)
+        b[2] = min(b[2], ly - hd)
+        b[3] = max(b[3], ly + hd)
+        b[4] = max(b[4], h)
+
+    def _make_lod_box(self):
+        """Silhouette basse-poly : 1 boîte par bâtiment, positions/tailles réelles.
+        ~10 triangles × N bâtiments — toujours 1 seul draw call (1 GeomBatch)."""
+        b   = 0.27
+        gz  = GROUND_Z
+        bat = _GeomBatch()
+        for hb in self._hitboxes:
+            # Ignorer les sous-hitboxes de ridge (toit hangar) — visuellement couvert par le corps
+            if hb.get('_is_ridge') or hb.get('_debug_hidden'):
+                continue
+            lx = hb['lx']
+            ly = hb['ly']
+            hw = max(hb['hw'], 0.3)   # garde une taille minimale visible
+            hd = max(hb['hd'], 0.3)
+            h  = hb['height']
+            hh = h * 0.5
+            bz = gz + hh
+            # Luminosité variant selon la hauteur (tours plus claires que bunkers)
+            t  = min(1.0, h / 18.0)
+            ct = Vec4(b*(0.65+0.35*t), b*(0.64+0.34*t), b*(0.62+0.33*t), 1)
+            cs = Vec4(b*(0.50+0.25*t), b*(0.49+0.24*t), b*(0.47+0.23*t), 1)
+            cd = Vec4(b*(0.32+0.13*t), b*(0.31+0.12*t), b*(0.30+0.12*t), 1)
+            bat.box(lx, ly, bz, hw, hd, hh, ct, cs, cd)
+        # Fallback si hitboxes vide
+        if not self._hitboxes:
+            bat.box(0, 0, gz + 5, 10, 8, 5,
+                    Vec4(b*0.82, b*0.81, b*0.78, 1),
+                    Vec4(b*0.65, b*0.64, b*0.62, 1),
+                    Vec4(b*0.42, b*0.41, b*0.40, 1))
+        np = bat.emit("lod_box")
+        np.reparentTo(self.node)
+        np.setLightOff()
+        return np
 
     # ── Tours centrales (|X|<3.5) — NodePath propre, fadables ──────────────
 
@@ -940,10 +996,11 @@ class LunarBaseGroup:
             mesh  = _make_tower(hw, hd, h, rng,
                                 nc=None, bb=None, bd=None,
                                 ox=0.0, oy=0.0, oz=0.0)
-            mesh.reparentTo(self.node)
+            mesh.reparentTo(self._detail_root)
             mesh.setPos(lx, ly, bz)
             self.center_nodes.append(mesh)
             self._hitboxes.append({'lx': lx, 'ly': ly, 'hw': hw, 'hd': hd, 'height': h})
+            self._track_bounds(lx, ly, hw, hd, h)
 
     # ── Ajout de bâtiment ────────────────────────────────────
 
@@ -978,6 +1035,7 @@ class LunarBaseGroup:
         mesh.setPos(lx, ly, bz)
 
         self._hitboxes.append({'lx': lx, 'ly': ly, 'hw': hw, 'hd': hd, 'height': h})
+        self._track_bounds(lx, ly, hw, hd, h)
 
         # Hitbox supplémentaire pour le toit en pente des hangars
         if style == 'hangar':
@@ -1069,6 +1127,7 @@ class LunarBaseGroup:
             "hw": hw * hb, "hd": hd * hb,
             "height": h,
         })
+        self._track_bounds(lx, ly, hw, hd, h)
 
         # Ridge pour les hangars
         if mesh_name == "hangar":
@@ -1233,8 +1292,8 @@ class LunarBaseGroup:
         self.alive = True
         self.node.setY(new_y)
         self.node.show()
-        self.node.clearTransparency()
         self.node.setColorScale(1, 1, 1, 1)
+        self._detail_root.show()
         for cn in self.center_nodes:
             if not cn.isEmpty():
                 cn.clearTransparency()

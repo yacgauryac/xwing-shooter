@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Remove-Item \"C:\\\\Projets\\\\xwing-shooter\\\\src\\\\CLAUDE.md\")",
+      "Bash(Remove-Item \"C:\\\\Projets\\\\xwing-shooter\\\\src\\\\SPEC.md\")"
+    ]
+  }
+}
