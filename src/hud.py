@@ -673,7 +673,8 @@ class HUD:
             else:
                 sp["np"].setX(sp["np"].getX() + sp["vx"] * dt)
                 sp["np"].setZ(sp["np"].getZ() + sp["vz"] * dt)
-                a = max(0.0, sp["life"] / sp["max_life"]) * 0.90
+                t = max(0.0, sp["life"] / sp["max_life"])
+                a = (t ** 0.5) * 0.75
                 sp["np"].setColorScale(Vec4(1.0, sp["og"], 0.0, a))
         for sp in dead:
             self._sparks.remove(sp)
@@ -1056,7 +1057,7 @@ class HUD:
             speed = random.uniform(0.30, 0.90)
             vx = math.cos(angle) * speed
             vz = math.sin(angle) * speed
-            life = random.uniform(0.22, 0.38)
+            life = random.uniform(0.50, 0.85)
             og = random.uniform(0.45, 0.85)
 
             hw = random.uniform(0.002, 0.006)
