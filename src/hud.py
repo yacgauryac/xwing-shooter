@@ -1045,19 +1045,19 @@ class HUD:
         sx = p2d.getX() * ar
         sz = p2d.getY()
 
-        count = random.randint(16, 22)
+        count = random.randint(9, 13)
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(0.5, 1.5)
+            speed = random.uniform(0.35, 0.90)
             vx = math.cos(angle) * speed
             vz = math.sin(angle) * speed
-            life = random.uniform(0.28, 0.48)
-            og = random.uniform(0.50, 1.0)   # orange chaud → blanc
+            life = random.uniform(0.25, 0.40)
+            og = random.uniform(0.45, 0.85)   # orange chaud → blanc
 
-            hw, hh = 0.009, 0.006
+            hw, hh = 0.007, 0.005
             np = _make_rect(game.aspect2d,
                             sx - hw / 2, sz - hh / 2, hw, hh,
-                            Vec4(1.0, og, 0.0, 0.95))
+                            Vec4(1.0, og, 0.0, 0.65))
             np.setBin("fixed", 60)
             np.setDepthTest(False)
             np.setDepthWrite(False)
