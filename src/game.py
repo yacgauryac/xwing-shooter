@@ -14,9 +14,10 @@ from panda3d.core import (
     TextNode, loadPrcFileData,
 )
 
-# MSAA 4x — doit être déclaré avant ShowBase.__init__
+# MSAA 2x
 loadPrcFileData("", "framebuffer-multisample 1")
-loadPrcFileData("", "multisamples 4")
+loadPrcFileData("", "multisamples 2")
+loadPrcFileData("", "sync-video 0")   # désactive V-sync — mesure le vrai temps de rendu
 
 from src.player import Player
 from src.starfield import Starfield
@@ -33,7 +34,7 @@ from src.force import ForceAbility
 from src.menu import MainMenu
 from src.boss import BossTIEAdvanced, BOSS_TRIGGER_WAVE
 from src.screenshake import Screenshake
-from src.levels import LEVELS
+from src.levels import LEVELS, LevelManager
 from src.settings import get_level as _get_level_settings
 
 
@@ -90,6 +91,8 @@ class Game(ShowBase):
                      (-0.31,-1.20,-0.17), (0.31,-1.20,-0.17)]
 
     def __init__(self, net_mode=None, net_ip="127.0.0.1", net_port=7777):
+        import gc
+        gc.disable()  # Prevent mid-frame GC pauses; we collect manually at safe points
         ShowBase.__init__(self)
 
         # Réseau (skeleton V3)
@@ -105,7 +108,9 @@ class Game(ShowBase):
         self.setup_window()
         self.setup_lights()
 
-        self.render.setAntialias(AntialiasAttrib.MAuto)
+        # MAuto désactivé — test perf : avec MSAA au framebuffer, MAuto peut ajouter
+        # un depth sort multisamplé sur les transparents, en doublon avec le MSAA GPU.
+        # self.render.setAntialias(AntialiasAttrib.MAuto)
         self.setBackgroundColor(0, 0, 0, 1)
 
         # Leaderboard (disponible pour le menu)
@@ -144,6 +149,10 @@ class Game(ShowBase):
         # Menu principal
         self.menu = MainMenu(self)
         self.menu.show()
+
+        # Overlay debug perf (touche 6, disponible partout)
+        self._build_debug_overlay()
+        self.accept("6", self._toggle_debug_overlay)
 
     def _update_starfield(self, task):
         dt = globalClock.getDt()
@@ -228,6 +237,10 @@ class Game(ShowBase):
         self.accept("3", self._toggle_skeleton)
         self.accept("4", self._toggle_top_cam)
         self.accept("5", self._toggle_close_cam)
+        # Debug perf L0/L2 — isoler la source des spikes GPU
+        self.accept("t", self._dbg_toggle_terrain)
+        self.accept("b", self._dbg_toggle_buildings)
+        self.accept("f", self._dbg_toggle_fog)
 
         # Mode debug
         self.debug_mode       = False
@@ -249,6 +262,16 @@ class Game(ShowBase):
         if _ls.get("debug_ruler"):
             self.debug_mode = True
             self._build_debug_ruler()
+
+        # Fondu d'entrée du niveau (noir → transparent + nom du niveau en StarJedi)
+        self.level_manager = LevelManager(self)
+        self.level_manager.start_intro_for_level(self.selected_level)
+
+        import gc
+        gc.collect()  # Purge menu/setup temporaries before first gameplay frame
+
+        # Force un render complet pour uploader les VBOs AVANT le premier frame de jeu.
+        self.graphicsEngine.renderFrame()
 
     def setup_window(self):
         props = WindowProperties()
@@ -307,6 +330,35 @@ class Game(ShowBase):
         """Boucle de jeu principale."""
         dt = globalClock.getDt()
 
+        # ── FPS logger — moyenne glissante 120 frames, log toutes les 5s ──
+        if not hasattr(self, '_fps_samples'):
+            self._fps_samples = []
+            self._fps_log_t   = 0.0
+        if dt > 0:
+            fps = 1.0 / dt
+            self._fps_samples.append(fps)
+            if len(self._fps_samples) > 120:
+                self._fps_samples.pop(0)
+            if fps < 35.0:
+                n_bolts  = len(self.spawner.enemy_bolts) if hasattr(self, 'spawner') else 0
+                n_pool   = len(self.spawner._bolt_pool)  if hasattr(self, 'spawner') else 0
+                n_enemies= len(self.spawner.enemies)     if hasattr(self, 'spawner') else 0
+                n_bg_vis = 0
+                if hasattr(self, 'environment') and hasattr(self.environment, 'base_groups'):
+                    n_bg_vis = sum(1 for bg in self.environment.base_groups
+                                   if bg.alive and not bg.node.isEmpty() and not bg.node.isHidden())
+                self._dbg_push(f"[SPIKE] {fps:.1f}fps  dt={dt*1000:.1f}ms  enemies={n_enemies}  bolts={n_bolts}  pool={n_pool}  bldg_visible={n_bg_vis}")
+        self._fps_log_t += dt
+        if self._fps_log_t >= 5.0:
+            if self._fps_samples:
+                avg = sum(self._fps_samples) / len(self._fps_samples)
+                mn  = min(self._fps_samples)
+                mx  = max(self._fps_samples)
+                self._dbg_push(f"[FPS] avg={avg:.1f}  min={mn:.1f}  max={mx:.1f}  samples={len(self._fps_samples)}")
+            self._fps_log_t = 0.0
+        if self._dbg_ov_visible:
+            self._dbg_refresh_overlay()
+
         # ── Fondu au noir game over → menu ──
         if self._fading:
             self._fade_timer += dt
@@ -319,6 +371,10 @@ class Game(ShowBase):
 
         if self.game_over:
             return task.cont
+
+        # Intro de niveau (fondu noir + titre)
+        if self.level_manager.transitioning:
+            self.level_manager.update(dt)
 
         # Réseau (stub V3)
         self._process_network()
@@ -400,14 +456,19 @@ class Game(ShowBase):
         collected = self.powerups.update(dt_world, player_pos, self.scroll_speed)
         for pu_type in collected:
             if pu_type == "torpedo":
-                self.torpedoes.add_stock(3)
-                self.hud.show_pickup("+3 TORPEDOES")
+                self.torpedoes.add_stock(1)
+                self.hud.show_pickup("+1 TORPEDO")
             elif pu_type == "repair":
-                self.player_hp = min(self.PLAYER_MAX_HP, self.player_hp + 2)
-                self.hud.show_pickup("+2 HULL")
+                self.player_hp = min(self.PLAYER_MAX_HP, self.player_hp + 1)
+                self.hud.show_pickup("+1 HULL")
             elif pu_type == "force":
-                self.force.add_pickup(35.0)
+                self.force.add_pickup(15.0)
                 self.hud.show_pickup("FORCE CHARGED")
+            elif pu_type == "fake":
+                self.player_hp = max(0, self.player_hp - 5)
+                self.hud.show_pickup("DARK SIDE!", color=Vec4(1.0, 0.08, 0.08, 1.0))
+                self.hud.show_damage_flash(self.player_hp / self.PLAYER_MAX_HP)
+                self.screenshake.trigger(0.35, 0.2)
             self.sounds.play("hit")
 
         # Torpilles — cibles : ennemis normaux OU boss si phase boss
@@ -597,8 +658,10 @@ class Game(ShowBase):
             if enemy.alive:
                 enemy.destroy()
         for bolt in self.spawner.enemy_bolts:
-            if bolt.alive:
-                bolt.destroy()
+            bolt.cleanup()
+        for bolt in self.spawner._bolt_pool:
+            bolt.cleanup()
+        self.spawner._bolt_pool.clear()
         for bolt in self.lasers.bolts:
             if bolt.alive:
                 bolt.destroy()
@@ -726,6 +789,9 @@ class Game(ShowBase):
         # Reset HUD complet
         self.hud.reset()
 
+        import gc
+        gc.collect()  # Purge all dead objects accumulated during the round at a safe moment
+
         # Reset debug
         if getattr(self, '_skeleton_mode', False):
             try: self.player.model_node.show()
@@ -845,8 +911,10 @@ class Game(ShowBase):
                 if enemy.alive:
                     enemy.destroy()
             for bolt in self.spawner.enemy_bolts:
-                if bolt.alive:
-                    bolt.destroy()
+                bolt.cleanup()
+            for bolt in self.spawner._bolt_pool:
+                bolt.cleanup()
+            self.spawner._bolt_pool.clear()
         if hasattr(self, 'lasers'):
             for bolt in self.lasers.bolts:
                 if bolt.alive:
@@ -1444,6 +1512,86 @@ class Game(ShowBase):
             self._cam_cur_look = Vec3(*self.CAM_FAR_LOOK)
             self.camera.setPos(self._cam_cur_pos)
             self.camera.lookAt(self._cam_cur_look)
+
+    # ── FXAA post-process (touche 7) ─────────────────────────────────────────
+
+    # ── Overlay debug perf (touche 6) ────────────────────────────────────────
+
+    def _build_debug_overlay(self):
+        from direct.gui.DirectGui import DirectFrame
+        self._dbg_ov_visible = False
+        self._dbg_log_lines  = []
+        # Coin bas-gauche, ~1/8 d'écran : X -1.28→-0.05, Y -0.97→-0.52
+        self._dbg_panel = DirectFrame(
+            frameColor=(0, 0, 0, 0.80),
+            frameSize=(0, 1.23, 0, 0.45),
+            pos=(-1.28, 0, -0.97),
+            sortOrder=150,
+        )
+        self._dbg_text = OnscreenText(
+            text="",
+            parent=self._dbg_panel,
+            pos=(0.02, 0.42),
+            scale=0.030,
+            fg=(1, 1, 1, 1),
+            align=TextNode.ALeft,
+            mayChange=True,
+        )
+        self._dbg_panel.hide()
+
+    def _toggle_debug_overlay(self):
+        self._dbg_ov_visible = not self._dbg_ov_visible
+        if self._dbg_ov_visible:
+            self._dbg_panel.show()
+            self._dbg_refresh_overlay()
+        else:
+            self._dbg_panel.hide()
+
+    def _dbg_push(self, line):
+        """Ajoute une ligne au log overlay et à la console."""
+        print(line)
+        self._dbg_log_lines.append(line)
+        if len(self._dbg_log_lines) > 30:
+            self._dbg_log_lines.pop(0)
+
+    def _dbg_refresh_overlay(self):
+        samples = getattr(self, '_fps_samples', [])
+        if samples:
+            avg = sum(samples) / len(samples)
+            mn  = min(samples)
+            mx  = max(samples)
+        else:
+            avg = mn = mx = 0.0
+        env = getattr(self, 'environment', None)
+        t_s = 'ON ' if not getattr(env, '_dbg_hide_terrain',   False) else 'OFF'
+        b_s = 'ON ' if not getattr(env, '_dbg_hide_buildings', False) else 'OFF'
+        f_s = 'ON ' if not getattr(env, '_dbg_hide_fog',       False) else 'OFF'
+        header = [
+            f"FPS avg={avg:5.1f} min={mn:5.1f} max={mx:5.1f}  [6]",
+            f"T:{t_s} B:{b_s} F:{f_s}   (T/B/F)",
+            "---",
+        ]
+        self._dbg_text.setText('\n'.join(header + self._dbg_log_lines[-8:]))
+
+    # ── Debug perf L0/L2 (touches T / B / F) ────────────────────────────────
+
+    def _dbg_toggle_terrain(self):
+        if hasattr(self, 'environment'):
+            self.environment.toggle_terrain_debug()
+            state = "OFF" if self.environment._dbg_hide_terrain else "ON"
+            self._dbg_push(f"[DBG] Terrain {state}")
+
+    def _dbg_toggle_buildings(self):
+        if hasattr(self, 'environment'):
+            self.environment.toggle_buildings_debug()
+            state = "OFF" if self.environment._dbg_hide_buildings else "ON"
+            self._dbg_push(f"[DBG] Buildings {state}")
+
+    def _dbg_toggle_fog(self):
+        if hasattr(self, 'environment'):
+            self.environment.toggle_fog_debug()
+            state = "OFF" if self.environment._dbg_hide_fog else "ON"
+            self._dbg_push(f"[DBG] Fog {state}")
 
     def _build_skeleton_geom(self):
         """Crée la géométrie UHDynamic du squelette (80 vertices pré-alloués)."""

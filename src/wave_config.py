@@ -3,10 +3,13 @@ Wave Configuration — Format declaratif pour definir les vagues par niveau.
 
 Pour creer/modifier un niveau : editer LEVEL_X_WAVES ci-dessous.
 Chaque vague est un dict avec :
-  - enemies     : dict {"nom_ennemi": quantite}
-  - formation   : "line", "v", "pincer", "swarm"
-  - delay_before: (optionnel) secondes avant le debut de la vague (defaut 1.5)
+  - enemies      : dict {"nom_ennemi": quantite}
+  - delay_before : (optionnel) secondes avant le debut de la vague (defaut 1.5)
   - spawn_interval: (optionnel) secondes entre chaque spawn (defaut 0.5)
+
+Positionnement de spawn : automatique.
+  N entrees → N zones du plan XZ (1=centre, 2=gauche+droite, 4=quadrants, etc.)
+  Le champ "formation" est ignore s'il est present (conserve pour retrocompat).
 """
 
 # ============================================================
@@ -41,47 +44,47 @@ def _get_registry():
 # ============================================================
 
 # L1 — Champ d'asteroides : TIE classiques
+# tie_fighter: N = N squads de 4. 1 entree = 1 zone d'ecran.
 LEVEL_1_WAVES = [
-    {"enemies": {"tie_fighter": 5}, "formation": "line"},
-    {"enemies": {"tie_fighter": 7}, "formation": "v"},
-    {"enemies": {"tie_fighter": 4, "tie_interceptor": 2}, "formation": "swarm"},
-    {"enemies": {"tie_interceptor": 6}, "formation": "pincer"},
-    {"enemies": {"tie_bomber": 1, "tie_fighter": 4}, "formation": "v"},
-    {"enemies": {"tie_fighter": 4, "tie_interceptor": 3, "tie_bomber": 1}, "formation": "swarm"},
-    {"enemies": {"tie_interceptor": 4, "tie_bomber": 2, "tie_fighter": 4}, "formation": "pincer"},
+    {"enemies": {"tie_fighter": 4}},
+    {"enemies": {"tie_fighter": 8}},
+    {"enemies": {"tie_fighter": 16, "tie_interceptor": 4}},
+    {"enemies": {"tie_interceptor": 40}},
+    {"enemies": {"tie_bomber": 40, "tie_fighter": 8}},
+    {"enemies": {"tie_fighter": 2, "tie_interceptor": 3, "tie_bomber": 1}},
+    {"enemies": {"tie_interceptor": 4, "tie_bomber": 2, "tie_fighter": 2}},
 ]
-
 # L2 — Surface lunaire : Shuttles + TIE
 LEVEL_2_WAVES = [
-    {"enemies": {"tie_fighter": 4, "tie_interceptor": 2}, "formation": "line"},
-    {"enemies": {"shuttle": 1, "tie_fighter": 4}, "formation": "v"},
-    {"enemies": {"shuttle": 2, "tie_interceptor": 3}, "formation": "swarm"},
-    {"enemies": {"shuttle": 2, "tie_fighter": 2, "tie_bomber": 1}, "formation": "line"},
-    {"enemies": {"shuttle": 1, "tie_interceptor": 4, "tie_bomber": 1}, "formation": "pincer"},
-    {"enemies": {"shuttle": 2, "tie_bomber": 2, "tie_fighter": 2}, "formation": "swarm"},
-    {"enemies": {"shuttle": 2, "tie_interceptor": 3, "tie_bomber": 2}, "formation": "pincer"},
+    {"enemies": {"tie_fighter": 2, "tie_interceptor": 2}},
+    {"enemies": {"shuttle": 1, "tie_fighter": 2}},
+    {"enemies": {"shuttle": 2, "tie_interceptor": 3}},
+    {"enemies": {"shuttle": 2, "tie_fighter": 2, "tie_bomber": 1}},
+    {"enemies": {"shuttle": 1, "tie_interceptor": 4, "tie_bomber": 1}},
+    {"enemies": {"shuttle": 2, "tie_bomber": 2, "tie_fighter": 2}},
+    {"enemies": {"shuttle": 2, "tie_interceptor": 3, "tie_bomber": 2}},
 ]
 
 # L3 — Tranchee Death Star : Probe Droids + Attack Bombers + Tourelles
 LEVEL_3_WAVES = [
-    {"enemies": {"tie_fighter": 4, "probe_droid": 2}, "formation": "swarm"},
-    {"enemies": {"probe_droid": 5, "tie_interceptor": 2}, "formation": "v"},
-    {"enemies": {"attack_bomber": 1, "tie_fighter": 3, "ground_turret": 2}, "formation": "line"},
-    {"enemies": {"probe_droid": 5, "ground_turret": 3}, "formation": "pincer"},
-    {"enemies": {"attack_bomber": 2, "tie_interceptor": 3, "probe_droid": 2}, "formation": "swarm"},
-    {"enemies": {"attack_bomber": 1, "probe_droid": 4, "ground_turret": 3}, "formation": "swarm"},
-    {"enemies": {"attack_bomber": 2, "tie_interceptor": 3, "ground_turret": 3}, "formation": "pincer"},
+    {"enemies": {"tie_fighter": 2, "probe_droid": 2}},
+    {"enemies": {"probe_droid": 5, "tie_interceptor": 2}},
+    {"enemies": {"attack_bomber": 1, "tie_fighter": 2, "ground_turret": 2}},
+    {"enemies": {"probe_droid": 5, "ground_turret": 3}},
+    {"enemies": {"attack_bomber": 2, "tie_interceptor": 3, "probe_droid": 2}},
+    {"enemies": {"attack_bomber": 1, "probe_droid": 4, "ground_turret": 3}},
+    {"enemies": {"attack_bomber": 2, "tie_interceptor": 3, "ground_turret": 3}},
 ]
 
 # L4 — Nebuleuse : tout melange, difficulte max
 LEVEL_4_WAVES = [
-    {"enemies": {"tie_fighter": 4, "probe_droid": 3}, "formation": "swarm"},
-    {"enemies": {"shuttle": 1, "tie_interceptor": 4}, "formation": "v"},
-    {"enemies": {"attack_bomber": 1, "probe_droid": 2, "tie_fighter": 3}, "formation": "line"},
-    {"enemies": {"probe_droid": 4, "shuttle": 2}, "formation": "pincer"},
-    {"enemies": {"attack_bomber": 2, "tie_bomber": 2, "probe_droid": 2}, "formation": "swarm"},
-    {"enemies": {"shuttle": 2, "attack_bomber": 1, "probe_droid": 3}, "formation": "swarm"},
-    {"enemies": {"attack_bomber": 2, "shuttle": 2, "tie_interceptor": 3}, "formation": "pincer"},
+    {"enemies": {"tie_fighter": 2, "probe_droid": 3}},
+    {"enemies": {"shuttle": 1, "tie_interceptor": 4}},
+    {"enemies": {"attack_bomber": 1, "probe_droid": 2, "tie_fighter": 2}},
+    {"enemies": {"probe_droid": 4, "shuttle": 2}},
+    {"enemies": {"attack_bomber": 2, "tie_bomber": 2, "probe_droid": 2}},
+    {"enemies": {"shuttle": 2, "attack_bomber": 1, "probe_droid": 3}},
+    {"enemies": {"attack_bomber": 2, "shuttle": 2, "tie_interceptor": 3}},
 ]
 
 
@@ -107,7 +110,7 @@ _WAVES_BY_LEVEL = {
 
 
 def _expand_wave(wave_def):
-    """Convertit un dict declaratif en format runtime {enemies: [Class,...], formation: str}."""
+    """Convertit un dict declaratif en format runtime."""
     registry = _get_registry()
     enemy_list = []
     for name, count in wave_def["enemies"].items():
@@ -116,9 +119,8 @@ def _expand_wave(wave_def):
             raise ValueError(f"Ennemi inconnu: {name!r}. Disponibles: {list(registry)}")
         enemy_list.extend([cls] * count)
     return {
-        "enemies": enemy_list,
-        "formation": wave_def["formation"],
-        "delay_before": wave_def.get("delay_before", 1.5),
+        "enemies":       enemy_list,
+        "delay_before":  wave_def.get("delay_before",   1.5),
         "spawn_interval": wave_def.get("spawn_interval", 0.5),
     }
 

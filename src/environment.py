@@ -2601,17 +2601,23 @@ class Environment:
                     behind = player_y - bg_y
                     if behind > 22.0 or bg_y - player_y > 85.0:
                         bg.node.hide()
-                    # FADE COMMENTÉ — test perf pour isoler la source des spikes GPU 29ms.
-                    # Remettre ce bloc pour restaurer le fondu derrière le joueur :
-                    # elif behind > 8.0:
-                    #     alpha = max(0.0, 1.0 - (behind - 8.0) / 14.0)
-                    #     bg.node.show()
-                    #     bg.node.setTransparency(TransparencyAttrib.MAlpha)
-                    #     bg.node.setColorScale(1, 1, 1, alpha)
+                    elif behind > 8.0:
+                        # Batch opaque — pas de fade, pas de tri GPU
+                        bg.node.show()
+                        bg.node.setColorScale(1, 1, 1, 1)
+                        # Seules les tours centrales (NodePath propre) sont fadées
+                        a = max(0.0, 1.0 - (behind - 8.0) / 14.0)
+                        for cn in bg.center_nodes:
+                            if not cn.isEmpty():
+                                cn.setTransparency(TransparencyAttrib.MAlpha)
+                                cn.setColorScale(1, 1, 1, a)
                     else:
                         bg.node.show()
-                        bg.node.clearTransparency()
                         bg.node.setColorScale(1, 1, 1, 1)
+                        for cn in bg.center_nodes:
+                            if not cn.isEmpty():
+                                cn.clearTransparency()
+                                cn.setColorScale(1, 1, 1, 1)
         self.base_groups = [bg for bg in self.base_groups if bg.alive]
         # Spawn / recyclage de groupes
         if self.base_groups:

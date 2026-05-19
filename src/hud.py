@@ -564,15 +564,10 @@ class HUD:
             self._dmg_intensity = a
             self._set_trapeze_alpha(self._dmg_left_np,  a, 'left')
             self._set_trapeze_alpha(self._dmg_right_np, a, 'right')
-            # Suit le roll du vaisseau — effet "peint sur la coque"
-            self._dmg_left_np.setR(-roll)
-            self._dmg_right_np.setR(-roll)
         elif self._dmg_intensity > 0.0:
             self._dmg_intensity = 0.0
             self._set_trapeze_alpha(self._dmg_left_np,  0.0, 'left')
             self._set_trapeze_alpha(self._dmg_right_np, 0.0, 'right')
-            self._dmg_left_np.setR(0)
-            self._dmg_right_np.setR(0)
 
         # ── Warning astéroïdes ──
         if self._ast_warn_timer > 0:
@@ -692,18 +687,19 @@ class HUD:
         """Trapèze dégâts — géométrie vertex colors, gradient outer→inner.
         Outer alpha=1 baked, inner alpha=0. Visibilité via setAlphaScale."""
         AR        =  1.78
-        OUTER_TOP =  0.82
-        OUTER_BOT = -0.82
+        EDGE_GAP  =  0.25   # écart bord écran
+        OUTER_TOP =  0.68
+        OUTER_BOT = -0.68
         INNER_TOP =  0.40
         INNER_BOT = -0.40
-        WIDTH     =  0.50
+        WIDTH     =  0.30
 
         if side == 'left':
-            ox = -AR
-            ix = -AR + WIDTH
+            ox = -(AR - EDGE_GAP)
+            ix = -(AR - EDGE_GAP) + WIDTH
         else:
-            ox =  AR
-            ix =  AR - WIDTH
+            ox =  (AR - EDGE_GAP)
+            ix =  (AR - EDGE_GAP) - WIDTH
 
         C_OUTER = (0.70, 0.0, 0.0, 1.0)
         C_INNER = (0.40, 0.0, 0.0, 0.0)
@@ -1101,10 +1097,10 @@ class HUD:
         if self.overlay:
             self.overlay.show()
 
-    def show_pickup(self, text):
-        """Affiche un texte de pickup qui fade."""
+    def show_pickup(self, text, color=None):
+        """Affiche un texte de pickup qui fade. color = Vec4 optionnel."""
         self.pickup_text.setText(text)
-        self.pickup_text.setFg(Vec4(1, 1, 1, 1))
+        self.pickup_text.setFg(color if color is not None else Vec4(1, 1, 1, 1))
         self.pickup_text.setScale(0.05)
         self.pickup_timer = 1.5
 

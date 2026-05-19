@@ -20,13 +20,13 @@ main.py
         ├── LaserSystem    — tir, surchauffe, auto-aim
         ├── TorpedoSystem  — missiles homing avec lock-on
         ├── ForceAbility   — bullet-time 0.3x, 6s
-        ├── BossTIEAdvanced — 50 HP, 3 phases
+        ├── BossTIEAdvanced — 150 HP, 3 phases
         ├── Environment    — astéroïdes, nébuleuses, debris
         ├── Starfield      — 1000 étoiles avec traînées de vitesse
         ├── HUD            — overlay holographique orange/ambre
         ├── ExplosionManager — particules, débris, popups score
         ├── SoundManager   — pooling audio + fallback procédural
-        ├── PowerUpManager — collectibles (torpille, réparation)
+        ├── PowerUpManager — collectibles (torpille, réparation, force, fake)
         ├── MainMenu       — titre, options, leaderboard
         └── Leaderboard    — top 10 persistant JSON
 ```
@@ -49,19 +49,28 @@ main.py
 - **Bouclier** : désactivé — réservé V3 (vrai système énergétique)
 
 ### `src/enemies.py` — Ennemis
-- **TIEFighter** : 18 u/s, charge à 65 u/s, 2 HP, 2 bolts, équilibré
+
+#### TIEFighter — state machine cinématique
+- **États** : `S_APPROACH` → `S_BREAK` → `S_ATTACK_RUN` / `S_FLANK` → `S_LOOP_BACK`
+- **Squads** de 4 TIEs avec offsets de formation (`FORMATION_OFFSETS`, `APPROACH_TARGETS`)
+- **Virages courbes** : bank angle calculé depuis `vel_x`, clamp ±35°, lerp fluide
+- Vitesses : approche 22 u/s, attaque 46 u/s, flanking 52 u/s, loop 36 u/s
+- Taux de virage max : approche 55°/s, attaque 80°/s, loop 95°/s
+- `FIRE_RANGE=85u` — ne tire que s'il voit le joueur à portée
 - **TIEInterceptor** : 25 u/s, charge à 80 u/s, 1 HP, 1 bolt, drift agressif
 - **TIEBomber** : 10 u/s, charge à 30 u/s, 5 HP, 2 bolts, tank
 - **ImperialShuttle** *(V2)* : 8 u/s, 8 HP, 2 bolts, 500 pts — procédural (ailes trilobées, dérive dorsale)
-- **AttackBomber** *(V2)* : 7 u/s, 10 HP, triple tir en éventail, 400 pts — procédural (3 pods + pont)
-- **ProbeDroid** *(V2)* : 22 u/s, drift très agressif, 2 HP, 200 pts — procédural (corps cubique + 4 bras + œil rouge)
-- **GroundTurret** *(V2)* : stationnaire au sol (Z=-5.2), défile monde, 6 HP, vise joueur, 300 pts — procédural (base + canon incliné)
+- **AttackBomber** *(V2)* : 7 u/s, 10 HP, triple tir en éventail, 400 pts — 3 pods + pont
+- **ProbeDroid** *(V2)* : 22 u/s, drift ×2 agressif, 2 HP, 200 pts — corps cubique + 4 bras + œil rouge
+- **GroundTurret** *(V2)* : stationnaire sol (Z=-5.2), défile monde, 6 HP, vise joueur, 300 pts
+- **`FOG_ONSET_BY_LEVEL`** : seuil Y par niveau au-delà duquel un ennemi est invisible → invulnérable
 - Tous avec modèles 3D texturés (si disponibles) + fallback procédural
-- Accélération kamikaze à l'approche joueur
-- Tirs laser verts (EnemyBolt)
-- **Formations** : V, ligne, tenaille (pincer), essaim
 - **`WAVE_DEFS_BY_LEVEL`** : dict par niveau (1-4), 7 vagues pré-définies + escalade automatique
 - **`EnemySpawner(game, level=1)`** : utilise les wave defs du niveau sélectionné
+
+#### EnemyBolt — pool
+- `SPEED=80 u/s`, `DAMAGE=1.0`, `HIT_RADIUS=1.8`
+- **Pool** : `reset()` réutilise sans recréer la géométrie ; `destroy()` détache sans supprimer ; `cleanup()` supprime définitivement (nettoyage de niveau)
 
 ### `src/lasers.py` — Système laser
 - 2 bolts par salve (4 canons en 2 paires alternées)
@@ -72,15 +81,18 @@ main.py
 - Auto-aim conservé uniquement pour les torpilles homing
 
 ### `src/torpedoes.py` — Torpilles
-- Lock-on : clic droit maintenu, portée 120 u, cône 8 u
+- Lock-on : clic droit maintenu, portée 120 u, cône 14 u
 - Relâcher = tir
 - Homing vers la cible lockée
 - Ammo limitée (augmente via powerup)
+- `TORPEDO_SPLASH_RADIUS=1.0`, `TORPEDO_SPLASH_DAMAGE=3.0`, `TORPEDO_COOLDOWN=3.0s`
+- `TORPEDO_MAX_DIST=120u`, `TORPEDO_TURN_RATE=2.0`, `TORPEDO_ACCEL=70.0`
 
 ### `src/force.py` — Capacité Force
 - S'active au clic central (molette)
 - Requiert la jauge Force pleine (kills)
 - Durée 6s, vitesse monde × 0.3, auto-aim parfait, pas de surchauffe
+- Powerup force : `add_pickup(15.0)` — +15 jauge
 
 ### `src/boss.py` — Boss TIE Advanced
 - Déclenché à partir de la vague 8 (`BOSS_TRIGGER_WAVE=8`)
@@ -92,7 +104,7 @@ main.py
 - Label cosmétique 3 phases (CALIBRATION / AGGRESSION / RAGE) basé sur HP%
 - Défaite → explosion en chaîne 2.5s + explosion finale +5000 pts
 
-### `src/boss_ai.py` — Utility AI du boss (nouveau)
+### `src/boss_ai.py` — Utility AI du boss
 - **`lerp_curve(points)`** : courbe linéaire par morceaux, base du scoring
 - **`BossPerception`** : collecte boss_hp_pct, player_hp_pct, distance normalisée, vélocité joueur, player_threat (monte sur hit, décroît naturellement), bolt_count
 - **`BossAction`** : base_priority × dist_curve × hp_curve × threat_curve ; contraintes min/max distance et HP ; move_intent associé ; cooldown individuel
@@ -121,18 +133,20 @@ main.py
 - Couleur de fond `setBackgroundColor` appliquée depuis `LEVELS` au lancement
 - Toutes les classes : `update(dt, scroll_speed)` + `destroy()`, `setLightOff()` systématique
 - Tuilage : step exact = `TILE_DEPTH`, spawn runtime à `max_y + TILE_DEPTH` → 0 overlap, 0 Z-fighting
+- **L2 fade bâtiments** : la géométrie opaque du groupe reste solide ; seuls les `center_nodes` (tours centrales) sont fadés via alpha — pas de depth sort GPU sur la masse des bâtiments
+- **Debug perf** : `toggle_terrain_debug()` / `toggle_buildings_debug()` / `toggle_fog_debug()` — caches partiels pour isoler les sources de spikes
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague
 - **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + vie (jaune). Géométrie créée une seule fois en `__init__`, `setScale`/`setColorScale` chaque frame (zéro allocation).
 - **WARN/OVERHEAT** : `OnscreenText` pré-alloué `_ship_warn_text`, `setPos` chaque frame au niveau fuselage
-- **Trapèzes dégâts** : flash rouge latéraux style HL2, suivent le roll du vaisseau (`setR(-roll)`)
+- **Trapèzes dégâts** : flash rouge latéraux style HL2, repliés vers les bords (EDGE_GAP=0.25), largeur 0.30
 - **Torpilles** : losange bas-centre avec compteur, clignotement rouge si ≤2
 - **Annonce wave** : "WAVE X" haut-gauche `(-1.20, 0.90)`, dezoom `0.065→0.040` + fade sur 2s
 - **Panneau radio boss** (bas d'écran) : rectangle + 2 demi-cercles procéduraux en GeomTriangles, fond sombre + bordure orange, barre HP couleur dynamique, texte nom + phase. Visible uniquement pendant le combat boss.
 - Screen flash blanc : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s
 - Texte combo : `show_combo(count)` — "xN COMBO!" orange pulsant 1.5s
-- Overlay PNG `assets/textures/hud_overlay.png` : code prêt, non intégré (WIP)
+- `show_pickup(text, color=None)` — couleur optionnelle (ex: rouge pour fake powerup)
 
 ### `src/sounds.py` — Audio
 - Pooling de sons, randomisation pitch
@@ -152,16 +166,24 @@ main.py
 - L99 DEBUG : astéroïdes only, 999 vagues, 100 HP
 - `LevelManager` : câblé dans `game.py` — `start_intro_for_level()` appelé depuis `start_game()`
 - **Intro fade** : fondu noir (alpha 1→0) sur 1.5s au début de chaque niveau, texte visible jusqu'à 3s
-  - Nom du niveau affiché en police **StarJedi** (`assets/fonts/StarJedi.ttf`), échelle 0.10
-  - Sous-titre (nom court) en StarJedi, intro text en police par défaut
-  - Même effet au lancement initial et lors des transitions entre niveaux
+  - Nom du niveau affiché en police **SFDistantGalaxy** (`assets/fonts/SFDistantGalaxy.ttf`), chargée en lazy singleton
+  - Sous-titre (nom court) en SFDistantGalaxy, intro text en police par défaut
+  - `start_intro_for_level(level_id)` déclenche directement depuis `start_game()` sans attendre une transition
 
-### `src/game.py` — Caméra
+### `src/game.py` — Caméra & perf
 - **Vue normale** : `CAM_FAR_POS=(0,-8,3.5)` → `CAM_FAR_LOOK=(0,22,0)`
 - **Vue Force/ADS** : `CAM_CLOSE_POS=(0,3,1.8)` → `CAM_CLOSE_LOOK=(0,16,0)`
 - **Lerp fluide** : `CAM_LERP_SPEED=5.0` — transition ~0.2s
 - Force active → zoom avant automatique ; touche 5 → bascule manuelle
 - `_update_camera(dt)` exécuté **avant** `hud.update()` dans la boucle (projection synchronisée)
+- **MSAA 2x** (était 4x), `sync-video 0` — désactive le V-sync pour mesurer le vrai temps de rendu
+- `MAuto` antialiasing désactivé (évite double depth sort multisamplé sur transparents)
+- `gc.disable()` au démarrage, `gc.collect()` manuel aux points sûrs (après reset, return_to_menu)
+- `graphicsEngine.renderFrame()` avant la première frame → upload VBOs GPU avant le jeu
+- **Bolt pool** : `cleanup()` appelé à la place de `destroy()` lors du nettoyage de niveau
+- **Overlay debug perf (touche 6)** : panneau bas-gauche, FPS avg/min/max, log spike <35fps, touches T/B/F (toggle terrain/bâtiments/fog)
+- Powerup rebalancé : torpedo +3→**+1**, repair +2→**+1**, force 35→**+15**
+- **Fake powerup** : -5 HP, show_pickup("DARK SIDE!", rouge), damage flash + screenshake 0.35
 
 ### `src/building_viewer.py` — Viewer procédural
 - Launcher : `python viewer.py`
@@ -169,7 +191,7 @@ main.py
 - Touches **1-7** : jump direct au bâtiment | Tab/Shift-Tab : navigation séquentielle
 - Hitbox **cyan** `(0.0,0.95,0.85)` (non confondue avec néons orange)
 - **Néons 3 couches additifs** (core + glow ×3 alpha 0.28 + bloom ×7 alpha 0.09) sur tous les bâtiments
-- **Labels Star Jedi** font impériale billboards
+- **Labels SFDistantGalaxy** font impériale billboards
 - Lancement **plein écran** natif
 
 ### `src/menu.py` — Menu principal
@@ -179,19 +201,20 @@ main.py
 - `"SOLO"` démarre toujours depuis L1
 
 ### `src/powerups.py` — Collectibles
-- 22% de chance de drop par kill (désactivé les 15 premières secondes)
+- `DROP_CHANCE=15%`, `NO_DROP_TIME=0`, `COLLECT_RADIUS=8u`
 - **4 types à 25% chacun** :
   - **Torpedo** (blanc cassé, lettre `T`) : +1 torpille
   - **Repair** (jaune, lettre `H`) : +1 HP
   - **Force** (bleu, lettre `F`) : +15 jauge Force
-  - **Fake** (violet Sith, lettre `?`) : piège — inflige -5 HP, flash dégâts + screenshake
-- **Visuels** : gemme octaédrique + label StarJedi billboard + flamme mystique 3 couches additives (core/glow/bloom)
+  - **Fake** (violet Sith `#B20DD9`, lettre `?`) : piège — inflige -5 HP, flash dégâts + screenshake
+- **Visuels** : gemme octaédrique + label SFDistantGalaxy billboard + flamme mystique 3 couches additives (core/glow/bloom) via `ColorBlendAttrib.MAdd`
 - **Clignotement** : battement double fréquence `sin(age×3.2) + sin(age×7.1)`, amplitude 0.15→1.6, cycle couleur A↔B
-- **Flamme** : 3 disques `ColorBlendAttrib.MAdd` (r=0.55/1.05/1.90), phases décalées, respiration 2.2 Hz
+- **Flamme** : 3 disques `_make_disc()` (r=0.55/1.05/1.90), phases décalées, respiration 2.2 Hz
 
-### `src/menu.py` — Menu principal *(section déjà mise à jour ci-dessus)*
-- Écran titre avec starfield en fond
-- Options, affichage leaderboard
+### `src/lunar_base.py` — Bâtiments L2
+- `setRenderModeThickness` **supprimé** de tous les nœuds néon (incompatible OpenGL Core Profile)
+- **`bd` (batch partagé)** : paramètre optionnel sur `_make_tower/_make_hangar/_make_silo` — permet de fusionner plusieurs bâtiments dans le même `_GeomBatch`, réduisant les draw calls de groupes
+- **`center_nodes`** : liste de NodePath attachée à chaque `BaseGroup` pour le fade sélectif — seule la géométrie centrale est fadée, pas le batch complet
 
 ---
 
@@ -204,14 +227,16 @@ main.py
 | HP joueur | 10 |
 | Surchauffe (salves) | ~20 |
 | Cooldown surchauffe | 2.5s |
-| Auto-aim | 15% |
+| Auto-aim | désactivé lasers / actif torpilles |
 | Barrel roll durée | 0.6s |
 | Force bullet-time | 0.3× |
 | Force durée | 6s |
 | Lock-on portée | 120 u |
 | Score de base/kill | 100 |
-| Drop chance powerup | 22% (4 types × 25%) |
+| Drop chance powerup | 15% (4 types × 25%) |
 | Leaderboard | Top 10 |
+| MSAA | 2x (framebuffer) |
+| V-sync | désactivé |
 
 ---
 
@@ -227,6 +252,8 @@ main.py
 | M | Sons on/off |
 | F11 | Plein écran |
 | F1 | Compteur FPS |
+| 6 | Overlay debug FPS/spikes |
+| T / B / F (debug) | Toggle terrain/bâtiments/fog |
 | R | Restart (game over) |
 | Échap | Quitter |
 
@@ -241,6 +268,7 @@ main.py
 | Astéroïdes pack 2 | Sketchfab | CC-BY |
 | Planètes (9 models) | Sketchfab | CC-BY |
 | Sons WAV | Procéduraux (5 fichiers) | — |
+| Police SFDistantGalaxy | `assets/fonts/SFDistantGalaxy.ttf` | — |
 
 ---
 
@@ -259,7 +287,7 @@ main.py
 - [ ] **Couleur réacteurs** : X-Wing réacteurs bleu-blanc, TIE réacteurs rouge-orangé — vertex color animée (pulse)
 - [ ] **Repère hauteur joueur** : ✅ pyramide HUD 3 barres (vert→rouge, pointe haut/bas selon Z)
 - [ ] **Indicateur altitude ennemis** : disque au sol ou tiret lateral (A choisir)
-- [x] **Ennemis sur paliers** : Z = -4 / 0 / +4, transitions lerp (TIER_LERP=2.8)
+- [x] **Ennemis sur paliers** : Z = -4 / 0 / +4, transitions lerp (TIER_LERP=1.8)
   - B1 Mirror (TIEFighter) — suit le palier du joueur
   - B2 Route (TIEInterceptor) — séquence aléatoire calculée au spawn
   - B3 Kamikaze (TIEInterceptor, ProbeDroid) — fonce en 3D direct
@@ -364,7 +392,12 @@ main.py
 - `.gitignore` étendu (*.exe, *.zip, *.pdf)
 - Création `SPEC.md` et `CLAUDE.md`
 
-### v0.15 — Boss Utility AI (nouveau)
+### v0.14 — Bugfixes : keys / torpilles / fullscreen
+- **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)
+- **Bug torpilles** : `fire_torpedo()` appelle `fire()` avant de mettre `locking=False` ; `LOCK_CONE` 8→14 ; dumb-fire sans lock possible
+- **Bug fullscreen** : résolution native via `pipe.getDisplayWidth/Height()` ; `camLens.setAspectRatio` resynchronisé 50ms après resize
+
+### v0.15 — Boss Utility AI
 - Nouveau fichier `src/boss_ai.py` : BossPerception + BossAction + BossUtilityAI
 - Boss réévalué toutes les 0.45s — choisit parmi 8 actions selon scores dynamiques
 - Mouvement : orbit (paramètres HP-dépendants) / charge / strafe / retraite
@@ -372,7 +405,7 @@ main.py
 - `player_hp` passé à `boss.update()` depuis `game.py`
 - Tous les paramètres de tuning centralisés en constantes (`ORBIT_HIGH/MID/LOW`, `CHARGE_SPEED`, `CONE_BOLT_COUNT`, etc.)
 
-### v0.16 — VFX Explosions V2 + Screenshake + Curseur (nouveau)
+### v0.16 — VFX Explosions V2 + Screenshake + Curseur
 
 #### `src/screenshake.py` — Nouveau module
 - Classe `Screenshake` : décroissance quadratique (pas linéaire)
@@ -382,153 +415,96 @@ main.py
 
 #### `src/explosions.py` — Réécriture complète
 - 3 presets : `small` (TIE Fighter) / `medium` (torpille / TIE Bomber) / `large` (boss)
-- 5 composants :
-  - **Flash** (0.1s) : blanc chaud `(4.0, 3.5, 2.5)`, billboard additif
-  - **Onde de choc** (0.25s) : carte très plate, s'expanse 0.3→max_radius, alpha 0.7→0
-  - **Fireballs** : expansion 40% puis fade, palette chaude uniquement (orange vif/moyen/brûlé), résistance air
-  - **Étincelles GeomPoints** : 20-45 pts, jaune→orange, décélération ×4/s
-  - **Débris sombres** : gris 0.08-0.18, gravité légère, fade sur 30% finaux
+- 5 composants : Flash (0.1s) + Onde de choc (0.25s) + Fireballs + Étincelles GeomPoints + Débris sombres
 - Palette stricte : jamais de bleu/vert/violet — que du chaud
 - API : `spawn(position, preset="small", score=0)`
 
 #### `src/hud.py` — Nouveaux éléments
-- **Screen flash blanc** : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s, séparé du flash rouge dégâts
-- **Barre HP boss** : affichée à l'entrée du boss, masquée à sa mort, couleur ORANGE→WARN→DANGER selon HP
-- **Texte combo** : `show_combo(count)` — "xN COMBO!" orange pulsant, 1.5s, animé — déplacé côté droit (1.15, 0.40)
-- **Wave Incoming** : déplacé côté gauche (-1.15, 0.35) hors axe de visée
-- **Pyramide altitude** : 3 barres horizontales décroissantes, vert→rouge selon |Z|, pointe haut si Z>0 bas si Z<0
+- Screen flash blanc, barre HP boss, texte combo "xN COMBO!", pyramide altitude
 
 #### `src/game.py` — Intégration
 - Curseur souris masqué en jeu (`setCursorHidden(True)`), restauré au menu
 - `Screenshake` instancié dans `start_game()`, `update()` chaque frame, `reset()` au restart
 - `time_scale` combo slow-mo (×0.65 pendant 0.4s, 3 kills en 2s) combiné avec `force.get_time_scale()`
-- Explosion preset par classe ennemi (TIEBomber → medium, autres → small)
-- Torpilles : impact principal → medium, splash et kills → small
-- Boss mort → preset large + screenshake 1.0 + screen flash 0.4
-
-### v0.18 — Niveaux L2/L3/L4 + 4 nouveaux ennemis + sélection niveau menu
-
-#### Nouveaux ennemis procéduraux (`src/enemies.py`)
-- **ImperialShuttle** : 8 u/s, 8 HP, 2 bolts, 500 pts — navette avec grandes ailes angled + dérive dorsale
-- **AttackBomber** : 7 u/s, 10 HP, triple tir éventail ±0.6u, 400 pts — 3 pods + pont + ailes 2.5u
-- **ProbeDroid** : 22 u/s, drift ×2 plus agressif, 2 HP, 200 pts — corps cubique + 4 bras + œil rouge frontal
-- **GroundTurret** : stationnaire sol (Z=-5.2), défile à 14 u/s, 6 HP, rotation H vers joueur, 300 pts
-- `WAVE_DEFS_BY_LEVEL` : 4 niveaux × 7 vagues configurés — pool d'escalade adapté au niveau
-- `EnemySpawner(game, level=1)` : paramètre level, wave_defs instance (plus de variable de classe)
-
-#### Nouvelles classes décor (`src/environment.py`)
-- **LunarTerrain** : dalle 240×22u à Z=-7.8, courbure parabolique sphérique (R=420), palette gris-bleutée, `setLightOff()`
-- **LunarRock** : astéroïde aplati (flat=0.55-0.75), palette gris-bleutée lunaire
-- **TrenchWallPanel / TrenchFloorPanel / TrenchSurfacePanel** : géométrie UV (`getV3t2()`), texture appliquée via `setTexture()`
-- **Texture procédurale** (`_gen_trench_wall_texture`, `_gen_trench_floor_texture`) :
-  - PNMImage 256×256 générée au lancement (seed déterministe)
-  - Layout aléatoire de panneaux 1×cell ou 2×cell (variété de formes)
-  - Effet **bevel** : ombre dégradée sur 4px en bordure → faux relief sans éclairage
-  - Wrap repeat + filtrage bilinéaire / mipmap
-  - Fallback : charge `assets/textures/trench_wall.jpg` / `trench_floor.jpg` si présents
-- L3 bg_color : `(0.22, 0.05, 0.03)` — lueur rouge exhaust port visible au fond de la tranchée
-- `Environment(game, level=1)` : init + update adaptatifs, reset géré dans `reset_game()`
-- Tuilage init : `step = TILE_DEPTH` (exact, zéro overlap) de Y=15 à SPAWN_DEPTH+d
-- Spawn runtime : nouvelle dalle/rangée à `max_y + TILE_DEPTH` quand `max_y < SPAWN_DEPTH - TILE_DEPTH/2`
-- Largeur 240u couvre les tuiles à Y=200 (distance cam ≈ 184u, demi-largeur visible ≈ 106u avec FOV 60°)
-
-#### Sélection de niveau (`src/menu.py`)
-- Entrée "CHOISIR NIVEAU" dans le menu principal
-- Sous-menu dynamique : `L1 — ASTEROID FIELD` … `L4 — NEBULA`
-- Subtitle affiche la description des ennemis du niveau survolé
-- Action `play_level_N` → `start_game(start_level=N)`
-
-#### Intégration (`src/game.py`)
-- `start_game(start_level=1)` : `selected_level` stocké, bg color appliqué, Level passé à env + spawner
-- `reset_game()` : nettoie terrain_tiles/wall_panels/floor_panels + réinitialise décor et wave_defs au niveau en cours
 
 ### v0.17 — Fullscreen au lancement + Boss équilibré + Panneau radio boss + Explosions circulaires
 
-#### `src/game.py` — Plein écran natif au lancement
-- `setup_window()` : `setFullscreen(True)` + résolution détectée via `pipe.getDisplayWidth/Height()`
-- `is_fullscreen` initialisé à `True` dans `setup_window()` (plus de `False` dans `__init__`)
-- Aspect ratio synchronisé 50ms après la fenêtre via `doMethodLater`
+- Plein écran natif au lancement (`setFullscreen(True)` + résolution détectée)
+- Boss rebalancé : HP 50→150, BOSS_TRIGGER_WAVE 2→8, RETREAT_Y 62→25, orbite yo 35→15
+- Panneau radio boss procédural (bas d'écran) avec barre HP + label phase
+- Explosions : flash et onde de choc passent en géométrie circulaire procédurale (`_make_disc`, `_make_ring`)
 
-#### `src/boss.py` — Boss rebalancé
-- HP : 50 → **150**  
-- `BOSS_HIT_RADIUS` : 3.0 → 2.5
-- `BOSS_TRIGGER_WAVE` : 2 → **8** (vagues normales restaurées)
-- `RETREAT_Y` : 62.0 → **25.0** — boss ne sort plus du range de tir
-- `STRAFE_RADIUS` : 13.0 → 11.0
-- Orbite yo : 35→28 → **15→11**, variation sin×5 (était ×10) — boss reste 10-20 u devant le joueur
+### v0.18 — Niveaux L2/L3/L4 + 4 nouveaux ennemis + sélection niveau menu
 
-#### `src/hud.py` — Panneau radio boss
-- Panneau procédural en bas d'écran (Z≈-0.810) à la place de la barre centrée
-- `_make_panel_bg()` : rectangle + 2 demi-cercles (GeomTriangles), fond sombre `(0.02,0,0,0.82)`
-- `_make_panel_border()` : contour GeomLines avec arcs latéraux, épaisseur 1.5px
-- Ligne déco intérieure supplémentaire (alpha 0.30)
-- Barre HP dans le panneau, texte "◈ DARTH VADER — TIE ADVANCED" + label de phase
-
-#### `src/explosions.py` — Géométrie circulaire procédurale
-- Flash et onde de choc passent de CardMaker (rectangles visibles) à géométrie procédurale
-- **`_make_disc()`** : disque fan de triangles, alpha centre=1.0 / bord=0.0, billboard additif `M_add + O_incoming_alpha`
-- **`_make_ring()`** : 3 cercles concentriques (0.55/0.80/1.00), alpha 0→1→0, billboard additif
-- Débris plus visibles : couleur 0.08-0.18 → **0.20-0.45** (teinte chaude), vitesse 6-18 → **10-28**, durée 0.4-0.8 → **0.7-1.3s**, compte : 7/10/16
-
-### v0.20 — Viseur centre + décorations 3D tranchée + contraste directionnel L3
-
-#### `src/hud.py` — Viseur central
-- `_make_crosshair(game)` : croix 4 branches via `GeomLines`, gap central 0.018u, bras 0.040u, blanc légèrement chaud semi-transparent (alpha 0.75)
-- Rendu sur `aspect2d`, bin "fixed" sort 60, `setDepthTest(False)` → toujours visible devant le décor
-- Initialisé dans `HUD.__init__` → toujours affiché, ne bouge pas
-
-#### `src/environment.py` — `TrenchDecorGroup` + textures circuit + contraste directionnel
-- **Éclairage directionnel** : paramètre `lit=True/False` — mur gauche ombre `0.18→0.42`, mur droit lumière `0.55→1.00` (vertex color × texture)
-- **Lune** : `DistantPlanet` à `Point3(-18, 140, 28)` (gauche), rayon 4.5u, blanc-chaud, `grow_rate=0`
-- **Textures circuit imprimé** (`_draw_circuit_tex`) : fond sombre + plaques irrégulières + traces PCB horizontales/verticales + courtes jonctions obliques + pads circulaires aux nœuds. Appliquées via `TextureStage M_modulate` (texture × vertex_color) sur murs et sol. Format custom `_V3C4T2` (position + color + UV).
-- **Nouvelles primitives** :
-  - `_make_antenna` : colonne fine + disque tête + anneau intermédiaire optionnel
-  - `_make_l_bracket` : bras horizontal + bras vertical connectés en L
-  - `_make_tower` : récursif depth 2-3 — boîte de base + éléments décroissants au sommet
-  - `_make_connected_cluster` : 2 boîtes reliées par un rail + nœud vertical optionnel
-- **Placement fractal/puzzle** (hiérarchie en 4 niveaux) :
-  1. Rails de fond (1-3, traversent tout le segment)
-  2. Conduits groupés (50% des segments)
-  3. Clusters connectés (1-3 par segment, min_sep 2.5-4.5u)
-  4. Éléments terminaux (3-7 : tours, antennes, L-brackets, boîtes, disques, marches)
+- ImperialShuttle, AttackBomber, ProbeDroid, GroundTurret procéduraux
+- `WAVE_DEFS_BY_LEVEL` : 4 niveaux × 7 vagues configurés
+- LunarTerrain, LunarRock, TrenchWallPanel/FloorPanel/SurfacePanel
+- Textures procédurales tranchée (circuit imprimé, bevel 4px, seed déterministe)
+- Sélecteur niveau dans le menu principal
 
 ### v0.19 — Fix tuilage L2/L3 : zéro overlap, zéro Z-fighting, courbure planétaire
 
-#### `src/environment.py` — Tuilage sans fissures et sans scintillement
-- **Init** (`_init_lunar`, `_init_trench`) : `step = d` exact (était `d-1`), zéro overlap entre dalles adjacentes
-- **Runtime** (`_update_l2`, `_update_l3`) : nouvelle dalle spawned à `max_y + TILE_DEPTH` (était à `SPAWN_DEPTH` fixe → overlap ~20u avec la précédente)
-- Condition de spawn : `max_y < SPAWN_DEPTH - TILE_DEPTH/2` — garantit une dalle toujours en réserve avant la zone de tir
-- **LunarTerrain** : courbure parabolique sphérique `z = -(x²+y²)/(2×380)` sur tous les vertices; bords Y (`j=0`, `j=segs_y`) déterministes (bump=0) → joints seamless entre dalles consécutives
-- Taux de cratères 3 niveaux : `bump < -0.18` → dark 0.72 / `bump < 0` → 0.88 / positif → 1.0
-- Toutes les surfaces décor : `setLightOff()` → couleurs vertex brutes sans teinte de l'éclairage scène
+- Step tuilage `d` exact (était `d-1`), spawn à `max_y + TILE_DEPTH`
+- LunarTerrain : courbure parabolique sphérique `z = -(x²+y²)/(2×380)`, joints seamless
+
+### v0.20 — Viseur centre + décorations 3D tranchée + contraste directionnel L3
+
+- Viseur central fixe (4 branches `GeomLines`, bin "fixed" sort 60, `setDepthTest(False)`)
+- `TrenchDecorGroup` : hiérarchie 4 niveaux, textures circuit imprimé, éclairage directionnel
+- Lune DistantPlanet en décor L3, primitives antenna/l_bracket/tower/connected_cluster
 
 ### v0.21 — Debug mode, FPS aim, danger light astéroïdes, L99
 
-#### `src/game.py`
-- **Debug (key 2)** : labels Y jaune pastel, hitbox wireframe verte `(0.0,1.0,0.4,0.385)`, label X 3D billboard `setScale(0.408)` attaché à render
-- **Debug (key 3)** : mode squelette toggle — affiche les arêtes du modèle
-- `return_to_menu()` : cleanup complet terrain_tiles, wall_panels, floor_panels, surface_panels, decor_groups, base_groups, boss + `clearFog()` + reset background
-- `env_level = self.selected_level` (corrige L99 qui recevait toujours level=1)
+- Debug key 2 : labels Y, hitbox wireframe, labels X 3D billboard
+- Debug key 3 : mode squelette
+- Visée FPS souris relative, rectangle visée 3D UHDynamic
+- Danger light astéroïdes (ambient + spot + point scoped), L99 debug level
 
-#### `src/player.py`
-- Visée FPS souris relative : delta centre → `mouse_aim_x/z` clampé ±1.2/±0.9, warp chaque frame
-- Rectangle de visée 3D UHDynamic 4 segments, couleur `(0.95,0.82,0.18,0.50)`
-- Spring crosshair : target = ship_pos + mouse_offset
+### v0.22 — TIE Fighter state machine + perf tooling + rebalance
+
+#### `src/enemies.py`
+- **TIEFighter refonte complète** : state machine 5 états (APPROACH/BREAK/ATTACK_RUN/FLANK/LOOP_BACK), squads de 4 TIEs, virages courbes avec bank angle, cibles d'approche fixes par rôle
+- **EnemyBolt** : speed 52→**80** u/s, pool avec `reset()` (réutilise géométrie) + `cleanup()` (destruction finale)
+- **`FOG_ONSET_BY_LEVEL`** : seuil d'invulnérabilité par niveau (ennemis invisibles dans le fog)
+
+#### `src/wave_config.py`
+- L1 vagues redesignées pour le système squad (N tie_fighter = N squads de 4)
+- Champ `formation` déprécié (conservé pour rétrocompat)
+
+#### `src/game.py` — Perf & outils
+- MSAA 4x→**2x**, `sync-video 0` (V-sync désactivé)
+- `MAuto` antialiasing désactivé (évite double depth sort)
+- `gc.disable()` au démarrage, `gc.collect()` aux points sûrs
+- `graphicsEngine.renderFrame()` avant la première frame (upload VBOs)
+- **Overlay debug (touche 6)** : FPS avg/min/max, logger spikes <35fps
+- **Touches T/B/F** : toggle terrain/bâtiments/fog (isolation perf L2)
+- Bolt pool `cleanup()` lors du nettoyage de niveau
+
+#### Rebalance
+- Torpilles : splash radius 15→**1**, splash damage 10→**3**, cooldown 1→**3s**, max_dist 200→**120u**
+- Powerup torpedo : +3→**+1** | repair : +2→**+1** | force : +35→**+15**
+- **Fake powerup** intégré : -5 HP, flash rouge, screenshake 0.35
+
+#### `src/powerups.py`
+- 4 types 25% chacun (torpedo/repair/force/fake), `DROP_CHANCE=15%`, `COLLECT_RADIUS=8u`
+- Visuels refaits : gemme + label StarJedi + flamme 3 disques `ColorBlendAttrib.MAdd`
+
+#### `src/levels.py`
+- Police SFDistantGalaxy lazy singleton
+- `start_intro_for_level()` : fondu noir 1→0 sur 1.5s, texte jusqu'à 3s
 
 #### `src/hud.py`
-- Annonce wave : suppression "INCOMING", position haut-gauche, dezoom+fade 2s
-- Compteur hostiles supprimé
+- Trapèzes dégâts repliés vers les bords (EDGE_GAP=0.25, WIDTH=0.30), roll tracking supprimé
+- `show_pickup(text, color=None)` : couleur optionnelle
+
+#### `src/lunar_base.py`
+- `setRenderModeThickness` supprimé (OpenGL Core incompatible)
+- Paramètre `bd` (batch partagé) sur `_make_tower/_make_hangar/_make_silo`
+- `center_nodes` sur `BaseGroup` pour fade sélectif sans depth sort GPU
 
 #### `src/environment.py`
-- Danger light : `AmbientLight` + `Spotlight` + `PointLight` scopés par astéroïde
-- Couleur viseur `(0.95,0.82,0.18)` sur ambient et spot, orange sur halo
-- Intensité linéaire distance Y, extinction progressive
-- L99 : `_debug_asteroids=True` → interval 0.1s (10/s), vitesse ×0.5–2.0
-
-### v0.14 — Bugfixes : keys / torpilles / fullscreen
-- **Bug keys post-restart** : `_lb_unbind_keys()` restaure "m" et "r" après unbind A-Z ; `reset_game()` appelle `player.setup_controls()` pour restaurer z/q/s/d (écrasées par le leaderboard) ; spawner et environnement entièrement réinitialisés (`_prepare_wave()`, timers, planètes)
-- **Bug torpilles** : `fire_torpedo()` appelle `fire()` avant de mettre `locking=False` ; `LOCK_CONE` 8→14 ; dumb-fire sans lock possible
-- **Bug fullscreen** : résolution native via `pipe.getDisplayWidth/Height()` ; `camLens.setAspectRatio` resynchronisé 50ms après resize
+- L2 fade : seuls les `center_nodes` sont fadés, géométrie opaque reste solide
+- Méthodes `toggle_terrain/buildings/fog_debug()` pour isoler les spikes GPU
 
 ---
 
@@ -537,8 +513,7 @@ main.py
 Voir [ROADMAP.md](ROADMAP.md) pour le détail complet V1 ✅ + V2 planifié.
 
 Prochaines priorités V2 :
-- Visuels distincts par niveau (L2 surface lunaire, L3 tranchée, L4 nébuleuse)
-- Nouveaux types d'ennemis (Shuttle, Probe Droid, tourelles sol)
-- Boss Star Destroyer avec tourelles destructibles
+- Performance L2 : audit draw calls, `flattenStrong()` sur groupes bâtiments
+- TIEFighter state machine : tuning des transitions et des timings squad
+- Comportement boss : distance d'orbite trop courte
 - Audio upgrade (musiques ambiantes, dialogues radio)
-- Screenshake + effets caméra

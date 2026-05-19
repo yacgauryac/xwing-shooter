@@ -23,6 +23,10 @@ from src.wave_config import get_wave_defs_for_level, get_escalation_pool
 TIERS = [-4.0, 0.0, 4.0]       # 3 altitudes fixes
 TIER_LERP = 1.8                 # Vitesse de transition vers le palier cible (u/s) — lent et fluide
 
+# Distance à partir de laquelle le fog rend un ennemi invisible → invulnérable.
+# Doit correspondre aux valeurs "onset" de _setup_distance_fog dans environment.py.
+FOG_ONSET_BY_LEVEL = {0: 90.0, 1: 150.0, 2: 90.0, 3: 90.0, 4: 100.0}
+
 # Comportements disponibles
 # B1 Mirror   — suit le palier du joueur UNE SEULE FOIS avec latence, puis lock
 # B2 Route    — séquence aléatoire de paliers (2-3 transitions max, timers longs)
@@ -39,8 +43,8 @@ TIER_LERP = 1.8                 # Vitesse de transition vers le palier cible (u/
 class EnemyBolt:
     """Un tir laser ennemi (vert)."""
 
-    SPEED = 52.0    # +30% — plus rapides, moins faciles à éviter
-    DAMAGE = 1
+    SPEED = 80.0    # +30% — plus rapides, moins faciles à éviter
+    DAMAGE = 1.0
     HIT_RADIUS = 1.8
 
     def __init__(self, parent_node, start_pos, direction):
@@ -95,7 +99,22 @@ class EnemyBolt:
         if pos.getY() < -15 or abs(pos.getX()) > 20 or abs(pos.getZ()) > 15:
             self.destroy()
 
+    def reset(self, parent_node, start_pos, direction):
+        """Réutilise ce bolt depuis le pool — pas de création géométrique."""
+        self.alive = True
+        self.direction = Vec3(direction)
+        self.direction.normalize()
+        self.node.reparentTo(parent_node)
+        self.node.setPos(start_pos)
+        self.node.lookAt(start_pos + self.direction)
+
     def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.detachNode()   # Détache sans supprimer — retourne au pool
+
+    def cleanup(self):
+        """Destruction finale (nettoyage de niveau)."""
         self.alive = False
         if not self.node.isEmpty():
             self.node.removeNode()
@@ -529,24 +548,376 @@ class BaseEnemy:
 # ============================================================
 
 class TIEFighter(BaseEnemy):
-    """TIE Fighter standard — équilibré. Mirror ou garde son palier."""
-    BEHAVIORS = ["B1", "B1", "B4"]   # 2/3 mirror, 1/3 guard
-    SPEED_BASE = 18.0
-    SPEED_CHARGE = 65.0       # Kamikaze !
-    CHARGE_DISTANCE = 100.0   # Accélère de loin
-    HP = 2
-    HIT_RADIUS = 1.8
-    FIRE_COOLDOWN_MIN = 2.5
-    FIRE_COOLDOWN_MAX = 5.0
-    BOLTS_PER_SHOT = 2
-    SCORE_VALUE = 100
+    """TIE Fighter standard — state machine cinématique, squads de 4, virages courbes."""
 
-    MODEL_PATH = "assets/models/tie_fighter/scene.gltf"
+    # ── États ────────────────────────────────────────────────────────
+    S_APPROACH   = 0   # Formation tight vers le joueur
+    S_BREAK      = 1   # Bref délai avant le split (wingmen décalés)
+    S_ATTACK_RUN = 2   # Attaque directe avec correction de trajectoire
+    S_FLANK      = 3   # Balayage latéral one-shot, sort de l'écran
+    S_LOOP_BACK  = 4   # Grand arc visible pour revenir en attack run
+
+    # ── Vitesses ─────────────────────────────────────────────────────
+    SPEED_APPROACH = 22.0
+    SPEED_ATTACK   = 46.0
+    SPEED_FLANK    = 52.0
+    SPEED_LOOP     = 36.0
+
+    # ── Taux de virage max (°/s) ──────────────────────────────────────
+    TURN_APPROACH  = 55.0
+    TURN_ATTACK    = 80.0
+    TURN_LOOP      = 95.0
+
+    # ── BaseEnemy overrides ───────────────────────────────────────────
+    BEHAVIORS          = ["B4"]   # Non utilisé mais requis par BaseEnemy
+    SPEED_BASE         = 22.0
+    SPEED_CHARGE       = 46.0
+    CHARGE_DISTANCE    = 0.0
+    HP                 = 2
+    HIT_RADIUS         = 1.8
+    FIRE_RANGE         = 85.0
+    FIRE_COOLDOWN_MIN  = 2.2
+    FIRE_COOLDOWN_MAX  = 4.5
+    BOLTS_PER_SHOT     = 2
+    SCORE_VALUE        = 100
+
+    MODEL_PATH  = "assets/models/tie_fighter/scene.gltf"
     MODEL_SCALE = 0.5
-    TARGET_SIZE = 2.0         # ~2 unités monde
+    TARGET_SIZE = 2.0
+
+    # ── Formation offsets spawn [leader, wing1, wing2, wing3] ───────────
+    # Espacement ~1/4 d'écran min entre membres (≥9u X, ≥10u Y)
+    FORMATION_OFFSETS = [
+        Vec3( 0,  0,  0),   # leader — en tête
+        Vec3(-9, 10,  1),   # wing1  — arrière gauche
+        Vec3( 9, 10, -1),   # wing2  — arrière droit
+        Vec3( 0, 20,  3),   # wing3  — loin arrière, légèrement haut
+    ]
+
+    # ── Cibles d'approche par rôle (relatif au joueur) ───────────────
+    # Chaque TIE vole vers un point fixe dans l'espace joueur.
+    # Élimine l'oscillation en chaîne du suivi leader-follower.
+    APPROACH_TARGETS = [
+        Vec3( 0,  60,  0),   # leader → droit devant
+        Vec3(-9,  70,  1),   # wing1  → gauche, légèrement en retrait
+        Vec3( 9,  70, -1),   # wing2  → droite, légèrement en retrait
+        Vec3( 0,  80,  3),   # wing3  → centre lointain, haut
+    ]
+
+    # ── Offsets cible par rôle (attack) ───────────────────────────────
+    ATTACK_TARGET_OFFSETS = [
+        Vec3( 0.0, 0,  0.0),
+        Vec3(-2.5, 0,  0.5),
+        Vec3( 2.5, 0, -0.5),
+        Vec3( 0.0, 0,  1.5),
+    ]
+    DIVE_TARGET_OFFSETS = [
+        Vec3( 0.0, 0,  0.0),
+        Vec3(-2.0, 0,  4.5),
+        Vec3( 2.0, 0, -4.0),
+        Vec3( 0.0, 0,  5.5),
+    ]
+
+    def __init__(self, parent_node, start_pos, game=None):
+        super().__init__(parent_node, start_pos, game)
+        self.vel           = Vec3(0, -self.SPEED_APPROACH, 0)
+        self.target_speed  = self.SPEED_APPROACH
+        self.bank_angle    = 0.0
+        self._prev_vel_x   = 0.0
+        self.state         = self.S_APPROACH
+        self.break_pattern = 'attack'
+        self.break_role    = 0
+        self.break_delay   = 0.0
+        self.squad         = None
+        self.squad_role    = 0
+        self._wp_list      = []   # waypoints courants
+        self._wp_idx       = 0
+        self._atk_offset   = Vec3(0, 0, 0)
+        self._breaking_off = False   # True = phase de dégagement (frôlement)
+        self._break_target = Vec3(0, 0, 0)
+
+    def _init_behavior(self):
+        """Override — tier system non utilisé par TIEFighter."""
+        self.behavior          = "B4"
+        self.tier_timer        = 0.0
+        self.tier_route        = []
+        self.tier_route_idx    = 0
+        self.tier_moved        = False
+        self.tier_react_delay  = 0.0
+        self.formation_leader  = None
+        self.formation_delay   = 0.0
+        self.tier_transition_t = 1.0
+        z = self.node.getPos().getZ() if not self.node.isEmpty() else 0.0
+        self.tier_start_z  = z
+        self.tier_duration = 2.2
+        self.tier_idx      = 1
+        self.target_z      = z   # pas de snap de palier
+
+    # ── Steering ──────────────────────────────────────────────────────
+
+    def _steer_toward(self, target_pos, dt, max_turn_deg=75.0):
+        """Redirige la vélocité vers target_pos avec taux de virage limité."""
+        to_target = target_pos - self.node.getPos()
+        dist = to_target.length()
+        if dist < 0.5:
+            return
+        desired_dir = to_target * (1.0 / dist)
+        spd = self.vel.length()
+        if spd < 0.1:
+            self.vel = desired_dir * self.target_speed
+            return
+        current_dir = self.vel * (1.0 / spd)
+        dot   = max(-1.0, min(1.0, current_dir.dot(desired_dir)))
+        angle = math.acos(dot)
+        if angle < 0.001:
+            return
+        max_rad = math.radians(max_turn_deg) * dt
+        t = min(1.0, max_rad / angle)
+        new_dir = Vec3(
+            current_dir.getX() + (desired_dir.getX() - current_dir.getX()) * t,
+            current_dir.getY() + (desired_dir.getY() - current_dir.getY()) * t,
+            current_dir.getZ() + (desired_dir.getZ() - current_dir.getZ()) * t,
+        )
+        new_dir.normalize()
+        self.vel = new_dir * self.target_speed
+
+    # ── Transitions d'état ────────────────────────────────────────────
+
+    def on_break(self, pattern, role, delay):
+        """Déclenché par TIESquad quand la formation se split."""
+        self.break_pattern = pattern
+        self.break_role    = role
+        self.break_delay   = delay
+        self.state         = self.S_BREAK
+
+    BREAK_OFF_DIST = 30.0   # Distance à laquelle le TIE arrête de viser le joueur
+
+    def _enter_attack(self, player_pos=None):
+        self.state         = self.S_ATTACK_RUN
+        self.target_speed  = self.SPEED_ATTACK
+        self._breaking_off = False
+        r = min(self.break_role, 3)
+        if self.break_pattern == 'dive':
+            self._atk_offset = Vec3(self.DIVE_TARGET_OFFSETS[r])
+        else:
+            self._atk_offset = Vec3(self.ATTACK_TARGET_OFFSETS[r])
+
+    def _enter_flank(self, player_pos=None):
+        """Traversée cinématique : dive vers un côté de l'écran, sweep complet en
+        face du joueur, ressort de l'autre côté.  WP1 et WP2 à même profondeur →
+        le TIE doit ATTEINDRE WP1 avant de pivoter vers WP2."""
+        self.state        = self.S_FLANK
+        self.target_speed = self.SPEED_FLANK
+        px  = player_pos.getX() if player_pos else 0.0
+        py  = player_pos.getY() if player_pos else 0.0
+        pz  = player_pos.getZ() if player_pos else self.node.getZ()
+        z_off = [0.0, 0.0, 2.5, -2.5]
+        sides = [+1, -1, +1, -1]
+        s = sides[self.break_role % 4]
+        z = z_off[self.break_role % 4]
+        # Arc en 3 points : entrée côté s → centre proche joueur → sortie côté -s
+        # Le WP central force le TIE à plonger juste devant le joueur
+        dz = self.squad.flank_dz if self.squad else random.uniform(-6.0, 6.0)
+        self._wp_list = [
+            Vec3(px + s * 28,  py + 30, pz + z),        # entrée : côté s, devant
+            Vec3(px,           py + 14, pz + dz),        # centre : croise devant + monte/descend
+            Vec3(px - s * 30,  py + 26, pz + dz - z),   # sortie : côté -s, conserve la hauteur
+        ]
+        self._wp_idx = 0
+
+    def _enter_aero_loop(self, player_pos=None):
+        """Looping vertical circulaire dans le plan YZ.
+        Arc R=15 en 4 WPs à 90° d'intervalle → virages max 45° → steering fluide.
+        vitesse réduite à 22 pour rester dans le rayon de virage (r_min ≈ 13u).
+        """
+        self.state        = self.S_LOOP_BACK
+        self.target_speed = 28.0   # r_min = 28/1.66 ≈ 17 < R=18 ✓
+        cx  = self.node.getX()
+        px  = player_pos.getX() if player_pos else cx
+        py  = player_pos.getY() if player_pos else 0.0
+        pz  = player_pos.getZ() if player_pos else self.node.getZ()
+        sign = self.squad.loop_sign if self.squad else 1
+        x_off = [0, -5, 5, -2.5][min(self.break_role, 3)]
+        # Cercle R=18, centre (py+65, pz+18) — 4 WPs à 90° → virages 45° max
+        self._wp_list = [
+            Vec3(px + x_off, py + 47, pz + sign * 18),   # côté joueur, mi-hauteur
+            Vec3(px + x_off, py + 65, pz + sign * 36),   # sommet
+            Vec3(px + x_off, py + 83, pz + sign * 18),   # côté opposé, mi-hauteur
+            Vec3(px + x_off, py + 93, pz),               # réalignement → attack
+        ]
+        self._wp_idx = 0
+
+    def _enter_loop(self, player_pos):
+        """Loop-back après attack run — arc visible sur le côté puis réapproche frontale."""
+        self.state        = self.S_LOOP_BACK
+        self.target_speed = self.SPEED_LOOP
+        cx = self.node.getX()
+        cz = self.node.getZ()
+        px = player_pos.getX()
+        py = player_pos.getY()
+        pz = player_pos.getZ()
+        side = 1 if cx >= px else -1
+        self._wp_list = [
+            Vec3(cx + side * 14,             py + 20, cz + 2),
+            Vec3(px + side * 18,             py + 52, pz + 1),
+            Vec3(px + random.uniform(-6, 6), py + 75, pz + random.uniform(-2, 2)),
+        ]
+        self._wp_idx = 0
+
+    def _enter_loop_from_flank(self, player_pos):
+        """Retour après sweep latéral.
+        TIE sort déjà vers +Y (WP2 du flank était devant le joueur) —
+        seul un petit arc de recentrage est nécessaire, pas de demi-tour."""
+        self.state        = self.S_LOOP_BACK
+        self.target_speed = self.SPEED_LOOP
+        cx  = self.node.getX()
+        px  = player_pos.getX()
+        py  = player_pos.getY()
+        pz  = player_pos.getZ()
+        side = 1 if cx > px else -1
+        self._wp_list = [
+            Vec3(px + side * 12, py + 52, pz + random.uniform(-1, 1)),
+            Vec3(px + side * 6,  py + 76, pz),
+        ]
+        self._wp_idx = 0
+
+    # ── Update principal ──────────────────────────────────────────────
+
+    def update(self, dt, player_pos=None):
+        if not self.alive:
+            return None
+
+        s = self.state
+
+        if s == self.S_APPROACH:
+            if player_pos:
+                # Chaque TIE vole vers son point fixe relatif au joueur.
+                # Pas de suivi du leader → pas d'oscillation en chaîne.
+                r   = min(self.squad_role, len(self.APPROACH_TARGETS) - 1)
+                off = self.APPROACH_TARGETS[r]
+                target = Vec3(
+                    player_pos.getX() + off.getX(),
+                    player_pos.getY() + off.getY(),
+                    player_pos.getZ() + off.getZ(),
+                )
+                self._steer_toward(target, dt, self.TURN_APPROACH)
+
+        elif s == self.S_BREAK:
+            self.break_delay -= dt
+            if self.break_delay <= 0:
+                if self.break_pattern == 'flank':
+                    self._enter_flank(player_pos)
+                elif self.break_pattern == 'loop':
+                    self._enter_aero_loop(player_pos)
+                else:
+                    self._enter_attack(player_pos)
+
+        elif s == self.S_ATTACK_RUN:
+            if player_pos:
+                dist_p = (self.node.getPos() - player_pos).length()
+                if dist_p < self.BREAK_OFF_DIST:
+                    # Phase de dégagement — calculée une seule fois pour éviter l'oscillation
+                    if not self._breaking_off:
+                        self._breaking_off = True
+                        cx = self.node.getX()
+                        # Dégagement du côté où le TIE se trouve déjà — passe en frôlant
+                        side = 1 if cx >= player_pos.getX() else -1
+                        self._break_target = Vec3(
+                            player_pos.getX() + side * 11,
+                            player_pos.getY() - 22,
+                            player_pos.getZ() + random.uniform(-2.0, 2.0),
+                        )
+                    self._steer_toward(self._break_target, dt, self.TURN_ATTACK)
+                else:
+                    self._steer_toward(player_pos + self._atk_offset, dt, self.TURN_ATTACK)
+                if self.node.getY() < player_pos.getY() - 8:
+                    self._enter_loop(player_pos)
+
+        elif s == self.S_FLANK:
+            if self._wp_idx < len(self._wp_list):
+                wp = self._wp_list[self._wp_idx]
+                if (wp - self.node.getPos()).length() < 4.0:
+                    self._wp_idx += 1
+                else:
+                    self._steer_toward(wp, dt, 95.0)
+            else:
+                # Après le sweep, arc de retour par le flanc
+                if player_pos:
+                    self._enter_loop_from_flank(player_pos)
+                else:
+                    self.destroy()
+                    return None
+
+        elif s == self.S_LOOP_BACK:
+            if self._wp_idx < len(self._wp_list):
+                wp = self._wp_list[self._wp_idx]
+                if (wp - self.node.getPos()).length() < 10.0:
+                    self._wp_idx += 1
+                else:
+                    self._steer_toward(wp, dt, self.TURN_LOOP)
+            else:
+                self._enter_attack(player_pos)
+
+        # ── Physique ──────────────────────────────────────────────────
+        self.node.setPos(self.node.getPos() + self.vel * dt)
+
+        # ── Orientation : face à la vélocité + banking ────────────────
+        spd = self.vel.length()
+        if spd > 1.0:
+            fwd = self.node.getPos() + self.vel * 0.4
+            self.node.lookAt(Point3(fwd.getX(), fwd.getY(), fwd.getZ()))
+        dv_x = self.vel.getX() - self._prev_vel_x
+        raw_bank = max(-65.0, min(65.0, (dv_x / max(dt, 0.001)) * 2.8))
+        self.bank_angle += (raw_bank - self.bank_angle) * min(1.0, dt * 3.5)
+        self.node.setR(self.bank_angle)
+        self._prev_vel_x = self.vel.getX()
+
+        # Flash dégât
+        if self.flash_timer > 0:
+            self.flash_timer -= dt
+            if self.flash_timer <= 0:
+                self.node.setColorScale(self.COLOR_BOOST)
+
+        # Culling — derrière la caméra ou trop loin sur les côtés
+        # En flank/loop le TIE sort volontairement loin en X, on ne culle pas
+        pos = self.node.getPos()
+        x_limit = 55 if self.state in (self.S_FLANK, self.S_LOOP_BACK) else 34
+        if pos.getY() < -18 or abs(pos.getX()) > x_limit:
+            self.destroy()
+            return None
+
+        # Tir — uniquement en phase active
+        self.fire_timer -= dt
+        if self.fire_timer <= 0 and player_pos is not None:
+            if self.state in (self.S_ATTACK_RUN, self.S_LOOP_BACK, self.S_FLANK):
+                return self._try_fire(player_pos)
+            else:
+                self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
+
+        return None
+
+    def _try_fire(self, player_pos):
+        my_pos = self.node.getPos()
+        # Ne tire que quand le TIE est devant le joueur (pas par derrière)
+        if my_pos.getY() <= player_pos.getY():
+            self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
+            return None
+        dist = (my_pos - player_pos).length()
+        if dist < self.FIRE_RANGE:
+            self.fire_timer = random.uniform(self.FIRE_COOLDOWN_MIN, self.FIRE_COOLDOWN_MAX)
+            direction = player_pos - my_pos
+            direction.setX(direction.getX() + random.uniform(-1.0, 1.0))
+            direction.setZ(direction.getZ() + random.uniform(-0.8, 0.8))
+            direction.normalize()
+            off = 0.4
+            return [
+                (Vec3(my_pos.getX(), my_pos.getY(), my_pos.getZ() + off), direction),
+                (Vec3(my_pos.getX(), my_pos.getY(), my_pos.getZ() - off), direction),
+            ]
+        return None
 
     def create_procedural(self):
-        root = NodePath("tie_fighter")
+        root    = NodePath("tie_fighter")
         cockpit = self._make_box(0.6, 0.6, 0.6, Vec4(0.3, 0.3, 0.35, 1))
         cockpit.reparentTo(root)
         for y_sign in [-1, 1]:
@@ -555,6 +926,62 @@ class TIEFighter(BaseEnemy):
             panel.setPos(0, 0.7 * y_sign, 0)
         root.setH(90)
         return root
+
+
+# ============================================================
+# Escadron TIE — coordination de 4 TIE Fighters
+# ============================================================
+
+class TIESquad:
+    """4 TIE Fighters (leader + 3 wingmen) — formation, break, attaque coordonnée."""
+
+    BREAK_DISTANCE = 80.0   # Distance Y joueur → trigger break
+
+    # PATTERNS =  ['attack', 'attack', 'flank', 'loop', 'dive']
+
+    PATTERNS =  ['flank', 'loop']
+    
+
+    def __init__(self):
+        self.leader  = None
+        self.wingmen = []
+        self.broken  = False
+
+    @property
+    def all_members(self):
+        m = []
+        if self.leader:
+            m.append(self.leader)
+        m.extend(self.wingmen)
+        return m
+
+    def trigger_break(self, player_pos):
+        """Déclenche le split — appelé quand le joueur tire sur la formation."""
+        if self.broken:
+            return
+        self._do_break(player_pos)
+
+    def check_break(self, player_pos):
+        """Filet de sécurité — break forcé si le squad passe très près sans avoir été visé."""
+        if self.broken or player_pos is None:
+            return
+        anchor = (self.leader if (self.leader and self.leader.alive)
+                  else next((w for w in self.wingmen if w.alive), None))
+        if anchor is None:
+            return
+        if anchor.node.getPos().getY() - player_pos.getY() < 40.0:
+            self._do_break(player_pos)
+
+    def _do_break(self, player_pos):
+        pattern = random.choice(self.PATTERNS)
+        self.broken    = True
+        self.flank_dz  = random.uniform(-6.0, 6.0)   # partagé — flank
+        self.loop_sign = random.choice([-1, 1])       # partagé — loop (tous montent ou tous descendent)
+        living = [m for m in self.all_members
+                  if m.alive and m.state == TIEFighter.S_APPROACH]
+        for i, member in enumerate(living):
+            delay = (0.38 * i + random.uniform(0.0, 0.22)) if i > 0 else 0.0
+            member.on_break(pattern, role=i, delay=delay)
 
 
 class TIEInterceptor(BaseEnemy):
@@ -968,7 +1395,7 @@ class EnemySpawner:
     """Gère le spawn, les tirs ennemis, et les vagues."""
 
     SPAWN_DEPTH = 200.0
-    MAX_ENEMIES = 15
+    MAX_ENEMIES = 24   # Augmenté pour accommoder les squads de 4 TIE
 
     def __init__(self, game, level=1):
         self.game = game
@@ -977,6 +1404,8 @@ class EnemySpawner:
 
         self.enemies = []
         self.enemy_bolts = []
+        self._bolt_pool = []
+        self.squads = []            # TIESquads actifs
         self.spawn_timer = 2.0
         self.score = 0
         self.wave = 1
@@ -989,14 +1418,48 @@ class EnemySpawner:
 
         self._prepare_wave()
 
+    @staticmethod
+    def _sector_offsets(count):
+        """Divise le plan XZ en N zones et retourne un centre par entrée.
+
+        1 entrée → centre écran
+        2 entrées → moitié gauche / moitié droite
+        4 entrées → 4 quadrants (X±, Z±)
+        etc.
+        """
+        X, Z = 8.0, 2.5   # demi-largeur / demi-hauteur des zones spawn
+
+        base = {
+            1: [(  0,    0)],
+            2: [( -X,    0), (  X,    0)],
+            3: [( -X,    0), (  0,    0), (  X,   0)],
+            4: [( -X,    Z), (  X,    Z), ( -X,  -Z), (  X,  -Z)],
+            5: [( -X,    Z), (  0,    Z), (  X,   Z), (-X*0.6, -Z), (X*0.6, -Z)],
+            6: [( -X,    Z), (  0,    Z), (  X,   Z), ( -X,   -Z), (   0,  -Z), (X, -Z)],
+        }
+
+        xz_list = base.get(count)
+        if xz_list is None:
+            # Grille automatique pour N > 6
+            cols = math.ceil(math.sqrt(count))
+            rows = math.ceil(count / cols)
+            xz_list = []
+            for i in range(count):
+                c, r = i % cols, i // cols
+                x = ((c / max(1, cols - 1)) - 0.5) * 2 * X
+                z = ((r / max(1, rows - 1)) - 0.5) * 2 * Z
+                xz_list.append((x, z))
+
+        # Léger décalage Y aléatoire pour le stagger de spawn (profondeur)
+        return [(x, random.uniform(0, 8), z) for x, z in xz_list]
+
     def _prepare_wave(self):
         """Prépare la vague courante."""
         wave_idx = min(self.wave - 1, len(self.wave_defs) - 1)
         wave_def = self.wave_defs[wave_idx]
 
-        enemy_classes = list(wave_def["enemies"])   # copie pour ne pas muter le template
-        formation_type = wave_def["formation"]
-        delay_before = wave_def.get("delay_before", 1.5)
+        enemy_classes = list(wave_def["enemies"])
+        delay_before   = wave_def.get("delay_before",   1.5)
         spawn_interval = wave_def.get("spawn_interval", 0.5)
 
         # Pour les vagues au-delà des définitions, on scale
@@ -1006,18 +1469,7 @@ class EnemySpawner:
             for _ in range(extra * 2):
                 enemy_classes.append(random.choice(pool))
 
-        count = len(enemy_classes)
-        center_x = random.uniform(-4, 4)
-        center_z = random.uniform(-2, 2)
-
-        if formation_type == "v":
-            offsets = Formation.v_formation(center_x, center_z, count)
-        elif formation_type == "line":
-            offsets = Formation.line_formation(center_x, center_z, count)
-        elif formation_type == "pincer":
-            offsets = Formation.pincer_formation(count)
-        else:  # swarm
-            offsets = Formation.swarm_formation(center_x, center_z, count)
+        offsets = self._sector_offsets(len(enemy_classes))
 
         self.wave_enemies_to_spawn = list(zip(enemy_classes, offsets))
         self.spawn_index = 0
@@ -1029,7 +1481,9 @@ class EnemySpawner:
         # Spawn progressif de la vague
         self.spawn_timer -= dt
         if self.spawn_timer <= 0 and self.spawn_index < len(self.wave_enemies_to_spawn):
-            if len(self.enemies) < self.MAX_ENEMIES:
+            next_class = self.wave_enemies_to_spawn[self.spawn_index][0]
+            slots = 4 if next_class is TIEFighter else 1
+            if len(self.enemies) + slots <= self.MAX_ENEMIES:
                 self._spawn_next()
                 self.spawn_timer = self.spawn_interval
 
@@ -1038,19 +1492,57 @@ class EnemySpawner:
             fire_result = enemy.update(dt, player_pos)
             if fire_result is not None:
                 for pos, direction in fire_result:
-                    bolt = EnemyBolt(self.game.render, pos, direction)
+                    if self._bolt_pool:
+                        bolt = self._bolt_pool.pop()
+                        bolt.reset(self.game.render, pos, direction)
+                    else:
+                        bolt = EnemyBolt(self.game.render, pos, direction)
                     self.enemy_bolts.append(bolt)
 
         # Update tirs ennemis
         for bolt in self.enemy_bolts:
             bolt.update(dt)
 
-        # Collisions
-        self.check_collisions(laser_system)
+        # Détection : laser joueur dans la zone d'un squad → break de formation
+        for bolt in laser_system.get_bolts():
+            if not bolt.alive:
+                continue
+            bpos = bolt.node.getPos()
+            for squad in self.squads:
+                if squad.broken:
+                    continue
+                for member in squad.all_members:
+                    if not member.alive:
+                        continue
+                    epos = member.get_pos()
+                    if epos is None:
+                        continue
+                    # Laser en dessous de l'ennemi et proche (laser monte en +Y vers les ennemis)
+                    if bpos.getY() < epos.getY():
+                        dist_fwd = epos.getY() - bpos.getY()
+                        if (dist_fwd < 65.0
+                                and abs(bpos.getX() - epos.getX()) < 7.0
+                                and abs(bpos.getZ() - epos.getZ()) < 5.0):
+                            squad.trigger_break(player_pos)
+                            break   # un seul trigger par squad par frame
 
-        # Nettoie
+        # Filet de sécurité distance + nettoyage squads morts
+        for squad in self.squads:
+            squad.check_break(player_pos)
+        self.squads = [s for s in self.squads if any(m.alive for m in s.all_members)]
+
+        # Collisions
+        self.check_collisions(laser_system, player_pos)
+
+        # Nettoie — recycle les bolts morts vers le pool
+        live_bolts = []
+        for b in self.enemy_bolts:
+            if b.alive:
+                live_bolts.append(b)
+            else:
+                self._bolt_pool.append(b)
+        self.enemy_bolts = live_bolts
         self.enemies = [e for e in self.enemies if e.alive]
-        self.enemy_bolts = [b for b in self.enemy_bolts if b.alive]
 
         # Vague terminée ? (seulement si on a fini de tout spawner ET plus d'ennemis)
         if (self.wave_started
@@ -1060,18 +1552,21 @@ class EnemySpawner:
             self.next_wave()
 
     def _spawn_next(self):
-        """Spawn le prochain ennemi de la vague, avec assignation du leader de formation."""
+        """Spawn le prochain ennemi. TIEFighter → squad de 4, autres → spawn normal."""
         if self.spawn_index >= len(self.wave_enemies_to_spawn):
             return
 
         enemy_class, (off_x, off_y, off_z) = self.wave_enemies_to_spawn[self.spawn_index]
-        pos = Point3(off_x, self.SPAWN_DEPTH + off_y, off_z)
 
+        if enemy_class is TIEFighter:
+            self._spawn_tie_squad(off_x, off_y, off_z)
+            return
+
+        pos   = Point3(off_x, self.SPAWN_DEPTH + off_y, off_z)
         enemy = enemy_class(self.game.render, pos, game=self.game)
 
-        # Formation leader : cherche le premier ennemi vivant du même type dans la vague courante
-        # Les followers copient le palier du leader avec un délai croissant
-        if enemy.behavior in ("B1", "B4"):  # Mirror et Guard se forment en escadrille
+        # Formation leader pour les types qui gardent un palier
+        if enemy.behavior in ("B1", "B4"):
             leader = None
             follower_count = 0
             for e in self.enemies:
@@ -1081,10 +1576,29 @@ class EnemySpawner:
                     follower_count += 1
             if leader is not None:
                 enemy.formation_leader = leader
-                # Délai croissant selon le rang dans la formation
                 enemy.formation_delay = follower_count * random.uniform(0.3, 0.6)
 
         self.enemies.append(enemy)
+        self.spawn_index += 1
+
+    def _spawn_tie_squad(self, off_x, off_y, off_z):
+        """Crée un squad de 4 TIE Fighters en formation tight."""
+        squad = TIESquad()
+        for i, foff in enumerate(TIEFighter.FORMATION_OFFSETS):
+            pos = Point3(
+                off_x + foff.getX(),
+                self.SPAWN_DEPTH + off_y + foff.getY(),
+                off_z + foff.getZ(),
+            )
+            tie = TIEFighter(self.game.render, pos, game=self.game)
+            tie.squad      = squad
+            tie.squad_role = i
+            if i == 0:
+                squad.leader = tie
+            else:
+                squad.wingmen.append(tie)
+            self.enemies.append(tie)
+        self.squads.append(squad)
         self.spawn_index += 1
 
     def check_player_hit(self, player_pos):
@@ -1122,7 +1636,8 @@ class EnemySpawner:
 
         return damage, hit_positions
 
-    def check_collisions(self, laser_system):
+    def check_collisions(self, laser_system, player_pos=None):
+        fog_onset = FOG_ONSET_BY_LEVEL.get(self.level, 999.0)
         for bolt in laser_system.get_bolts():
             if not bolt.alive:
                 continue
@@ -1133,6 +1648,10 @@ class EnemySpawner:
                 enemy_pos = enemy.get_pos()
                 if enemy_pos is None:
                     continue
+                # Invulnérable dans le fog — on ne peut pas tuer ce qu'on ne voit pas
+                if player_pos is not None:
+                    if enemy_pos.getY() - player_pos.getY() > fog_onset:
+                        continue
                 dist = (bolt_pos - enemy_pos).length()
                 if dist < enemy.HIT_RADIUS + 0.5:  # Plus généreux
                     destroyed = enemy.hit(bolt.DAMAGE)

@@ -5,10 +5,21 @@ Gère la progression entre les niveaux et les transitions.
 
 from direct.gui.OnscreenText import OnscreenText
 from direct.gui.DirectGui import DirectFrame
-from panda3d.core import TextNode, Vec4, ClockObject
+from panda3d.core import TextNode, Vec4, ClockObject, TransparencyAttrib
 import math
 
 globalClock = ClockObject.getGlobalClock()
+
+_starjedi_font = None
+
+def _get_starjedi_font(game):
+    global _starjedi_font
+    if _starjedi_font is None:
+        try:
+            _starjedi_font = game.loader.loadFont("assets/fonts/SFDistantGalaxy.ttf")
+        except Exception:
+            _starjedi_font = False
+    return _starjedi_font if _starjedi_font else None
 
 C_BRIGHT = Vec4(1.0, 0.7, 0.2, 1.0)
 C_ORANGE = Vec4(0.9, 0.55, 0.15, 1.0)
@@ -81,6 +92,7 @@ class LevelManager:
         # UI elements
         self.transition_bg = None
         self.transition_texts = []
+        self._fade_alpha = 0.0
 
     def get_level_config(self):
         return LEVELS.get(self.current_level, LEVELS[1])
@@ -110,6 +122,14 @@ class LevelManager:
                 self._start_transition()
                 return "transition"
         return "continue"
+
+    def start_intro_for_level(self, level_id):
+        """Fondu d'entrée au lancement initial d'un niveau."""
+        self.current_level = level_id
+        self.transitioning = True
+        self.transition_timer = 0.0
+        self.transition_phase = "intro"
+        self._show_level_intro()
 
     def _start_transition(self):
         """Démarre la transition vers le niveau suivant."""
@@ -141,7 +161,15 @@ class LevelManager:
                 self.game.setBackgroundColor(bg[0], bg[1], bg[2], 1)
 
         elif self.transition_phase == "intro":
-            # Phase 2: intro du nouveau niveau (3s)
+            # Fondu noir 1→0 sur 1.5s, puis texte visible jusqu'à 3s
+            FADE_DUR = 1.5
+            if self.transition_timer < FADE_DUR:
+                self._fade_alpha = 1.0 - (self.transition_timer / FADE_DUR)
+                if self.transition_bg:
+                    self.transition_bg["frameColor"] = Vec4(0, 0, 0, self._fade_alpha)
+            elif self.transition_bg:
+                self.transition_bg["frameColor"] = Vec4(0, 0, 0, 0)
+
             if self.transition_timer > 3.0:
                 self._clear_transition()
                 self.transitioning = False
@@ -175,28 +203,35 @@ class LevelManager:
 
     def _show_level_intro(self):
         self._clear_transition()
+        self._fade_alpha = 1.0
 
         self.transition_bg = DirectFrame(
-            frameColor=Vec4(0, 0, 0, 0.7),
+            frameColor=Vec4(0, 0, 0, 1.0),
             frameSize=(-2, 2, -2, 2),
             pos=(0, 0, 0), sortOrder=150,
         )
+        self.transition_bg.setTransparency(TransparencyAttrib.MAlpha)
 
         config = self.get_level_config()
+        font = _get_starjedi_font(self.game)
+
+        kw_font = {"font": font} if font else {}
         t1 = OnscreenText(
             text=f"LEVEL {self.current_level}",
-            pos=(0, 0.2), scale=0.08,
+            pos=(0, 0.15), scale=0.10,
             fg=C_BRIGHT, align=TextNode.ACenter, sort=160,
             shadow=(0, 0, 0, 1),
+            **kw_font,
         )
         t2 = OnscreenText(
             text=config["name"],
-            pos=(0, 0.1), scale=0.05,
+            pos=(0, 0.01), scale=0.065,
             fg=C_ORANGE, align=TextNode.ACenter, sort=160,
+            **kw_font,
         )
         t3 = OnscreenText(
             text=config.get("intro_text", ""),
-            pos=(0, -0.0), scale=0.03,
+            pos=(0, -0.12), scale=0.03,
             fg=C_DIM, align=TextNode.ACenter, sort=160,
         )
         self.transition_texts = [t1, t2, t3]

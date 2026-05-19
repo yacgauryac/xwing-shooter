@@ -16,12 +16,12 @@ import math
 # Paramètres
 TORPEDO_SPEED_MIN = 40.0
 TORPEDO_SPEED_MAX = 120.0
-TORPEDO_ACCEL = 80.0       # Accélération par seconde
-TORPEDO_TURN_RATE = 3.0    # Vitesse de virage (lerp vers cible)
-TORPEDO_MAX_DIST = 200.0
-TORPEDO_SPLASH_RADIUS = 15.0
-TORPEDO_SPLASH_DAMAGE = 10  # Tue tout dans le rayon
-TORPEDO_COOLDOWN = 1.0
+TORPEDO_ACCEL = 70.0       # Accélération par seconde
+TORPEDO_TURN_RATE = 2.0    # Vitesse de virage (lerp vers cible)
+TORPEDO_MAX_DIST = 120.0
+TORPEDO_SPLASH_RADIUS = 1.0
+TORPEDO_SPLASH_DAMAGE = 3.0
+TORPEDO_COOLDOWN = 3.0
 LOCK_RANGE = 120.0         # Distance max de lock
 LOCK_CONE = 14.0           # Rayon autour du réticule pour le lock
 
