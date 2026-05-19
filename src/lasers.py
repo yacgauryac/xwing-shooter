@@ -12,36 +12,32 @@ from panda3d.core import (
 import math
 
 
-class BoltHalo:
+class BoltTrailRing:
     """
-    3 anneaux concentriques cycliques attachés au bolt — suivent le bolt.
-    Chaque anneau grossit de 0 → MAX_R et fade, avec déphasage 1/3 de période.
-    Actif uniquement sur les bolts Force.
+    Onde circulaire laissée dans le monde au passage d'un bolt — style Matrix.
+    La balle est passée, l'onde se propage et s'efface.
     """
 
-    MAX_R  = 0.22   # rayon max (u)
-    PERIOD = 0.13   # durée d'un cycle complet
-    N      = 3      # nombre d'anneaux phasés
-    N_SEGS = 12
-    INNER  = 0.35   # fraction inner/outer → anneau fin
+    MAX_R    = 0.38   # rayon max (u)
+    LIFETIME = 0.18   # secondes
+    N_SEGS   = 14
+    INNER    = 0.62   # fraction inner — anneau fin
+    # Blanc orangé chaud, accord avec le noyau des bolts
+    COLOR    = Vec4(1.0, 0.88, 0.65, 1.0)
 
-    COLOR  = Vec4(0.18, 0.90, 1.0, 1.0)   # cyan électrique
+    def __init__(self, parent, pos):
+        self.alive = True
+        self.timer = self.LIFETIME
+        self._node = self._build(parent, pos)
 
-    def __init__(self, bolt_node):
-        self._rings = []
-        for i in range(self.N):
-            np = self._make_ring_geom()
-            np.reparentTo(bolt_node)
-            self._rings.append({'np': np, 't': i / self.N})
-
-    def _make_ring_geom(self):
+    def _build(self, parent, pos):
         fmt   = GeomVertexFormat.getV3c4()
-        vdata = GeomVertexData("halo", fmt, Geom.UHStatic)
+        vdata = GeomVertexData("tr", fmt, Geom.UHStatic)
         vw    = GeomVertexWriter(vdata, "vertex")
         cw    = GeomVertexWriter(vdata, "color")
         tris  = GeomTriangles(Geom.UHStatic)
 
-        ri    = self.INNER
+        ri   = self.INNER
         c_in  = Vec4(self.COLOR.x, self.COLOR.y, self.COLOR.z, 0.0)
         c_out = Vec4(self.COLOR.x, self.COLOR.y, self.COLOR.z, 0.9)
 
@@ -49,19 +45,21 @@ class BoltHalo:
             a0   = 2 * math.pi * i       / self.N_SEGS
             a1   = 2 * math.pi * (i + 1) / self.N_SEGS
             base = i * 4
-            # Plan XZ — perpendiculaire à Y (direction du bolt)
-            vw.addData3(ri * math.cos(a0), 0, ri * math.sin(a0)); cw.addData4(c_in)
-            vw.addData3(ri * math.cos(a1), 0, ri * math.sin(a1)); cw.addData4(c_in)
-            vw.addData3(     math.cos(a0), 0,      math.sin(a0)); cw.addData4(c_out)
-            vw.addData3(     math.cos(a1), 0,      math.sin(a1)); cw.addData4(c_out)
-            tris.addVertices(base + 0, base + 2, base + 3)
-            tris.addVertices(base + 0, base + 3, base + 1)
+            # Plan XZ — perpendiculaire à la direction du bolt (Y)
+            vw.addData3(ri*math.cos(a0), 0, ri*math.sin(a0)); cw.addData4(c_in)
+            vw.addData3(ri*math.cos(a1), 0, ri*math.sin(a1)); cw.addData4(c_in)
+            vw.addData3(   math.cos(a0), 0,    math.sin(a0)); cw.addData4(c_out)
+            vw.addData3(   math.cos(a1), 0,    math.sin(a1)); cw.addData4(c_out)
+            tris.addVertices(base, base+2, base+3)
+            tris.addVertices(base, base+3, base+1)
 
         geom = Geom(vdata)
         geom.addPrimitive(tris)
-        gn   = GeomNode("halo_ring")
+        gn = GeomNode("trail_ring")
         gn.addGeom(geom)
-        np   = NodePath(gn)
+        np = NodePath(gn)
+        np.reparentTo(parent)
+        np.setPos(pos)
         np.setAttrib(ColorBlendAttrib.make(ColorBlendAttrib.MAdd))
         np.setDepthWrite(False)
         np.setTwoSided(True)
@@ -70,19 +68,24 @@ class BoltHalo:
         return np
 
     def update(self, dt):
-        for ring in self._rings:
-            ring['t'] = (ring['t'] + dt / self.PERIOD) % 1.0
-            t   = ring['t']                         # 0 → 1 → 0 cycling
-            r   = max(0.001, self.MAX_R * t)
-            alpha = max(0.0, 1.0 - t)
-            ring['np'].setScale(r)
-            ring['np'].setAlphaScale(alpha)
+        if not self.alive:
+            return
+        self.timer -= dt
+        if self.timer <= 0:
+            self.alive = False
+            if not self._node.isEmpty():
+                self._node.removeNode()
+            return
+        t = 1.0 - self.timer / self.LIFETIME   # 0 (jeune) → 1 (vieux)
+        r = max(0.001, self.MAX_R * t)
+        alpha = 1.0 - t * t                    # fade doux
+        self._node.setScale(r)
+        self._node.setAlphaScale(alpha)
 
     def destroy(self):
-        for ring in self._rings:
-            if not ring['np'].isEmpty():
-                ring['np'].removeNode()
-        self._rings = []
+        self.alive = False
+        if not self._node.isEmpty():
+            self._node.removeNode()
 
 
 class LaserBolt:
@@ -92,11 +95,16 @@ class LaserBolt:
     MAX_DISTANCE = 380.0
     DAMAGE = 1
 
+    TRAIL_INTERVAL = 2.2   # u entre chaque ring de traînée
+
     def __init__(self, parent_node, start_pos, direction, color_back=None,
-                 color_front=None, show_halo=False):
+                 color_front=None):
         self.alive = True
         self.distance_traveled = 0.0
         self.direction = direction
+        self._parent_node  = parent_node
+        self._trail_rings  = []
+        self._trail_dist   = 0.0
 
         if color_back is None:
             color_back = Vec4(1.0, 0.2, 0.0, 1)
@@ -108,8 +116,6 @@ class LaserBolt:
         self.node.setPos(start_pos)
         self.node.lookAt(start_pos + direction)
         self.node.setLightOff()
-
-        self._halo = BoltHalo(self.node) if show_halo else None
 
     def make_bolt(self, color_back, color_front):
         root = NodePath("bolt_root")
@@ -204,17 +210,26 @@ class LaserBolt:
         self.node.setPos(self.node.getPos() + self.direction * move)
         self.distance_traveled += move
 
-        if self._halo:
-            self._halo.update(dt)
+        # Spawn un ring dans le monde à chaque TRAIL_INTERVAL u parcourus
+        self._trail_dist += move
+        if self._trail_dist >= self.TRAIL_INTERVAL:
+            self._trail_dist -= self.TRAIL_INTERVAL
+            self._trail_rings.append(
+                BoltTrailRing(self._parent_node, self.node.getPos())
+            )
+
+        for ring in self._trail_rings:
+            ring.update(dt)
+        self._trail_rings = [r for r in self._trail_rings if r.alive]
 
         if self.distance_traveled > self.MAX_DISTANCE:
             self.destroy()
 
     def destroy(self):
         self.alive = False
-        if self._halo:
-            self._halo.destroy()
-            self._halo = None
+        for ring in self._trail_rings:
+            ring.destroy()
+        self._trail_rings = []
         if not self.node.isEmpty():
             self.node.removeNode()
 
@@ -336,8 +351,7 @@ class LaserSystem:
             base_dir  = Vec3(0, 1, 0)
 
             bolt = LaserBolt(self.game.render, world_pos, base_dir,
-                             color_back=c_back, color_front=c_front,
-                             show_halo=force_active)
+                             color_back=c_back, color_front=c_front)
             if force_active:
                 bolt.node.setScale(1.5)
                 bolt.node.setColorScale(1.5, 1.5, 1.5, 1)
