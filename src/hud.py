@@ -48,6 +48,40 @@ def _make_rect(parent, x, z, w, h, color):
     return np
 
 
+def _make_rounded_rect(parent, x, z, w, h, color, segs=4):
+    """Rectangle à coins arrondis — triangle fan depuis le centre."""
+    r = min(h / 2.0, w / 4.0)
+    cx, cz = x + w / 2.0, z + h / 2.0
+    fmt = GeomVertexFormat.getV3c4()
+    vd  = GeomVertexData("rr", fmt, Geom.UHStatic)
+    vw  = GeomVertexWriter(vd, "vertex")
+    cw  = GeomVertexWriter(vd, "color")
+    tris = GeomTriangles(Geom.UHStatic)
+    vw.addData3(cx, 0, cz); cw.addData4(color)
+    corners = [
+        (x + r,     z + r,     180, 270),
+        (x + w - r, z + r,     270, 360),
+        (x + w - r, z + h - r, 0,   90),
+        (x + r,     z + h - r, 90,  180),
+    ]
+    rim = []
+    for ox, oz, a0, a1 in corners:
+        for i in range(segs + 1):
+            a = math.radians(a0 + (a1 - a0) * i / segs)
+            rim.append((ox + math.cos(a) * r, oz + math.sin(a) * r))
+    for vx, vz in rim:
+        vw.addData3(vx, 0, vz); cw.addData4(color)
+    n = len(rim)
+    for i in range(n):
+        tris.addVertices(0, 1 + i, 1 + (i + 1) % n)
+    geom = Geom(vd); geom.addPrimitive(tris)
+    gn = GeomNode("rrect"); gn.addGeom(geom)
+    np = NodePath(gn)
+    np.reparentTo(parent)
+    np.setTransparency(TransparencyAttrib.MAlpha)
+    return np
+
+
 def _make_rect_outline(parent, x, z, w, h, color):
     fmt = GeomVertexFormat.getV3c4()
     vd = GeomVertexData("o", fmt, Geom.UHStatic)
@@ -283,22 +317,19 @@ class HUD:
         self._sbar_root = sbar
 
         # Laser bar (z = 0 dans l'espace local de sbar)
-        _make_rect(sbar, 0, 0,  _W, _H, Vec4(0.12, 0.05, 0.02, 0.38))   # fond
-        self._sbar_laser_fill = _make_rect(sbar, 0, 0, _W, _H, C_ORANGE) # fill
-        _make_rect_outline(sbar, 0, 0, _W, _H, Vec4(1.0, 0.45, 0.1, 0.18))
+        _make_rounded_rect(sbar, 0, 0, _W, _H, Vec4(0.12, 0.05, 0.02, 0.38))
+        self._sbar_laser_fill = _make_rect(sbar, 0, 0, _W, _H, C_ORANGE)
 
-        # Barre HP — 6 segments discrets (z = -(H+GAP) dans l'espace local de sbar)
+        # Barre HP — 6 segments arrondis (z = -(H+GAP) dans l'espace local de sbar)
         _z2    = -(_H + _GAP)
         _SGAP  = 0.0025
-        _sw    = (_W - 7 * _SGAP) / 6   # largeur d'un segment
-        _make_rect(sbar, -_SGAP, _z2 - 0.001, _W + 2 * _SGAP, _H + 0.002,
-                   Vec4(0.0, 0.0, 0.0, 0.55))
-        _make_rect_outline(sbar, -_SGAP, _z2 - 0.001, _W + 2 * _SGAP, _H + 0.002,
-                           Vec4(0.0, 0.75, 1.0, 0.18))
+        _sw    = (_W - 7 * _SGAP) / 6
+        _make_rounded_rect(sbar, -_SGAP, _z2 - 0.001, _W + 2 * _SGAP, _H + 0.002,
+                           Vec4(0.0, 0.0, 0.0, 0.55))
         self._seg_nodes = []
         for i in range(6):
             sx = _SGAP + i * (_sw + _SGAP)
-            seg = _make_rect(sbar, sx, _z2, _sw, _H, Vec4(0.0, 0.85, 1.0, 0.88))
+            seg = _make_rounded_rect(sbar, sx, _z2, _sw, _H, Vec4(0.2, 0.55, 1.0, 0.90))
             self._seg_nodes.append(seg)
         self._seg_z2   = _z2
         self._seg_sw   = _sw
@@ -854,7 +885,7 @@ class HUD:
             self._ship_warn_text.setFg(Vec4(1.0, 0.35, 0.0, 0.0))
 
         # ── Segments vie ────────────────────────────────────────────────────
-        n_lit = max(0, math.ceil(health / max(max_health, 1) * 6))
+        n_lit = (max(1, round(health / max(max_health, 1) * 6)) if health > 0 else 0)
         flash_active = self._seg_flash_timer > 0
         for i, seg in enumerate(self._seg_nodes):
             if i >= n_lit:
@@ -863,13 +894,11 @@ class HUD:
             seg.show()
             if flash_active:
                 seg.setColorScale(Vec4(1.0, 1.0, 1.0, 1.0))
-            elif n_lit <= 1:
+            elif n_lit == 1:
                 pulse = 0.55 + 0.45 * abs(math.sin(bt * 5))
                 seg.setColorScale(Vec4(1.0, 0.15, 0.05, pulse))
-            elif n_lit <= 3:
-                seg.setColorScale(Vec4(0.95, 0.80, 0.10, 0.88))
             else:
-                seg.setColorScale(Vec4(0.0, 0.85, 1.0, 0.88))
+                seg.setColorScale(Vec4(0.2, 0.55, 1.0, 0.90))
 
     def _build_torp_pips(self, max_count):
         """Obsolète."""
@@ -1016,7 +1045,7 @@ class HUD:
         sx = p2d.getX() * ar
         sz = p2d.getY()
 
-        count = random.randint(6, 8)
+        count = random.randint(14, 20)
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
             speed = random.uniform(0.25, 0.65)

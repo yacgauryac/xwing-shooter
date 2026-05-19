@@ -146,7 +146,7 @@ main.py
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague
-- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + **6 segments vie** style holographique. Géométrie créée une seule fois en `__init__`, `setColorScale` chaque frame (zéro allocation). Couleur dynamique : cyan (6-5) → jaune (4-3) → rouge (2-1), blink lent si 1 seul segment. Fond noir semi-transparent + contour cyan.
+- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + **6 segments vie** style holographique. Géométrie créée une seule fois en `__init__`, `setColorScale` chaque frame (zéro allocation). Segments arrondis (`_make_rounded_rect`). Couleur : bleu `(0.2, 0.55, 1.0)` sauf dernier segment seul → rouge clignotant. Fond laser arrondi aussi. Mapping `round` avec garde `health > 0 → n_lit ≥ 1`.
 - **WARN/OVERHEAT** : `OnscreenText` pré-alloué `_ship_warn_text`, `setPos` chaque frame au niveau fuselage
 - **Trapèzes dégâts** : flash rouge latéraux style HL2, repliés vers les bords (EDGE_GAP=0.25), largeur 0.30
 - **Torpilles** : losange bas-centre avec compteur, clignotement rouge si ≤2
