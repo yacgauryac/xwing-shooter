@@ -659,11 +659,11 @@ class FogLayer:
 # ============================================================
 
 class GasFilament:
-    """Filament de gaz scrollant : ellipse billboard avec dégradé alpha radial.
+    """Filament de gaz scrollant : ellipse avec dégradé alpha radial.
 
-    Géométrie : 1 vertex central (alpha plein) + N sur périmètre (alpha=0).
-    N triangles en éventail → fondu parfait vers les bords.
-    Billboard point-eye = toujours face caméra quelle que soit la vue.
+    Géométrie dans le plan XZ local (face +Y = face caméra par construction).
+    Rail shooter : la caméra pointe toujours en +Y → pas de billboard nécessaire.
+    Économie : zéro matrice billboard par frame, un seul setPos/setColorScale.
     """
 
     _PALETTES = [
@@ -728,12 +728,15 @@ class GasFilament:
         self.node = NodePath(gnode)
         self.node.reparentTo(parent)
         self.node.setPos(pos)
+        # Rotation H aléatoire : oriente le filament dans le plan XZ (angle de vue caméra)
+        self.node.setH(random.uniform(0, 360))
         self.node.setTransparency(TransparencyAttrib.MAlpha)
         self.node.setDepthWrite(False)
+        self.node.setDepthTest(False)    # pas de depth sort contre les autres transparents
         self.node.setLightOff()
         self.node.setBin("transparent", 30)
         self.node.setColorScale(1, 1, 1, 0)   # fade-in doux
-        self.node.setBillboardPointEye()        # toujours face caméra
+        # Pas de setBillboardPointEye() — géom XZ fait déjà face à la caméra +Y
 
     def update(self, dt):
         if not self.alive:
@@ -2314,28 +2317,28 @@ class Environment:
         elif level == 3:
             pass  # Tranchée : pas de nappe
         elif level == 4:
-            # 5 nappes étagées — violet profond / rose-magenta / indigo / rose chaud / magenta ras-du-sol
+            # 5 nappes étagées — quads réduits pour perf (tri transparence)
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.55, 0.10, 0.78), alpha=0.33,
-                altitude_z=-3.0, spread_x=30.0, count=14, speed_y=5.0,
+                altitude_z=-3.0, spread_x=30.0, count=9, speed_y=5.0,
             ))
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.80, 0.20, 0.55), alpha=0.38,
-                altitude_z=2.5, spread_x=26.0, count=12, speed_y=4.5,
+                altitude_z=2.5, spread_x=26.0, count=8, speed_y=4.5,
             ))
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.40, 0.04, 0.65), alpha=0.30,
-                altitude_z=0.0, spread_x=36.0, count=15, speed_y=6.0,
+                altitude_z=0.0, spread_x=36.0, count=9, speed_y=6.0,
             ))
             # 4ème nappe haute — bleu-indigo pour profondeur
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.18, 0.05, 0.45), alpha=0.18,
-                altitude_z=5.5, spread_x=32.0, count=8, speed_y=7.0,
+                altitude_z=5.5, spread_x=32.0, count=6, speed_y=7.0,
             ))
-            # 5ème nappe basse — magenta-rose ras du sol, subtile
+            # 5ème nappe basse — magenta-rose ras du sol
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.88, 0.14, 0.58), alpha=0.20,
-                altitude_z=-6.0, spread_x=34.0, count=9, speed_y=3.2,
+                altitude_z=-6.0, spread_x=34.0, count=6, speed_y=3.2,
             ))
 
     # ----------------------------------------------------------
@@ -2458,21 +2461,19 @@ class Environment:
         for _ in range(6):
             self._spawn_nebula(scale=random.uniform(1.4, 2.4), richness=2.0)
 
-        # Filaments de gaz — distribution garantie sur toute la profondeur
-        self._spawn_gas_filaments(count=45)
+        # Filaments de gaz — distribution régulière, count réduit (perf)
+        self._spawn_gas_filaments(count=28)
 
-    def _spawn_gas_filaments(self, count=45):
-        """L4 — Filaments de gaz initiaux : distribution régulière sur Y=20→620."""
+    def _spawn_gas_filaments(self, count=28):
+        """L4 — Filaments de gaz initiaux : distribution régulière sur Y=20→520."""
         render = self.game.render
-        # Découpage en bandes égales pour garantir la densité à tout Y
-        band_size = 600.0 / count
+        band_size = 500.0 / count
         for i in range(count):
-            # Base régulière + jitter ±30% pour casser la grille
             y = 20.0 + i * band_size + random.uniform(-band_size * 0.3, band_size * 0.3)
             y = max(15.0, y)
             x = random.uniform(-58, 58)
             z = random.uniform(-24, 24)
-            speed = random.uniform(1.2, 4.0)   # dérive fond — éléments permanents
+            speed = random.uniform(1.2, 4.0)
             self.nebulae.append(GasFilament(render, Point3(x, y, z), speed))
 
     # ----------------------------------------------------------
@@ -2736,16 +2737,16 @@ class Environment:
         for n in self.nebulae:
             n.update(dt)
 
-        # Filaments de gaz — spawn périodique + rattrapage si densité insuffisante
+        # Filaments de gaz — spawn périodique + rattrapage minimum
         self.filament_timer -= dt
         n_filaments = sum(1 for n in self.nebulae if isinstance(n, GasFilament))
-        if self.filament_timer <= 0 or n_filaments < 18:
+        if self.filament_timer <= 0 or n_filaments < 12:
             x = random.uniform(-58, 58)
             z = random.uniform(-24, 24)
             y = self.SPAWN_DEPTH + random.uniform(30, 160)
             speed = random.uniform(1.2, 4.0)
             self.nebulae.append(GasFilament(self.game.render, Point3(x, y, z), speed))
-            self.filament_timer = random.uniform(3.5, 7.0)
+            self.filament_timer = random.uniform(5.0, 9.0)
 
         self.debris_timer -= dt
         if self.debris_timer <= 0:
