@@ -783,7 +783,7 @@ class FogBank:
         r_col, g_col, b_col = random.choice(self._PALETTES)
         width  = random.uniform(55.0, 90.0)
         height = random.uniform(30.0, 48.0)
-        alpha  = random.uniform(0.36, 0.58)
+        alpha  = random.uniform(0.18, 0.29)
         N = 16
 
         self.node = NodePath("fogbank")
@@ -2367,7 +2367,7 @@ class Environment:
         if level == 1:
             color, onset, opaque = (0.0, 0.0, 0.0), 150.0, 230.0
         elif level in (2, 0):
-            color, onset, opaque = (0.10, 0.11, 0.14), 52.0, 80.0
+            color, onset, opaque = (0.04, 0.04, 0.06), 60.0, 85.0
         elif level == 4:
             color, onset, opaque = (0.03, 0.01, 0.05), 100.0, 190.0
         else:
@@ -2395,14 +2395,10 @@ class Environment:
                 altitude_z=0.0, spread_x=24.0, count=6, speed_y=5.5,
             ))
         elif level in (2, 0):
-            # 2 nappes grises — ras du sol + légèrement au-dessus
+            # Nappe grise ras du sol — poussière lunaire
             self.fog_layers.append(FogLayer(
                 render, Vec3(0.55, 0.55, 0.52), alpha=0.16,
                 altitude_z=-7.0, spread_x=30.0, count=5, speed_y=3.0,
-            ))
-            self.fog_layers.append(FogLayer(
-                render, Vec3(0.48, 0.48, 0.46), alpha=0.09,
-                altitude_z=-5.5, spread_x=28.0, count=3, speed_y=2.5,
             ))
         elif level == 3:
             pass  # Tranchée : pas de nappe

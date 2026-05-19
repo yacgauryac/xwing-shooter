@@ -130,11 +130,11 @@ main.py
   - `PointLight` halo orange — collé à la surface côté joueur
   - Intensité linéaire : max quand l'astéroïde est proche devant (`proximity = max(0, 1 - raw_dy/120)`), 0 quand derrière
   - Extinction progressive sur `_danger_timer` à la désactivation
-- **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés)
+- **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés). Fog distance `color=(0.04,0.05,0.09) onset=60u opaque=85u`. Nappes FogLayer : gris ras-du-sol + nappe orange/ambre néon impérial (`Vec3(0.78,0.32,0.04)` alpha=0.14, Z=-6u, count=6)
 - **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
 - **L4 (Nébuleuse)** : nébuleuses denses (richness=2.0) + 3 planètes violettes/roses + filaments + nappes opaques
   - **`GasFilament`** : ellipse dans le plan XZ (face caméra +Y par construction — pas de billboard), éventail 12 triangles dégradé alpha, `setR(random)` pour orientation variée sans jamais être edge-on, `setDepthTest(False)`. Palette 10 couleurs violet/rose/magenta. **28 filaments initiaux** en bandes régulières Y=20→520, spawn 5–9s, minimum 12 actifs. `filament_timer=0` au démarrage.
-  - **`FogBank`** : nappe de brouillard très opaque traversable. 3 couches en Y (-8u/0u/+10u) pour effet volumétrique. Ellipse XZ large (55–90u) × haute (30–48u), **alpha 0.36–0.58** au centre, dégradé → 0 aux bords. 5 palettes violet/indigo/magenta. `setDepthTest(False)`, bin transparent 20. 3 initiaux (Y≈80/190/310u) + spawn toutes 20–35s. Stockés dans `nebulae`.
+  - **`FogBank`** : nappe de brouillard traversable. 3 couches en Y (-8u/0u/+10u) pour effet volumétrique. Ellipse XZ large (55–90u) × haute (30–48u), **alpha 0.18–0.29** au centre, dégradé → 0 aux bords. 5 palettes violet/indigo/magenta. `setDepthTest(False)`, bin transparent 20. 3 initiaux (Y≈80/190/310u) + spawn toutes 20–35s. Stockés dans `nebulae`.
   - **`Nebula` (richness=2.0)** : `num_points=160`, `col_var=0.24`, alpha max 0.20, point size 4. 6 pré-spawnées à l'init, `nebula_timer=3s`.
   - **Palette L4** : 7 couleurs violet/rose/magenta/indigo exclusivement
   - **Palette L1** : orange-brun / bleu-électrique / rouge-orangé / cyan-vert / jaune-ambre — aucun violet
