@@ -728,15 +728,15 @@ class GasFilament:
         self.node = NodePath(gnode)
         self.node.reparentTo(parent)
         self.node.setPos(pos)
-        # Rotation H aléatoire : oriente le filament dans le plan XZ (angle de vue caméra)
-        self.node.setH(random.uniform(0, 360))
+        # setR = rotation autour de Y (axe caméra) → tourne l'ellipse comme une horloge
+        # vue de face. Jamais edge-on, toujours visible. (setH serait autour de Z = bands)
+        self.node.setR(random.uniform(0, 360))
         self.node.setTransparency(TransparencyAttrib.MAlpha)
         self.node.setDepthWrite(False)
-        self.node.setDepthTest(False)    # pas de depth sort contre les autres transparents
+        self.node.setDepthTest(False)
         self.node.setLightOff()
         self.node.setBin("transparent", 30)
         self.node.setColorScale(1, 1, 1, 0)   # fade-in doux
-        # Pas de setBillboardPointEye() — géom XZ fait déjà face à la caméra +Y
 
     def update(self, dt):
         if not self.alive:
@@ -746,6 +746,95 @@ class GasFilament:
             self._fade_age += dt
             self.node.setColorScale(1, 1, 1, min(1.0, self._fade_age / self._fade_duration))
         if self.node.getY() < -80:
+            self.destroy()
+
+    def destroy(self):
+        self.alive = False
+        if not self.node.isEmpty():
+            self.node.removeNode()
+
+
+# ============================================================
+# FogBank — nappe de brouillard dense traversable (L4)
+# ============================================================
+
+class FogBank:
+    """Nappe de brouillard tres opaque que le joueur traverse.
+
+    3 couches en Y pour un effet volumetrique minimal.
+    Chaque couche : ellipse XZ avec degrade alpha fort au centre.
+    Scrolle a la vitesse du jeu -> le joueur perce a travers.
+    """
+
+    _PALETTES = [
+        (0.38, 0.05, 0.58),
+        (0.55, 0.08, 0.72),
+        (0.62, 0.10, 0.52),
+        (0.25, 0.04, 0.48),
+        (0.70, 0.12, 0.60),
+    ]
+
+    def __init__(self, parent, pos, speed):
+        self.alive = True
+        self.speed = speed
+        self._fade_age      = 0.0
+        self._fade_duration = 2.0
+
+        r_col, g_col, b_col = random.choice(self._PALETTES)
+        width  = random.uniform(55.0, 90.0)
+        height = random.uniform(30.0, 48.0)
+        alpha  = random.uniform(0.50, 0.75)
+        N = 16
+
+        self.node = NodePath("fogbank")
+        self.node.reparentTo(parent)
+        self.node.setPos(pos)
+        self.node.setTransparency(TransparencyAttrib.MAlpha)
+        self.node.setDepthWrite(False)
+        self.node.setDepthTest(False)
+        self.node.setLightOff()
+        self.node.setBin("transparent", 20)
+        self.node.setColorScale(1, 1, 1, 0)
+
+        for dy, a_mult in [(0.0, 1.00), (-8.0, 0.65), (10.0, 0.55)]:
+            self._make_layer(self.node, r_col, g_col, b_col,
+                             width, height, alpha * a_mult, dy, N)
+
+    def _make_layer(self, parent_np, r, g, b, width, height, alpha, dy, N):
+        hw, hh = width / 2.0, height / 2.0
+        fmt = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("fb_layer", fmt, Geom.UHStatic)
+        vdata.setNumRows(1 + N)
+        vertex = GeomVertexWriter(vdata, "vertex")
+        col_w  = GeomVertexWriter(vdata, "color")
+        vertex.addData3(0, dy, 0)
+        col_w.addData4(r, g, b, alpha)
+        for i in range(N):
+            a = 2 * math.pi * i / N
+            vertex.addData3(hw * math.cos(a), dy, hh * math.sin(a))
+            col_w.addData4(r, g, b, 0.0)
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(N):
+            tris.addVertices(0, 1 + i, 1 + (i + 1) % N)
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gnode = GeomNode("fb_layer")
+        gnode.addGeom(geom)
+        np = NodePath(gnode)
+        np.reparentTo(parent_np)
+        np.setTransparency(TransparencyAttrib.MAlpha)
+        np.setDepthWrite(False)
+        np.setDepthTest(False)
+        np.setLightOff()
+
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.node.setY(self.node.getY() - self.speed * dt)
+        if self._fade_age < self._fade_duration:
+            self._fade_age += dt
+            self.node.setColorScale(1, 1, 1, min(1.0, self._fade_age / self._fade_duration))
+        if self.node.getY() < -60:
             self.destroy()
 
     def destroy(self):
@@ -2225,6 +2314,7 @@ class Environment:
         self.nebula_timer    = 3.0 if level == 4 else 15.0
         self.debris_timer    = 4.0
         self.filament_timer  = 0.0   # L4 : spawn dès la 1ère frame
+        self.fogbank_timer   = 25.0  # L4 : première nappe opaque après ~25s
         self._asteroid_interval = 0.1 if debug else self.ASTEROID_INTERVAL   # L99 : 10/s
 
         self.star_destroyer = None
@@ -2277,7 +2367,7 @@ class Environment:
         if level == 1:
             color, onset, opaque = (0.0, 0.0, 0.0), 150.0, 230.0
         elif level in (2, 0):
-            color, onset, opaque = (0.04, 0.04, 0.05), 90.0, 130.0
+            color, onset, opaque = (0.06, 0.07, 0.09), 38.0, 65.0
         elif level == 4:
             color, onset, opaque = (0.03, 0.01, 0.05), 100.0, 190.0
         else:
@@ -2464,6 +2554,15 @@ class Environment:
         # Filaments de gaz — distribution régulière, count réduit (perf)
         self._spawn_gas_filaments(count=28)
 
+        # FogBanks initiaux — 3 nappes opaques réparties en profondeur
+        render = self.game.render
+        for i, base_y in enumerate([80.0, 190.0, 310.0]):
+            x = random.uniform(-15, 15)
+            z = random.uniform(-4, 4)
+            y = base_y + random.uniform(-20, 20)
+            speed = random.uniform(35.0, 45.0)   # vitesse jeu ~40 u/s
+            self.nebulae.append(FogBank(render, Point3(x, y, z), speed))
+
     def _spawn_gas_filaments(self, count=28):
         """L4 — Filaments de gaz initiaux : distribution régulière sur Y=20→520."""
         render = self.game.render
@@ -2610,20 +2709,14 @@ class Environment:
                     bg_y   = bg.node.getY()
                     behind = player_y - bg_y
                     ahead = bg_y - player_y
-                    if behind > 22.0 or ahead > 80.0:
-                        # Hors champ — tout caché
+                    if behind > 30.0 or ahead > 70.0:
+                        # Hors champ (fog couvre tout à 65u) — caché
                         bg.node.hide()
-                    elif ahead > 50.0:
-                        # LOD — silhouette basse-poly, pas de détail ni de néons
+                    elif behind > 16.0:
+                        # Derrière le joueur — fade des tours centrales
                         bg.node.show()
-                        bg._lod_box.show()
-                        bg._detail_root.hide()
-                    elif behind > 8.0:
-                        # Détail + fade des tours centrales
-                        bg.node.show()
-                        bg._lod_box.hide()
                         bg._detail_root.show()
-                        a = max(0.0, 1.0 - (behind - 8.0) / 14.0)
+                        a = max(0.0, 1.0 - (behind - 16.0) / 14.0)
                         for cn in bg.center_nodes:
                             if not cn.isEmpty():
                                 cn.setTransparency(TransparencyAttrib.MAlpha)
@@ -2631,7 +2724,6 @@ class Environment:
                     else:
                         # Détail complet
                         bg.node.show()
-                        bg._lod_box.hide()
                         bg._detail_root.show()
                         for cn in bg.center_nodes:
                             if not cn.isEmpty():
@@ -2747,6 +2839,16 @@ class Environment:
             speed = random.uniform(1.2, 4.0)
             self.nebulae.append(GasFilament(self.game.render, Point3(x, y, z), speed))
             self.filament_timer = random.uniform(5.0, 9.0)
+
+        # FogBanks — nappes opaques traversables, toutes les 20-35s
+        self.fogbank_timer -= dt
+        if self.fogbank_timer <= 0:
+            x = random.uniform(-20, 20)
+            z = random.uniform(-6, 6)
+            y = self.SPAWN_DEPTH + random.uniform(20, 60)
+            speed = random.uniform(35.0, 45.0)
+            self.nebulae.append(FogBank(self.game.render, Point3(x, y, z), speed))
+            self.fogbank_timer = random.uniform(20.0, 35.0)
 
         self.debris_timer -= dt
         if self.debris_timer <= 0:
