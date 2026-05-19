@@ -147,7 +147,7 @@ main.py
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague
-- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + **6 segments vie** style holographique. Géométrie créée une seule fois en `__init__`, `setColorScale` chaque frame (zéro allocation). Segments arrondis (`_make_rounded_rect`). Couleur : bleu `(0.2, 0.55, 1.0)` sauf dernier segment seul → rouge clignotant. Fond laser arrondi aussi. Mapping `round` avec garde `health > 0 → n_lit ≥ 1`.
+- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + **6 segments vie** style holographique. Géométrie créée une seule fois en `__init__`, `setColorScale` chaque frame (zéro allocation). Segments et fond laser arrondis (`_make_rounded_rect`, `segs=6`, `r=H/2`), dimensions +20% (`W=0.132, H=0.0072`). Base blanche pour que `setColorScale` soit exact. Couleur : jaune `C_BRIGHT` sauf dernier segment seul → rouge blink 5 Hz. Mapping `round()` avec garde `health > 0 → n_lit ≥ 1`.
 - **WARN/OVERHEAT** : `OnscreenText` pré-alloué `_ship_warn_text`, `setPos` chaque frame au niveau fuselage
 - **Trapèzes dégâts** : flash rouge latéraux style HL2, repliés vers les bords (EDGE_GAP=0.25), largeur 0.30
 - **Torpilles** : losange bas-centre avec compteur, clignotement rouge si ≤2
@@ -155,7 +155,7 @@ main.py
 - **Panneau radio boss** (bas d'écran) : rectangle + 2 demi-cercles procéduraux en GeomTriangles, fond sombre + bordure orange, barre HP couleur dynamique, texte nom + phase. Visible uniquement pendant le combat boss.
 - Screen flash blanc : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s
 - Texte combo : `show_combo(count)` — "xN COMBO!" orange pulsant 1.5s
-- **Feedback d'impact** : `on_hit()` — flash blanc 0.10s sur les segments vie + 6-8 étincelles orange/blanc en aspect2d depuis la position écran du vaisseau (durée 0.25-0.42s, fade alpha linéaire)
+- **Feedback d'impact** : `on_hit()` — flash blanc 0.10s sur les segments vie + 18-25 étincelles orange/blanc en aspect2d depuis la position écran du vaisseau. Taille aléatoire `0.002–0.006`, vitesse `0.30–0.90`, durée `0.50–0.85s`, fade `sqrt(t)` (doux). Blend additif `ColorBlendAttrib.MAdd`. Cooldown 0.35s entre bursts (évite le spam multi-frame).
 - `show_pickup(text, color=None)` — couleur optionnelle (ex: rouge pour fake powerup)
 
 ### `src/sounds.py` — Audio
@@ -476,9 +476,10 @@ main.py
 - Suppression complète de l'éclair rouge au hit (`_create_hit_flash`, `show_shield_hit`, bloc update) — zéro deadcode
 
 #### `src/hud.py`
-- Barre vie near-ship remplacée par 6 segments holographiques dans `_sbar_root` (fond noir + contour cyan)
-- Couleur dynamique : cyan (6-5 segments) → jaune (4-3) → rouge (2-1), dernier segment blink à 5 Hz
-- `on_hit()` : flash blanc 0.10s sur les segments actifs + 6-8 étincelles orange/blanc en aspect2d (fade 0.25-0.42s)
+- Barre vie near-ship → 6 segments arrondis (`_make_rounded_rect`, segs=6), base blanche, +20% taille
+- Couleur : jaune `C_BRIGHT` constant, rouge blink 5 Hz uniquement quand 1 segment restant
+- Bug blink invisible corrigé : base colorée `Vec4(0.2,0.55,1.0)` annulait le rouge via setColorScale
+- `on_hit()` : flash blanc 0.10s + 18-25 étincelles orange/blanc MAdd, taille random, fade sqrt, cooldown 0.35s
 
 #### `src/game.py`
 - `player.show_shield_hit()` remplacé par `hud.on_hit()` aux 2 points de hit joueur
