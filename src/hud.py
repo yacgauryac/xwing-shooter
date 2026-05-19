@@ -1050,7 +1050,7 @@ class HUD:
         sx = p2d.getX() * ar
         sz = p2d.getY()
 
-        count = random.randint(5, 8)
+        count = random.randint(12, 18)
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
             speed = random.uniform(0.15, 0.45)
@@ -1059,7 +1059,8 @@ class HUD:
             life = random.uniform(0.20, 0.32)
             og = random.uniform(0.45, 0.85)
 
-            hw, hh = 0.005, 0.004
+            hw = random.uniform(0.002, 0.006)
+            hh = hw * random.uniform(0.5, 0.9)
             np = _make_rect(game.aspect2d,
                             sx - hw / 2, sz - hh / 2, hw, hh,
                             Vec4(1.0, og, 0.0, 0.50))
