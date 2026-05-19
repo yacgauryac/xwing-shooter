@@ -48,7 +48,7 @@ def _make_rect(parent, x, z, w, h, color):
     return np
 
 
-def _make_rounded_rect(parent, x, z, w, h, color, segs=4):
+def _make_rounded_rect(parent, x, z, w, h, color, segs=6):
     """Rectangle à coins arrondis — triangle fan depuis le centre."""
     r = min(h / 2.0, w / 4.0)
     cx, cz = x + w / 2.0, z + h / 2.0
@@ -304,7 +304,7 @@ class HUD:
         self._warn_torp_shown = False
 
         # ===== MINI HUD near-ship — barres persistantes (repositionnées chaque frame) =====
-        _W, _H, _GAP = 0.11, 0.0060, 0.0090
+        _W, _H, _GAP = 0.132, 0.0072, 0.0090
         self._sbar_W   = _W
         self._sbar_H   = _H
         self._sbar_GAP = _GAP
@@ -329,7 +329,7 @@ class HUD:
         self._seg_nodes = []
         for i in range(6):
             sx = _SGAP + i * (_sw + _SGAP)
-            seg = _make_rounded_rect(sbar, sx, _z2, _sw, _H, Vec4(0.2, 0.55, 1.0, 0.90))
+            seg = _make_rounded_rect(sbar, sx, _z2, _sw, _H, Vec4(1.0, 1.0, 1.0, 1.0))
             self._seg_nodes.append(seg)
         self._seg_z2   = _z2
         self._seg_sw   = _sw
@@ -896,9 +896,9 @@ class HUD:
                 seg.setColorScale(Vec4(1.0, 1.0, 1.0, 1.0))
             elif n_lit == 1:
                 pulse = 0.55 + 0.45 * abs(math.sin(bt * 5))
-                seg.setColorScale(Vec4(1.0, 0.15, 0.05, pulse))
+                seg.setColorScale(Vec4(1.0, 0.12, 0.04, pulse))
             else:
-                seg.setColorScale(Vec4(0.2, 0.55, 1.0, 0.90))
+                seg.setColorScale(C_BRIGHT)
 
     def _build_torp_pips(self, max_count):
         """Obsolète."""
@@ -1045,21 +1045,24 @@ class HUD:
         sx = p2d.getX() * ar
         sz = p2d.getY()
 
-        count = random.randint(14, 20)
+        count = random.randint(16, 22)
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(0.25, 0.65)
+            speed = random.uniform(0.5, 1.5)
             vx = math.cos(angle) * speed
             vz = math.sin(angle) * speed
-            life = random.uniform(0.25, 0.42)
-            og = random.uniform(0.35, 0.70)   # composante verte → orange ou blanc
+            life = random.uniform(0.28, 0.48)
+            og = random.uniform(0.50, 1.0)   # orange chaud → blanc
 
+            hw, hh = 0.009, 0.006
             np = _make_rect(game.aspect2d,
-                            sx - 0.003, sz - 0.002, 0.006, 0.004,
-                            Vec4(1.0, og, 0.0, 0.90))
+                            sx - hw / 2, sz - hh / 2, hw, hh,
+                            Vec4(1.0, og, 0.0, 0.95))
             np.setBin("fixed", 60)
             np.setDepthTest(False)
             np.setDepthWrite(False)
+            np.setAttrib(ColorBlendAttrib.make(
+                ColorBlendAttrib.MAdd, ColorBlendAttrib.OOne, ColorBlendAttrib.OOne))
             self._sparks.append({"np": np, "vx": vx, "vz": vz,
                                   "life": life, "max_life": life, "og": og})
 
