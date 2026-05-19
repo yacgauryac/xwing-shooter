@@ -87,6 +87,7 @@ main.py
 - **Auto-aim supprimé** pour les lasers normaux — tir droit (`Vec3(0,1,0)`)
 - **Portée** : `MAX_DISTANCE=380u`, `SPEED=115 u/s`
 - Auto-aim conservé uniquement pour les torpilles homing
+- **`BoltRing`** : anneau-onde cyan électrique (plan XZ, perpendiculaire au bolt) qui s'étend et fade sur 0.22s. Spawn tous les 10u parcourus (max 3 actifs/bolt). Blend additif `MAdd`, `setScale()` pour l'animation (géométrie statique normalisée r=1). Effet traînée style Matrix.
 
 ### `src/torpedoes.py` — Torpilles
 - Lock-on : clic droit maintenu, portée 120 u, cône 14 u
@@ -97,9 +98,10 @@ main.py
 - `TORPEDO_MAX_DIST=120u`, `TORPEDO_TURN_RATE=2.0`, `TORPEDO_ACCEL=70.0`
 
 ### `src/force.py` — Capacité Force
-- S'active au clic central (molette)
-- Requiert la jauge Force pleine (kills)
-- Durée 6s, vitesse monde × 0.3, auto-aim parfait, pas de surchauffe
+- S'active au clic central (molette) — **use, pas toggle** : 2s fixes puis arrêt automatique
+- Requiert jauge > 5% — `is_ready()`
+- Durée fixe `USE_DURATION=2.0s`, drain parallèle `FORCE_DRAIN_RATE=18/s`, vitesse monde × 0.3, auto-aim parfait, pas de surchauffe
+- Clic pendant l'activation → remet le timer à 2s (si jauge encore disponible)
 - Powerup force : `add_pickup(15.0)` — +15 jauge
 
 ### `src/boss.py` — Boss TIE Advanced
@@ -240,7 +242,7 @@ main.py
 | Auto-aim | désactivé lasers / actif torpilles |
 | Barrel roll durée | 0.6s |
 | Force bullet-time | 0.3× |
-| Force durée | 6s |
+| Force durée | 2s fixes (use, pas toggle) |
 | Lock-on portée | 120 u |
 | Score de base/kill | 100 |
 | Drop chance powerup | 15% (4 types × 25%) |
@@ -258,7 +260,7 @@ main.py
 | Espace / Clic gauche | Tir laser |
 | Double-tap ← / → | Barrel roll |
 | Clic droit (maintenu) | Lock-on torpille |
-| Clic central | Capacité Force |
+| Clic central | Capacité Force (2s, use unique) |
 | M | Sons on/off |
 | F11 | Plein écran |
 | F1 | Compteur FPS |
@@ -533,6 +535,26 @@ main.py
 #### `src/environment.py`
 - L2 fade : seuls les `center_nodes` sont fadés, géométrie opaque reste solide
 - Méthodes `toggle_terrain/buildings/fog_debug()` pour isoler les spikes GPU
+
+---
+
+### v0.24 — Force use 2s + traînées Matrix lasers
+
+#### `src/force.py`
+- Nouveau comportement : clic molette = **use** (pas toggle) — durée fixe `USE_DURATION=2.0s`
+- Méthode `use()` : active + reset timer à 2s ; si déjà actif, remet juste le timer
+- Auto-désactivation quand timer ≤ 0 ou jauge épuisée (drain toujours actif pendant 2s)
+- Suppression de `held`, `set_held`, `activate()` public → simplifié
+
+#### `src/game.py`
+- `toggle_force` → `use_force()` — appelle `force.use()` au lieu de toggle
+
+#### `src/lasers.py`
+- Classe `BoltRing` : anneau-onde cyan électrique, plan XZ perpendiculaire à la trajectoire
+  - Géométrie statique N=12 segments, inner=0.40, `setScale(r)` pour animer
+  - Blend additif `ColorBlendAttrib.MAdd`, `setDepthWrite(False)`, durée 0.22s
+  - `r` : part de 25% → 100% du `MAX_R=0.48u` ; alpha : `(1-t²)` fade doux
+- Intégré dans `LaserBolt` : spawn tous les 10u (max 3 actifs), cleanup à `destroy()`
 
 ---
 

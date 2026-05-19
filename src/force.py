@@ -2,8 +2,7 @@
 Use the Force — Capacité spéciale.
 Bullet time + auto-aim parfait + surchauffe désactivée.
 
-Nouveau comportement : hold mouse2 pour utiliser, drain continu.
-Activable dès qu'il y a de la jauge (plus besoin d'attendre 100%).
+Comportement : clic molette = activation 2s fixes, puis arrêt automatique.
 """
 
 import math
@@ -18,80 +17,69 @@ FORCE_TORPEDO_BONUS = 5
 FORCE_MAX = 100.0
 
 # Drain et timing
-FORCE_DRAIN_RATE = 18.0      # Unités/seconde consommées en usage (100 / ~5.5s max)
-TIME_SCALE_TARGET = 0.3      # 30% vitesse monde
-EASE_IN_TIME  = 0.25         # Transition vers bullet time
-EASE_OUT_TIME = 0.4          # Retour à la normale
+USE_DURATION      = 2.0       # Durée fixe d'une utilisation (secondes)
+FORCE_DRAIN_RATE  = 18.0      # Unités/seconde consommées (garde la jauge comme ressource)
+TIME_SCALE_TARGET = 0.3       # 30% vitesse monde
+EASE_IN_TIME  = 0.25          # Transition vers bullet time
+EASE_OUT_TIME = 0.4           # Retour à la normale
 
 
 class ForceAbility:
-    """Gère la jauge de Force et le mode bullet time (hold-to-use)."""
+    """Gère la jauge de Force et le mode bullet time (use-for-duration)."""
 
     def __init__(self):
         self.gauge = 0.0
-        self.active = False          # True = joueur maintient appuyé ET jauge > 0
-        self.held   = False          # True = touche physiquement enfoncée
+        self.active = False
         self.time_scale = 1.0
-        self._ease_timer = 0.0       # Temps depuis activation/désactivation
+        self._ease_timer = 0.0
         self._easing_in  = False
         self._easing_out = False
+        self._use_timer  = 0.0      # Décompte de la durée fixe
 
     def add_kill(self, enemy_class_name, torpedo_kill=False):
-        """Ajoute de la Force basé sur le type d'ennemi tué."""
         gain = FORCE_PER_KILL.get(enemy_class_name, 8)
         if torpedo_kill:
             gain += FORCE_TORPEDO_BONUS
         self.gauge = min(FORCE_MAX, self.gauge + gain)
 
     def add_pickup(self, amount=15.0):
-        """Ajoute de la Force via un power-up ramassé (losange bleu)."""
         self.gauge = min(FORCE_MAX, self.gauge + amount)
 
     def is_ready(self):
-        """Jauge suffisante pour activer (seuil minimal 5%)."""
         return self.gauge >= FORCE_MAX * 0.05
 
-    def activate(self):
-        """Active la Force si jauge suffisante."""
+    def use(self):
+        """Active la Force pour USE_DURATION secondes. Réutilisable : reset le timer."""
         if not self.is_ready():
             return False
-        self.active      = True
-        self.held        = True
-        self._easing_in  = True
-        self._easing_out = False
-        self._ease_timer = 0.0
+        self._use_timer = USE_DURATION
+        if not self.active:
+            self.active      = True
+            self._easing_in  = True
+            self._easing_out = False
+            self._ease_timer = 0.0
         return True
 
     def deactivate(self):
-        """Désactive la Force."""
         if self.active:
             self.active      = False
+            self._use_timer  = 0.0
             self._easing_in  = False
             self._easing_out = True
             self._ease_timer = 0.0
-        self.held = False
-
-    def set_held(self, held):
-        """Compatibilité — redirige vers activate/deactivate."""
-        if held:
-            self.activate()
-        else:
-            self.deactivate()
 
     def update(self, dt):
-        """Update drain, recharge et time_scale."""
-
-        # Drain pendant l'utilisation
         if self.active:
+            self._use_timer -= dt
             self.gauge = max(0.0, self.gauge - FORCE_DRAIN_RATE * dt)
-            if self.gauge <= 0.0:
-                # Jauge vide — désactive même si touche tenue
+
+            if self._use_timer <= 0 or self.gauge <= 0:
                 self.active      = False
-                self._easing_out = True
+                self._use_timer  = 0.0
                 self._easing_in  = False
+                self._easing_out = True
                 self._ease_timer = 0.0
 
-        # Ease-in / ease-out du time_scale
         if self._easing_in:
             self._ease_timer += dt
             t = min(1.0, self._ease_timer / EASE_IN_TIME)
@@ -122,8 +110,8 @@ class ForceAbility:
     def reset(self):
         self.gauge       = 0.0
         self.active      = False
-        self.held        = False
         self.time_scale  = 1.0
         self._ease_timer = 0.0
         self._easing_in  = False
         self._easing_out = False
+        self._use_timer  = 0.0

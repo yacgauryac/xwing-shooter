@@ -7,9 +7,84 @@ from panda3d.core import (
     Vec3, Vec4, Point3,
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomTriangles, GeomNode,
-    NodePath, TransparencyAttrib
+    NodePath, TransparencyAttrib, ColorBlendAttrib,
 )
 import math
+
+
+class BoltRing:
+    """Anneau-onde qui s'étend perpendiculairement à la trajectoire d'un bolt."""
+
+    MAX_R    = 0.48   # rayon max (u)
+    LIFETIME = 0.22   # secondes
+    N_SEGS   = 12
+    INNER    = 0.40   # fraction du rayon → anneau fin
+
+    # Cyan électrique — contraste avec les bolts orange/rouge
+    COLOR = Vec4(0.15, 0.88, 1.0, 1.0)
+
+    def __init__(self, parent, pos):
+        self.alive = True
+        self.timer = self.LIFETIME
+        self._node = self._make(parent)
+        self._node.setPos(pos)
+
+    def _make(self, parent):
+        fmt   = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData("ring", fmt, Geom.UHStatic)
+        vw    = GeomVertexWriter(vdata, "vertex")
+        cw    = GeomVertexWriter(vdata, "color")
+        tris  = GeomTriangles(Geom.UHStatic)
+
+        N     = self.N_SEGS
+        ri, ro = self.INNER, 1.0
+        c_in  = Vec4(self.COLOR.x, self.COLOR.y, self.COLOR.z, 0.0)
+        c_out = Vec4(self.COLOR.x, self.COLOR.y, self.COLOR.z, 0.9)
+
+        for i in range(N):
+            a0   = 2 * math.pi * i       / N
+            a1   = 2 * math.pi * (i + 1) / N
+            base = i * 4
+            # Plan XZ — perpendiculaire à Y (direction du bolt)
+            vw.addData3(ri * math.cos(a0), 0, ri * math.sin(a0)); cw.addData4(c_in)
+            vw.addData3(ri * math.cos(a1), 0, ri * math.sin(a1)); cw.addData4(c_in)
+            vw.addData3(ro * math.cos(a0), 0, ro * math.sin(a0)); cw.addData4(c_out)
+            vw.addData3(ro * math.cos(a1), 0, ro * math.sin(a1)); cw.addData4(c_out)
+            tris.addVertices(base + 0, base + 2, base + 3)
+            tris.addVertices(base + 0, base + 3, base + 1)
+
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        gn   = GeomNode("bolt_ring")
+        gn.addGeom(geom)
+        np   = NodePath(gn)
+        np.reparentTo(parent)
+        np.setAttrib(ColorBlendAttrib.make(ColorBlendAttrib.MAdd))
+        np.setDepthWrite(False)
+        np.setTwoSided(True)
+        np.setLightOff()
+        np.setBin("transparent", 15)
+        return np
+
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.timer -= dt
+        if self.timer <= 0:
+            self.alive = False
+            if not self._node.isEmpty():
+                self._node.removeNode()
+            return
+        t   = 1.0 - self.timer / self.LIFETIME          # 0 (jeune) → 1 (vieux)
+        r   = max(0.001, self.MAX_R * (0.25 + 0.75 * t))
+        alpha = (1.0 - t * t)
+        self._node.setScale(r)
+        self._node.setAlphaScale(alpha)
+
+    def destroy(self):
+        self.alive = False
+        if not self._node.isEmpty():
+            self._node.removeNode()
 
 
 class LaserBolt:
@@ -19,10 +94,16 @@ class LaserBolt:
     MAX_DISTANCE = 380.0
     DAMAGE = 1
 
+    _RING_INTERVAL = 10.0   # u parcourues entre chaque ring
+    _RING_MAX      = 3      # rings actifs max par bolt
+
     def __init__(self, parent_node, start_pos, direction, color_back=None, color_front=None):
         self.alive = True
         self.distance_traveled = 0.0
         self.direction = direction
+        self._rings         = []
+        self._ring_dist     = 0.0
+        self._parent_node   = parent_node
 
         if color_back is None:
             color_back = Vec4(1.0, 0.2, 0.0, 1)
@@ -127,11 +208,26 @@ class LaserBolt:
         move = self.SPEED * dt
         self.node.setPos(self.node.getPos() + self.direction * move)
         self.distance_traveled += move
+
+        # Rings — spawn + update
+        self._ring_dist += move
+        if self._ring_dist >= self._RING_INTERVAL and len(self._rings) < self._RING_MAX:
+            self._ring_dist -= self._RING_INTERVAL
+            ring = BoltRing(self._parent_node, self.node.getPos())
+            self._rings.append(ring)
+
+        for ring in self._rings:
+            ring.update(dt)
+        self._rings = [r for r in self._rings if r.alive]
+
         if self.distance_traveled > self.MAX_DISTANCE:
             self.destroy()
 
     def destroy(self):
         self.alive = False
+        for ring in self._rings:
+            ring.destroy()
+        self._rings = []
         if not self.node.isEmpty():
             self.node.removeNode()
 

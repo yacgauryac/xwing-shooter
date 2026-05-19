@@ -231,7 +231,7 @@ class Game(ShowBase):
         self.accept("escape", self._game_escape)
         self.accept("m", self.sounds.toggle)
         self.accept("r", self.reset_game)
-        self.accept("mouse2",    self.toggle_force)
+        self.accept("mouse2",    self.use_force)
         self.accept("mouse3",    self.fire_torpedo)
         self.accept("2", self._toggle_debug)
         self.accept("3", self._toggle_skeleton)
@@ -829,20 +829,17 @@ class Game(ShowBase):
         if fired:
             self.sounds.play("explosion")
 
-    def toggle_force(self):
-        """Molette = toggle Force ON/OFF."""
+    def use_force(self):
+        """Molette = utilise la Force pendant 2s."""
         if self.game_over:
             return
-        if self.force.active:
-            self.force.deactivate()
-        else:
-            activated = self.force.activate()
-            if activated:
-                self.sounds.play("force_activate")
-                if self.lasers.overheated:
-                    self.lasers.heat = 0
-                    self.lasers.overheated = False
-                    self.lasers.cooldown_timer = 0
+        activated = self.force.use()
+        if activated:
+            self.sounds.play("force_activate")
+            if self.lasers.overheated:
+                self.lasers.heat = 0
+                self.lasers.overheated = False
+                self.lasers.cooldown_timer = 0
 
     def _trigger_leaderboard(self):
         """Game over — démarre le fondu au noir vers le menu."""
