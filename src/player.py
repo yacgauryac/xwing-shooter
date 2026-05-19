@@ -571,6 +571,7 @@ class Player:
         root = NodePath("crosshair")
         root.reparentTo(self.game.render)
         root.setLightOff()
+        root.setFogOff()
         root.setTransparency(TransparencyAttrib.MAlpha)
 
         fmt   = GeomVertexFormat.getV3c4()
