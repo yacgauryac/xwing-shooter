@@ -111,10 +111,6 @@ class Player:
         game.camera.setPos(0, 4, 2.5)
         game.camera.lookAt(0, 22, 0)
 
-        # Shield hit flash — Option B : copie du modèle agrandie rouge
-        self.shield_flash_timer = 0.0
-        self._hit_flash_np = self._create_hit_flash()
-
         # Overheat warning — teinte rouge sur le vaisseau (pas de halos canons)
         self._overheat_pulse = 0.0
         self._overheat_tint_np = None  # Créé à la première surchauffe
@@ -349,17 +345,6 @@ class Player:
         return NodePath(node)
 
     def update(self, dt, hp_pct=1.0, force_pct=0.0):
-        # --- Shield hit flash (Option B — mesh rouge semi-transparent) ---
-        if self.shield_flash_timer > 0:
-            self.shield_flash_timer -= dt
-            progress = self.shield_flash_timer / 0.25
-            if self._hit_flash_np and not self._hit_flash_np.isEmpty():
-                alpha = progress * 0.12
-                self._hit_flash_np.setColorScale(3.0, 0.05, 0.05, alpha)
-            if self.shield_flash_timer <= 0:
-                if self._hit_flash_np and not self._hit_flash_np.isEmpty():
-                    self._hit_flash_np.hide()
-
         # --- Overheat warning — teinte rouge pulsante sur le vaisseau ---
         if hasattr(self.game, 'lasers') and self.game.lasers:
             heat_pct = self.game.lasers.heat / self.game.lasers.MAX_HEAT
@@ -718,28 +703,6 @@ class Player:
 
             life = random.uniform(0.4, 0.8)
             self.speed_lines.append({"node": np, "life": life, "max_life": life})
-
-    def show_shield_hit(self, impact_pos=None):
-        """Lueur ambrée subtile sur la coque au hit."""
-        self.shield_flash_timer = 0.18
-        if self._hit_flash_np and not self._hit_flash_np.isEmpty():
-            self._hit_flash_np.show()
-            self._hit_flash_np.setColorScale(1.5, 0.28, 0.06, 0.055)
-
-    def _create_hit_flash(self):
-        """Copie du modèle légèrement agrandie, rouge semi-transparente — flash au hit."""
-        flash = self.model_node.copyTo(self.node)
-        # Garde le scale original du modèle, juste +10%
-        ms = self.model_node.getScale().getX()
-        flash.setScale(ms * 1.10)
-        flash.setColorScale(4.0, 0.05, 0.05, 0.55)
-        flash.setTransparency(TransparencyAttrib.MAlpha)
-        flash.setDepthWrite(False)
-        flash.setDepthTest(False)
-        flash.setBin("transparent", 5)
-        flash.setLightOff()
-        flash.hide()
-        return flash
 
     # _create_shield / _update_shield — supprimés, réservés pour V3
 

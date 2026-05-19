@@ -287,11 +287,28 @@ class HUD:
         self._sbar_laser_fill = _make_rect(sbar, 0, 0, _W, _H, C_ORANGE) # fill
         _make_rect_outline(sbar, 0, 0, _W, _H, Vec4(1.0, 0.45, 0.1, 0.18))
 
-        # HP bar (z = -(H+GAP) dans l'espace local de sbar)
-        _z2 = -(_H + _GAP)
-        _make_rect(sbar, 0, _z2, _W, _H, Vec4(0.10, 0.09, 0.02, 0.38))  # fond
-        self._sbar_hp_fill = _make_rect(sbar, 0, _z2, _W, _H, C_BRIGHT)  # fill
-        _make_rect_outline(sbar, 0, _z2, _W, _H, Vec4(1.0, 0.88, 0.12, 0.18))
+        # Barre HP — 6 segments discrets (z = -(H+GAP) dans l'espace local de sbar)
+        _z2    = -(_H + _GAP)
+        _SGAP  = 0.0025
+        _sw    = (_W - 7 * _SGAP) / 6   # largeur d'un segment
+        _make_rect(sbar, -_SGAP, _z2 - 0.001, _W + 2 * _SGAP, _H + 0.002,
+                   Vec4(0.0, 0.0, 0.0, 0.55))
+        _make_rect_outline(sbar, -_SGAP, _z2 - 0.001, _W + 2 * _SGAP, _H + 0.002,
+                           Vec4(0.0, 0.75, 1.0, 0.18))
+        self._seg_nodes = []
+        for i in range(6):
+            sx = _SGAP + i * (_sw + _SGAP)
+            seg = _make_rect(sbar, sx, _z2, _sw, _H, Vec4(0.0, 0.85, 1.0, 0.88))
+            self._seg_nodes.append(seg)
+        self._seg_z2   = _z2
+        self._seg_sw   = _sw
+        self._seg_sgap = _SGAP
+
+        # Flash hit segments
+        self._seg_flash_timer = 0.0
+
+        # Étincelles d'impact
+        self._sparks = []
 
         # ===== ANNONCE WAVE — dezoom vers le label permanent =====
         self.wave_announce = OnscreenText(
@@ -608,6 +625,25 @@ class HUD:
             if self.combo_timer <= 0:
                 self.combo_text.setText("")
 
+        # Flash hit segments
+        if self._seg_flash_timer > 0:
+            self._seg_flash_timer = max(0.0, self._seg_flash_timer - dt)
+
+        # Étincelles d'impact
+        dead = []
+        for sp in self._sparks:
+            sp["life"] -= dt
+            if sp["life"] <= 0:
+                sp["np"].removeNode()
+                dead.append(sp)
+            else:
+                sp["np"].setX(sp["np"].getX() + sp["vx"] * dt)
+                sp["np"].setZ(sp["np"].getZ() + sp["vz"] * dt)
+                a = max(0.0, sp["life"] / sp["max_life"]) * 0.90
+                sp["np"].setColorScale(Vec4(1.0, sp["og"], 0.0, a))
+        for sp in dead:
+            self._sparks.remove(sp)
+
         # Pyramide altitude — désactivée, remplacée par paliers ennemis
         # self._update_altitude_pyramid(player_z)
 
@@ -817,21 +853,23 @@ class HUD:
             self._ship_warn_text.setText("")
             self._ship_warn_text.setFg(Vec4(1.0, 0.35, 0.0, 0.0))
 
-        # ── Barre Vie ─────────────────────────────────────────────────────────
-        hp_pct = max(0.0, min(1.0, health / max(max_health, 1)))
-        if hp_pct > 0.0:
-            if hp_pct <= 0.25:
-                pulse = 0.65 + 0.35 * abs(math.sin(bt * 7))
-                vc = Vec4(1.0, 0.60 * pulse, 0.0, pulse)
-            elif hp_pct <= 0.50:
-                vc = Vec4(0.95, 0.80, 0.10, 0.88)
+        # ── Segments vie ────────────────────────────────────────────────────
+        n_lit = max(0, math.ceil(health / max(max_health, 1) * 6))
+        flash_active = self._seg_flash_timer > 0
+        for i, seg in enumerate(self._seg_nodes):
+            if i >= n_lit:
+                seg.hide()
+                continue
+            seg.show()
+            if flash_active:
+                seg.setColorScale(Vec4(1.0, 1.0, 1.0, 1.0))
+            elif n_lit <= 1:
+                pulse = 0.55 + 0.45 * abs(math.sin(bt * 5))
+                seg.setColorScale(Vec4(1.0, 0.15, 0.05, pulse))
+            elif n_lit <= 3:
+                seg.setColorScale(Vec4(0.95, 0.80, 0.10, 0.88))
             else:
-                vc = Vec4(0.88, 0.78, 0.12, 0.82)
-            self._sbar_hp_fill.setScale(hp_pct, 1.0, 1.0)
-            self._sbar_hp_fill.setColorScale(vc)
-            self._sbar_hp_fill.show()
-        else:
-            self._sbar_hp_fill.hide()
+                seg.setColorScale(Vec4(0.0, 0.85, 1.0, 0.88))
 
     def _build_torp_pips(self, max_count):
         """Obsolète."""
@@ -958,6 +996,44 @@ class HUD:
     # Nouveaux effets V2
     # ------------------------------------------------------------------
 
+    def on_hit(self):
+        """Flash blanc segments + étincelles — appelé depuis game.py au hit joueur."""
+        self._seg_flash_timer = 0.10
+        self._spawn_sparks()
+
+    def _spawn_sparks(self):
+        """6 à 8 particules orange/blanc depuis la position écran du vaisseau."""
+        import random
+        game = self.game
+        if not hasattr(game, 'player') or game.player is None:
+            return
+        sp = game.player.node.getPos()
+        p_cam = game.camera.getRelativePoint(game.render, sp)
+        p2d = Point2()
+        if not game.camLens.project(p_cam, p2d):
+            return
+        ar = game.getAspectRatio()
+        sx = p2d.getX() * ar
+        sz = p2d.getY()
+
+        count = random.randint(6, 8)
+        for _ in range(count):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(0.25, 0.65)
+            vx = math.cos(angle) * speed
+            vz = math.sin(angle) * speed
+            life = random.uniform(0.25, 0.42)
+            og = random.uniform(0.35, 0.70)   # composante verte → orange ou blanc
+
+            np = _make_rect(game.aspect2d,
+                            sx - 0.003, sz - 0.002, 0.006, 0.004,
+                            Vec4(1.0, og, 0.0, 0.90))
+            np.setBin("fixed", 60)
+            np.setDepthTest(False)
+            np.setDepthWrite(False)
+            self._sparks.append({"np": np, "vx": vx, "vz": vz,
+                                  "life": life, "max_life": life, "og": og})
+
     def trigger_screen_flash(self, intensity=0.35, duration=0.15):
         """Flash blanc plein écran — grosses explosions ou mort boss."""
         self.screen_flash_timer     = duration
@@ -1017,6 +1093,11 @@ class HUD:
 
     def hide_all(self):
         """Cache immédiatement TOUT le HUD — appelé au début du fondu game over."""
+        self._seg_flash_timer = 0.0
+        for sp in self._sparks:
+            sp["np"].removeNode()
+        self._sparks.clear()
+
         # Trapèzes
         self._dmg_timer     = 0.0
         self._dmg_peak      = 0.0
@@ -1060,6 +1141,11 @@ class HUD:
 
     def reset(self):
         """Remet tous les états transitoires à zéro — appelé au restart."""
+        self._seg_flash_timer = 0.0
+        for sp in self._sparks:
+            sp["np"].removeNode()
+        self._sparks.clear()
+
         self._dmg_timer     = 0.0
         self._dmg_peak      = 0.0
         self._dmg_intensity = 0.0

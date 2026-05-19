@@ -146,7 +146,7 @@ main.py
 
 ### `src/hud.py` — Interface
 - Bandeau supérieur semi-transparent : score, vague
-- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + vie (jaune). Géométrie créée une seule fois en `__init__`, `setScale`/`setColorScale` chaque frame (zéro allocation).
+- **Mini HUD near-ship** : 2 barres persistantes (`_sbar_root`) repositionnées chaque frame — laser (chaleur) + **6 segments vie** style holographique. Géométrie créée une seule fois en `__init__`, `setColorScale` chaque frame (zéro allocation). Couleur dynamique : cyan (6-5) → jaune (4-3) → rouge (2-1), blink lent si 1 seul segment. Fond noir semi-transparent + contour cyan.
 - **WARN/OVERHEAT** : `OnscreenText` pré-alloué `_ship_warn_text`, `setPos` chaque frame au niveau fuselage
 - **Trapèzes dégâts** : flash rouge latéraux style HL2, repliés vers les bords (EDGE_GAP=0.25), largeur 0.30
 - **Torpilles** : losange bas-centre avec compteur, clignotement rouge si ≤2
@@ -154,6 +154,7 @@ main.py
 - **Panneau radio boss** (bas d'écran) : rectangle + 2 demi-cercles procéduraux en GeomTriangles, fond sombre + bordure orange, barre HP couleur dynamique, texte nom + phase. Visible uniquement pendant le combat boss.
 - Screen flash blanc : `trigger_screen_flash(intensity, duration)` — quad plein écran 0.15s
 - Texte combo : `show_combo(count)` — "xN COMBO!" orange pulsant 1.5s
+- **Feedback d'impact** : `on_hit()` — flash blanc 0.10s sur les segments vie + 6-8 étincelles orange/blanc en aspect2d depuis la position écran du vaisseau (durée 0.25-0.42s, fade alpha linéaire)
 - `show_pickup(text, color=None)` — couleur optionnelle (ex: rouge pour fake powerup)
 
 ### `src/sounds.py` — Audio
@@ -468,6 +469,21 @@ main.py
 - Visée FPS souris relative, rectangle visée 3D UHDynamic
 - Danger light astéroïdes (ambient + spot + point scoped), L99 debug level
 
+### v0.23 — Vie en segments + feedback d'impact
+
+#### `src/player.py`
+- Suppression complète de l'éclair rouge au hit (`_create_hit_flash`, `show_shield_hit`, bloc update) — zéro deadcode
+
+#### `src/hud.py`
+- Barre vie near-ship remplacée par 6 segments holographiques dans `_sbar_root` (fond noir + contour cyan)
+- Couleur dynamique : cyan (6-5 segments) → jaune (4-3) → rouge (2-1), dernier segment blink à 5 Hz
+- `on_hit()` : flash blanc 0.10s sur les segments actifs + 6-8 étincelles orange/blanc en aspect2d (fade 0.25-0.42s)
+
+#### `src/game.py`
+- `player.show_shield_hit()` remplacé par `hud.on_hit()` aux 2 points de hit joueur
+
+---
+
 ### v0.22 — TIE Fighter state machine + perf tooling + rebalance
 
 #### `src/enemies.py`
@@ -504,6 +520,8 @@ main.py
 #### `src/hud.py`
 - Trapèzes dégâts repliés vers les bords (EDGE_GAP=0.25, WIDTH=0.30), roll tracking supprimé
 - `show_pickup(text, color=None)` : couleur optionnelle
+- Barre vie remplacée par 6 segments holographiques (couleur dynamique + blink 1 segment)
+- `on_hit()` : flash blanc segments + étincelles orange/blanc — éclair rouge mesh 3D supprimé de `player.py`
 
 #### `src/lunar_base.py`
 - `setRenderModeThickness` supprimé (OpenGL Core incompatible)

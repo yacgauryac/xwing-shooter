@@ -514,7 +514,7 @@ class Game(ShowBase):
                 hp_pct = self.player_hp / self.PLAYER_MAX_HP
                 self.hud.show_damage_flash(hp_pct)
                 self.hud.show_shield_flash()
-                self.player.show_shield_hit()
+                self.hud.on_hit()
                 self.sounds.play("hit")
                 self.screenshake.trigger(0.5, 0.3)
 
@@ -531,7 +531,7 @@ class Game(ShowBase):
                 hp_pct = self.player_hp / self.PLAYER_MAX_HP
                 self.hud.show_damage_flash(hp_pct)
                 self.hud.show_shield_flash()
-                self.player.show_shield_hit()
+                self.hud.on_hit()
                 self.sounds.play("hit")
                 self.screenshake.trigger(0.4, 0.25)
                 # Éjection vers le plan le plus proche (X latéral ou Z vertical)
