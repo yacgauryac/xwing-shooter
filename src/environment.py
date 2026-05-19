@@ -783,7 +783,7 @@ class FogBank:
         r_col, g_col, b_col = random.choice(self._PALETTES)
         width  = random.uniform(55.0, 90.0)
         height = random.uniform(30.0, 48.0)
-        alpha  = random.uniform(0.50, 0.75)
+        alpha  = random.uniform(0.36, 0.58)
         N = 16
 
         self.node = NodePath("fogbank")
@@ -2367,7 +2367,7 @@ class Environment:
         if level == 1:
             color, onset, opaque = (0.0, 0.0, 0.0), 150.0, 230.0
         elif level in (2, 0):
-            color, onset, opaque = (0.06, 0.07, 0.09), 38.0, 65.0
+            color, onset, opaque = (0.10, 0.11, 0.14), 52.0, 80.0
         elif level == 4:
             color, onset, opaque = (0.03, 0.01, 0.05), 100.0, 190.0
         else:
