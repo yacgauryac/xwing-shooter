@@ -691,9 +691,9 @@ class GasFilament:
         g_col = max(0.0, min(1.0, g_col + random.uniform(-0.04, 0.04)))
         b_col = max(0.0, min(1.0, b_col + random.uniform(-0.06, 0.06)))
 
-        width  = random.uniform(5.0, 15.0)
-        length = random.uniform(28.0, 85.0)
-        alpha  = random.uniform(0.22, 0.48)
+        width  = random.uniform(6.0, 18.0)
+        length = random.uniform(32.0, 95.0)
+        alpha  = random.uniform(0.30, 0.58)
 
         N = 12   # segments périmètre — éventail lisse
         fmt = GeomVertexFormat.getV3c4()
@@ -2218,9 +2218,10 @@ class Environment:
         self._debug_asteroids = (level == 99)
         debug = self._debug_asteroids
         self.asteroid_timer  = 0.1 if debug else 2.0
-        self.nebula_timer    = 15.0
+        # L4 : timers courts — nébuleuses dès le départ, filaments en continu
+        self.nebula_timer    = 3.0 if level == 4 else 15.0
         self.debris_timer    = 4.0
-        self.filament_timer  = 8.0   # L4 : filaments de gaz périodiques
+        self.filament_timer  = 0.0   # L4 : spawn dès la 1ère frame
         self._asteroid_interval = 0.1 if debug else self.ASTEROID_INTERVAL   # L99 : 10/s
 
         self.star_destroyer = None
@@ -2453,17 +2454,25 @@ class Environment:
         p3.grow_rate = 0.0   # planète fixe — ne grossit pas
         self.planets.append(p3)
 
-        # Filaments de gaz initiaux — billboard, dégradé alpha, violet/rose
-        self._spawn_gas_filaments(count=26)
+        # Nébuleuses Nebula pré-spawnées — 6 clouds immédiats, pas d'attente timer
+        for _ in range(6):
+            self._spawn_nebula(scale=random.uniform(1.4, 2.4), richness=2.0)
 
-    def _spawn_gas_filaments(self, count=26):
-        """L4 — Filaments de gaz initiaux : GasFilament billboard scrollants."""
+        # Filaments de gaz — distribution garantie sur toute la profondeur
+        self._spawn_gas_filaments(count=45)
+
+    def _spawn_gas_filaments(self, count=45):
+        """L4 — Filaments de gaz initiaux : distribution régulière sur Y=20→620."""
         render = self.game.render
-        for _ in range(count):
+        # Découpage en bandes égales pour garantir la densité à tout Y
+        band_size = 600.0 / count
+        for i in range(count):
+            # Base régulière + jitter ±30% pour casser la grille
+            y = 20.0 + i * band_size + random.uniform(-band_size * 0.3, band_size * 0.3)
+            y = max(15.0, y)
             x = random.uniform(-58, 58)
             z = random.uniform(-24, 24)
-            y = random.uniform(80, 380)
-            speed = random.uniform(1.0, 3.5)   # dérive lente — éléments de fond
+            speed = random.uniform(1.2, 4.0)   # dérive fond — éléments permanents
             self.nebulae.append(GasFilament(render, Point3(x, y, z), speed))
 
     # ----------------------------------------------------------
@@ -2599,21 +2608,30 @@ class Environment:
                 else:
                     bg_y   = bg.node.getY()
                     behind = player_y - bg_y
-                    if behind > 22.0 or bg_y - player_y > 85.0:
+                    ahead = bg_y - player_y
+                    if behind > 22.0 or ahead > 80.0:
+                        # Hors champ — tout caché
                         bg.node.hide()
-                    elif behind > 8.0:
-                        # Batch opaque — pas de fade, pas de tri GPU
+                    elif ahead > 50.0:
+                        # LOD — silhouette basse-poly, pas de détail ni de néons
                         bg.node.show()
-                        bg.node.setColorScale(1, 1, 1, 1)
-                        # Seules les tours centrales (NodePath propre) sont fadées
+                        bg._lod_box.show()
+                        bg._detail_root.hide()
+                    elif behind > 8.0:
+                        # Détail + fade des tours centrales
+                        bg.node.show()
+                        bg._lod_box.hide()
+                        bg._detail_root.show()
                         a = max(0.0, 1.0 - (behind - 8.0) / 14.0)
                         for cn in bg.center_nodes:
                             if not cn.isEmpty():
                                 cn.setTransparency(TransparencyAttrib.MAlpha)
                                 cn.setColorScale(1, 1, 1, a)
                     else:
+                        # Détail complet
                         bg.node.show()
-                        bg.node.setColorScale(1, 1, 1, 1)
+                        bg._lod_box.hide()
+                        bg._detail_root.show()
                         for cn in bg.center_nodes:
                             if not cn.isEmpty():
                                 cn.clearTransparency()
@@ -2718,15 +2736,16 @@ class Environment:
         for n in self.nebulae:
             n.update(dt)
 
-        # Filaments de gaz — spawned périodiquement pour maintenir la densité
+        # Filaments de gaz — spawn périodique + rattrapage si densité insuffisante
         self.filament_timer -= dt
-        if self.filament_timer <= 0:
+        n_filaments = sum(1 for n in self.nebulae if isinstance(n, GasFilament))
+        if self.filament_timer <= 0 or n_filaments < 18:
             x = random.uniform(-58, 58)
             z = random.uniform(-24, 24)
-            y = self.SPAWN_DEPTH + random.uniform(40, 180)
-            speed = random.uniform(1.5, 4.0)
+            y = self.SPAWN_DEPTH + random.uniform(30, 160)
+            speed = random.uniform(1.2, 4.0)
             self.nebulae.append(GasFilament(self.game.render, Point3(x, y, z), speed))
-            self.filament_timer = random.uniform(5.0, 10.0)
+            self.filament_timer = random.uniform(3.5, 7.0)
 
         self.debris_timer -= dt
         if self.debris_timer <= 0:

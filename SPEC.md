@@ -15,20 +15,28 @@ Rail shooter 3D en Python/Panda3D, thème Star Wars. Le joueur pilote un X-Wing 
 ```
 main.py
   └── Game (ShowBase)
-        ├── Player         — X-Wing, mouvement, barrel roll, crosshair
-        ├── EnemySpawner   — 3 types TIE, formations, vagues
-        ├── LaserSystem    — tir, surchauffe, auto-aim
-        ├── TorpedoSystem  — missiles homing avec lock-on
-        ├── ForceAbility   — bullet-time 0.3x, 6s
-        ├── BossTIEAdvanced — 150 HP, 3 phases
-        ├── Environment    — astéroïdes, nébuleuses, debris
-        ├── Starfield      — 1000 étoiles avec traînées de vitesse
-        ├── HUD            — overlay holographique orange/ambre
-        ├── ExplosionManager — particules, débris, popups score
-        ├── SoundManager   — pooling audio + fallback procédural
-        ├── PowerUpManager — collectibles (torpille, réparation, force, fake)
-        ├── MainMenu       — titre, options, leaderboard
-        └── Leaderboard    — top 10 persistant JSON
+        ├── src/player.py        Player         — X-Wing, mouvement, barrel roll, visée FPS souris
+        ├── src/enemies.py       EnemySpawner   — TIE state machine, squads, vagues
+        ├── src/lasers.py        LaserSystem    — tir, surchauffe, bolts poolés
+        ├── src/torpedoes.py     TorpedoSystem  — missiles homing, lock-on
+        ├── src/force.py         ForceAbility   — bullet-time 0.3×, 6s
+        ├── src/boss.py          BossTIEAdvanced — 150 HP, 3 phases
+        │     └── src/boss_ai.py BossUtilityAI  — 8 actions, scoring dynamique 0.45s
+        ├── src/environment.py   Environment    — L1-L4 décors, fog, danger lights
+        │     └── src/lunar_base.py LunarBase   — bâtiments procéduraux L2 (tower/hangar/silo…)
+        ├── src/starfield.py     Starfield      — 1000 étoiles + traînées de vitesse
+        ├── src/hud.py           HUD            — overlay holographique orange/ambre
+        ├── src/explosions.py    ExplosionManager — presets small/medium/large
+        ├── src/screenshake.py   Screenshake    — décroissance quadratique, intensités par événement
+        ├── src/sounds.py        SoundManager   — pooling audio + fallback procédural
+        ├── src/powerups.py      PowerUpManager — torpedo/repair/force/fake, flamme MAdd
+        ├── src/levels.py        LevelManager   — transitions, intro fade, L1→L4
+        ├── src/wave_config.py   —              — WAVE_DEFS_BY_LEVEL (config déclarative)
+        ├── src/menu.py          MainMenu       — titre, sélecteur niveau, leaderboard
+        ├── src/scores.py        Leaderboard    — top 10 persistant JSON
+        ├── src/settings.py      —              — settings par niveau
+        ├── src/network.py       NetworkManager — stub UDP V3 (non actif)
+        └── src/building_viewer.py —            — viewer standalone (python viewer.py)
 ```
 
 ---
@@ -125,7 +133,7 @@ main.py
 - **L2 (Surface lunaire)** : `LunarTerrain` (dalles 80×22u tuilées à Z=-7.8, courbure R=380) + `LunarRock` (rochers aplatis gris-bleutés)
 - **L3 (Tranchée)** : `TrenchWallPanel` (murs latéraux X=±13.5 avec voyants ambre/rouge) + `TrenchFloorPanel` (carrelage industriel Z=-7.5)
 - **L4 (Nébuleuse)** : nébuleuses denses × 2 (richness=2.0) + 3 planètes violettes/roses + filaments de gaz billboard
-  - **`GasFilament`** : ellipse billboard `setBillboardPointEye()`, dégradé alpha (centre plein → bords=0), éventail de 12 triangles, palette 10 couleurs violet/rose/magenta, scrolle avec la scène, fade-in 1.8s. 26 filaments initiaux + spawn périodique (toutes 5–10s) dans `_update_l4`
+  - **`GasFilament`** : ellipse billboard `setBillboardPointEye()`, dégradé alpha (centre plein → bords=0), éventail de 12 triangles, palette 10 couleurs violet/rose/magenta, scrolle avec la scène, fade-in 1.8s. **45 filaments initiaux** en bandes régulières Y=20→620 + spawn périodique 3.5–7s, **minimum garanti 18 actifs**. 6 Nebula pré-spawnées à l'init. `nebula_timer=3s, filament_timer=0` au démarrage.
   - **Palette nébuleuses L4** : 7 couleurs violet/rose/magenta/indigo exclusivement (aucun bleu/vert/orange)
   - **Palette nébuleuses L1** : orange-brun / bleu-électrique / rouge-orangé / cyan-vert / jaune-ambre — aucun violet → contraste maximal avec L4
   - **5 nappes fog L4** : violet `-3u` / rose-magenta `+2.5u` / indigo `0u` / bleu-indigo `+5.5u` / magenta ras-du-sol `-6u`
