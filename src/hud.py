@@ -1050,13 +1050,13 @@ class HUD:
         sx = p2d.getX() * ar
         sz = p2d.getY()
 
-        count = random.randint(12, 18)
+        count = random.randint(18, 25)
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(0.15, 0.45)
+            speed = random.uniform(0.30, 0.90)
             vx = math.cos(angle) * speed
             vz = math.sin(angle) * speed
-            life = random.uniform(0.20, 0.32)
+            life = random.uniform(0.22, 0.38)
             og = random.uniform(0.45, 0.85)
 
             hw = random.uniform(0.002, 0.006)
