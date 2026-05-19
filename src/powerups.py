@@ -210,9 +210,7 @@ class PowerUp:
         h, p, r = self._gem.getHpr()
         self._gem.setHpr(h + 60 * dt, p + 30 * dt, r)
 
-        # ── Clignotement subtil — légère respiration, pas de phare ──────────
-        blink = 0.85 + 0.10 * math.sin(self.age * 2.1) + 0.05 * math.sin(self.age * 5.3)
-        blink = max(0.75, min(1.05, blink))
+        blink = 0.94 + 0.03 * math.sin(self.age * 1.3) + 0.02 * math.sin(self.age * 3.7)
         c = self._base_color
 
         if self.age > LIFETIME - 2.0:

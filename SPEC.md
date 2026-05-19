@@ -195,7 +195,7 @@ main.py
 - **Bolt pool** : `cleanup()` appelé à la place de `destroy()` lors du nettoyage de niveau
 - **Overlay debug perf (touche 6)** : panneau bas-gauche, FPS avg/min/max, log spike <35fps, touches T/B/F (toggle terrain/bâtiments/fog)
 - Powerup rebalancé : torpedo +3→**+1**, repair +2→**+1**, force 35→**+15**
-- **Fake powerup** : -5 HP, show_pickup("DARK SIDE!", rouge), damage flash + screenshake 0.35
+- **Fake powerup** : contextuel selon `force.active` — Côté Obscur (Force inactive) : -5 HP, "DARK SIDE!" rouge, damage flash + screenshake ; Côté Force (Force active) : "LIGHT SIDE!", force rechargée à 100, méga Éclair (LineSegs bleus MAdd joueur→TIE, fade 0.45s) + kill tous les ennemis + flash écran bleu
 
 ### `src/building_viewer.py` — Viewer procédural
 - Launcher : `python viewer.py`
@@ -218,9 +218,9 @@ main.py
   - **Torpedo** (blanc cassé, lettre `T`) : +1 torpille
   - **Repair** (jaune, lettre `H`) : +1 HP
   - **Force** (bleu, lettre `F`) : +15 jauge Force
-  - **Fake** (violet Sith `#B20DD9`, lettre `?`) : piège — inflige -5 HP, flash dégâts + screenshake
-- **Visuels** : gemme octaédrique + label SFDistantGalaxy billboard + flamme mystique 3 couches additives (core/glow/bloom) via `ColorBlendAttrib.MAdd`
-- **Clignotement** : battement double fréquence `sin(age×3.2) + sin(age×7.1)`, amplitude 0.15→1.6, cycle couleur A↔B
+  - **Fake** (violet Sith `#B20DD9`, lettre `?`) : contextuel — Côté Obscur (Force inactive) : -5 HP ; Côté Force (Force active) : bonus Force + Éclair
+- **Visuels** : gemme octaédrique + label StarJedi billboard + flamme mystique 3 couches additives (core/glow/bloom) via `ColorBlendAttrib.MAdd`
+- **Clignotement gemme** : respiration douce `0.94 + 0.03·sin(1.3t) + 0.02·sin(3.7t)`, plage [0.89, 0.99]
 - **Flamme** : 3 disques `_make_disc()` (r=0.55/1.05/1.90), phases décalées, respiration 2.2 Hz
 
 ### `src/lunar_base.py` — Bâtiments L2
@@ -535,6 +535,24 @@ main.py
 #### `src/environment.py`
 - L2 fade : seuls les `center_nodes` sont fadés, géométrie opaque reste solide
 - Méthodes `toggle_terrain/buildings/fog_debug()` pour isoler les spikes GPU
+
+---
+
+### v0.25 — Fake contextuel Côté Obscur/Force + clignotement gemme subtil
+
+#### `src/powerups.py`
+- Clignotement gemme : `0.94 + 0.03·sin(1.3t) + 0.02·sin(3.7t)` — respiration douce, plage [0.89, 0.99]
+
+#### `src/game.py`
+- Fake powerup contextuel selon `force.active` :
+  - **Côté Obscur** (Force inactive) : -5 HP, "DARK SIDE!" rouge, damage flash + screenshake
+  - **Côté Force** (Force active) : "LIGHT SIDE!" bleu, force=100, `_trigger_force_lightning()`
+- `_trigger_force_lightning()` : LineSegs bleus MAdd joueur→chaque TIE, fade 0.45s ; kill tous les ennemis (avec explosion) ; flash écran bleu 0.4s
+- `_update_lightning_bolts(dt)` : fade quadratique des bolts
+- Reset bolt list au restart
+
+#### `src/hud.py`
+- `trigger_screen_flash(intensity, duration, color=None)` : paramètre couleur optionnel (Vec4) — permet flash bleu Force
 
 ---
 

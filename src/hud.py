@@ -411,6 +411,7 @@ class HUD:
         self.screen_flash_timer     = 0.0
         self.screen_flash_duration  = 0.15
         self.screen_flash_intensity = 0.35
+        self._screen_flash_rgb      = (1.0, 1.0, 1.0)
 
         # ===== COMBO TEXT (côté droit, hors regard central) =====
         self.combo_text = OnscreenText(
@@ -638,14 +639,15 @@ class HUD:
             if self.pickup_timer <= 0:
                 self.pickup_text.setText("")
 
-        # Screen flash blanc
+        # Screen flash (couleur configurable)
         if self.screen_flash_timer > 0:
             self.screen_flash_timer -= dt
             a = max(0.0, (self.screen_flash_timer / self.screen_flash_duration)
                     * self.screen_flash_intensity)
-            self.screen_flash["frameColor"] = Vec4(1, 1, 1, a)
+            r, g, b = self._screen_flash_rgb
+            self.screen_flash["frameColor"] = Vec4(r, g, b, a)
             if self.screen_flash_timer <= 0:
-                self.screen_flash["frameColor"] = Vec4(1, 1, 1, 0)
+                self.screen_flash["frameColor"] = Vec4(r, g, b, 0)
 
         # Combo text
         if self.combo_timer > 0:
@@ -1073,11 +1075,11 @@ class HUD:
             self._sparks.append({"np": np, "vx": vx, "vz": vz,
                                   "life": life, "max_life": life, "og": og})
 
-    def trigger_screen_flash(self, intensity=0.35, duration=0.15):
-        """Flash blanc plein écran — grosses explosions ou mort boss."""
+    def trigger_screen_flash(self, intensity=0.35, duration=0.15, color=None):
         self.screen_flash_timer     = duration
         self.screen_flash_duration  = duration
         self.screen_flash_intensity = intensity
+        self._screen_flash_rgb = (color.getX(), color.getY(), color.getZ()) if color else (1.0, 1.0, 1.0)
 
     def show_combo(self, count):
         """Affiche 'xN COMBO !' en orange pulsant en haut de l'écran."""

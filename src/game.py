@@ -12,6 +12,7 @@ from panda3d.core import (
     GeomVertexFormat, GeomVertexData, GeomVertexWriter,
     Geom, GeomLines, GeomNode, NodePath, TransparencyAttrib,
     TextNode, loadPrcFileData,
+    LineSegs, ColorBlendAttrib,
 )
 
 # MSAA 2x
@@ -190,6 +191,7 @@ class Game(ShowBase):
         self.torpedoes = TorpedoSystem(self)
         self.force = ForceAbility()
         self.force.gauge = 100.0   # Force pleine au démarrage
+        self._lightning_bolts = []
 
         self.lasers.set_enemies(self.spawner)
 
@@ -458,18 +460,27 @@ class Game(ShowBase):
             if pu_type == "torpedo":
                 self.torpedoes.add_stock(1)
                 self.hud.show_pickup("+1 TORPEDO")
+                self.sounds.play("hit")
             elif pu_type == "repair":
                 self.player_hp = min(self.PLAYER_MAX_HP, self.player_hp + 1)
                 self.hud.show_pickup("+1 HULL")
+                self.sounds.play("hit")
             elif pu_type == "force":
                 self.force.add_pickup(15.0)
                 self.hud.show_pickup("FORCE CHARGED")
+                self.sounds.play("hit")
             elif pu_type == "fake":
-                self.player_hp = max(0, self.player_hp - 5)
-                self.hud.show_pickup("DARK SIDE!", color=Vec4(1.0, 0.08, 0.08, 1.0))
-                self.hud.show_damage_flash(self.player_hp / self.PLAYER_MAX_HP)
-                self.screenshake.trigger(0.35, 0.2)
-            self.sounds.play("hit")
+                if self.force.active:
+                    self._trigger_force_lightning()
+                    self.hud.show_pickup("LIGHT SIDE!", color=Vec4(0.40, 0.75, 1.0, 1.0))
+                    self.sounds.play("force_activate")
+                else:
+                    self.player_hp = max(0, self.player_hp - 5)
+                    self.hud.show_pickup("DARK SIDE!", color=Vec4(1.0, 0.08, 0.08, 1.0))
+                    self.hud.show_damage_flash(self.player_hp / self.PLAYER_MAX_HP)
+                    self.screenshake.trigger(0.35, 0.2)
+                    self.sounds.play("hit")
+        self._update_lightning_bolts(dt_world)
 
         # Torpilles — cibles : ennemis normaux OU boss si phase boss
         torp_targets = [self.boss] if (self.boss and self.boss.alive) else self.spawner.enemies
@@ -695,6 +706,10 @@ class Game(ShowBase):
         self.powerups.reset()
         self.torpedoes.reset()
         self.force.reset()
+        for bolt in self._lightning_bolts:
+            if not bolt["np"].isEmpty():
+                bolt["np"].removeNode()
+        self._lightning_bolts = []
         if self.boss:
             self.boss.cleanup()
         self.boss = None
@@ -879,6 +894,47 @@ class Game(ShowBase):
         self.hud.show_combo(count)
         extra_shake = min(0.1, (count - 3) * 0.05)
         self.screenshake.trigger(0.3 + extra_shake, 0.3)
+
+    def _trigger_force_lightning(self):
+        """Éclair de Force : tue tous les TIE, LineSegs bleus qui fadent, flash écran."""
+        player_pos = self.player.node.getPos()
+        enemies = [e for e in self.spawner.enemies if e.alive]
+        if enemies:
+            segs = LineSegs()
+            segs.setThickness(2.5)
+            segs.setColor(0.7, 0.88, 1.0, 1.0)
+            for enemy in enemies:
+                ep = enemy.node.getPos()
+                segs.moveTo(player_pos)
+                segs.drawTo(ep)
+                self.explosions.spawn(ep, preset="tie_fighter")
+                self.sounds.play("explosion")
+                enemy.alive = False
+                if not enemy.node.isEmpty():
+                    enemy.node.removeNode()
+            self.spawner.enemies = [e for e in self.spawner.enemies if e.alive]
+            np = self.render.attachNewNode(segs.create())
+            np.setLightOff()
+            np.setDepthWrite(False)
+            np.setAttrib(ColorBlendAttrib.make(ColorBlendAttrib.MAdd))
+            np.setBin("transparent", 20)
+            self._lightning_bolts.append({"np": np, "timer": 0.45, "max": 0.45})
+        self.force.gauge = 100.0
+        self.screenshake.trigger(0.55, 0.15)
+        self.hud.trigger_screen_flash(0.85, 0.4, Vec4(0.35, 0.60, 1.0, 1.0))
+
+    def _update_lightning_bolts(self, dt):
+        alive = []
+        for bolt in self._lightning_bolts:
+            bolt["timer"] -= dt
+            if bolt["timer"] <= 0:
+                if not bolt["np"].isEmpty():
+                    bolt["np"].removeNode()
+            else:
+                a = bolt["timer"] / bolt["max"]
+                bolt["np"].setColorScale(1, 1, 1, a * a)
+                alive.append(bolt)
+        self._lightning_bolts = alive
 
     # ------------------------------------------------------------------
 
