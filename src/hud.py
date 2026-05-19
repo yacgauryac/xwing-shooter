@@ -340,6 +340,7 @@ class HUD:
 
         # Étincelles d'impact
         self._sparks = []
+        self._spark_cooldown = 0.0
 
         # ===== ANNONCE WAVE — dezoom vers le label permanent =====
         self.wave_announce = OnscreenText(
@@ -661,6 +662,8 @@ class HUD:
             self._seg_flash_timer = max(0.0, self._seg_flash_timer - dt)
 
         # Étincelles d'impact
+        if self._spark_cooldown > 0:
+            self._spark_cooldown = max(0.0, self._spark_cooldown - dt)
         dead = []
         for sp in self._sparks:
             sp["life"] -= dt
@@ -1028,7 +1031,9 @@ class HUD:
     def on_hit(self):
         """Flash blanc segments + étincelles — appelé depuis game.py au hit joueur."""
         self._seg_flash_timer = 0.10
-        self._spawn_sparks()
+        if self._spark_cooldown <= 0:
+            self._spawn_sparks()
+            self._spark_cooldown = 0.35
 
     def _spawn_sparks(self):
         """6 à 8 particules orange/blanc depuis la position écran du vaisseau."""
@@ -1045,19 +1050,19 @@ class HUD:
         sx = p2d.getX() * ar
         sz = p2d.getY()
 
-        count = random.randint(9, 13)
+        count = random.randint(5, 8)
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(0.35, 0.90)
+            speed = random.uniform(0.15, 0.45)
             vx = math.cos(angle) * speed
             vz = math.sin(angle) * speed
-            life = random.uniform(0.25, 0.40)
-            og = random.uniform(0.45, 0.85)   # orange chaud → blanc
+            life = random.uniform(0.20, 0.32)
+            og = random.uniform(0.45, 0.85)
 
-            hw, hh = 0.007, 0.005
+            hw, hh = 0.005, 0.004
             np = _make_rect(game.aspect2d,
                             sx - hw / 2, sz - hh / 2, hw, hh,
-                            Vec4(1.0, og, 0.0, 0.65))
+                            Vec4(1.0, og, 0.0, 0.50))
             np.setBin("fixed", 60)
             np.setDepthTest(False)
             np.setDepthWrite(False)
@@ -1174,6 +1179,7 @@ class HUD:
     def reset(self):
         """Remet tous les états transitoires à zéro — appelé au restart."""
         self._seg_flash_timer = 0.0
+        self._spark_cooldown  = 0.0
         for sp in self._sparks:
             sp["np"].removeNode()
         self._sparks.clear()
